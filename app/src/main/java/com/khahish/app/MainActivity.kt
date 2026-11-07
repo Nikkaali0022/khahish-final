@@ -1,5 +1,6 @@
 package com.khahish.app
 
+import android.app.Activity
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
@@ -29,7 +30,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.FirebaseException
+import com.google.firebase.auth.*
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import okhttp3.*
@@ -37,8 +39,9 @@ import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 
-// --- CLOUDINARY CONFIG (Apna Cloud Name aur Unsigned Preset yahan dalein) ---
+// --- CLOUDINARY CONFIG ---
 private const val CLOUDINARY_CLOUD_NAME = "YOUR_CLOUD_NAME"
 private const val CLOUDINARY_UPLOAD_PRESET = "YOUR_UNSIGNED_PRESET"
 
@@ -50,11 +53,6 @@ private val Muted = Color(0xFF788681)
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Auto Sign-in with Firebase Anonymous Auth (Testing ke liye foran login ho jayega)
-        val auth = FirebaseAuth.getInstance()
-        if (auth.currentUser == null) {
-            auth.signInAnonymously()
-        }
         setContent { KhahishApp() }
     }
 }
@@ -63,6 +61,7 @@ data class Chat(val id: String, val name: String, val message: String, val time:
 data class MessageItem(
     val id: String = "",
     val senderId: String = "",
+    val senderName: String = "",
     val text: String = "",
     val imageUrl: String = "",
     val timestamp: Long = 0L
@@ -78,10 +77,15 @@ private val demoChats = listOf(
 
 @Composable
 fun KhahishApp() {
+    val auth = remember { FirebaseAuth.getInstance() }
+    var currentUser by remember { mutableStateOf(auth.currentUser) }
     var tab by remember { mutableStateOf("Chats") }
     var selectedChat by remember { mutableStateOf<Chat?>(null) }
+
     MaterialTheme(colorScheme = lightColorScheme(primary = Green, background = Pale, surface = Color.White, onSurface = Ink)) {
-        if (selectedChat != null) {
+        if (currentUser == null) {
+            AuthScreen(onLoginSuccess = { currentUser = auth.currentUser })
+        } else if (selectedChat != null) {
             ConversationScreen(selectedChat!!) { selectedChat = null }
         } else {
             Scaffold(
@@ -119,12 +123,211 @@ fun KhahishApp() {
             ) { padding ->
                 when (tab) {
                     "Chats" -> ChatList(Modifier.padding(padding)) { selectedChat = it }
-                    "Settings" -> SettingsPage(Modifier.padding(padding))
+                    "Settings" -> SettingsPage(Modifier.padding(padding), onLogout = {
+                        auth.signOut()
+                        currentUser = null
+                    })
                     else -> PlaceholderPage(Modifier.padding(padding), tab)
                 }
             }
         }
     }
+}
+
+@Composable
+fun AuthScreen(onLoginSuccess: () -> Unit) {
+    val context = LocalContext.current
+    val auth = remember { FirebaseAuth.getInstance() }
+    val db = remember { FirebaseFirestore.getInstance() }
+
+    var name by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf("+92") }
+    var otpCode by remember { mutableStateOf("") }
+    var verificationId by remember { mutableStateOf<String?>(null) }
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var useEmailMode by remember { mutableStateOf(false) }
+    var isLoading by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier.fillMaxSize().background(Pale).padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(Modifier.size(64.dp).background(Green, RoundedCornerShape(20.dp)), contentAlignment = Alignment.Center) {
+            Icon(Icons.Default.Forum, null, tint = Color.White, modifier = Modifier.size(34.dp))
+        }
+        Spacer(Modifier.height(16.dp))
+        Text("Welcome to Khahish", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Ink)
+        Text(if (useEmailMode) "Sign in with Email" else "Sign in with Phone Number", fontSize = 13.sp, color = Muted)
+        Spacer(Modifier.height(24.dp))
+
+        OutlinedTextField(
+            value = name,
+            onValueChange = { name = it },
+            label = { Text("Your Name (e.g. Ali Khan)") },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            singleLine = true
+        )
+        Spacer(Modifier.height(12.dp))
+
+        if (!useEmailMode) {
+            // PHONE NUMBER OTP LOGIN
+            if (verificationId == null) {
+                OutlinedTextField(
+                    value = phone,
+                    onValueChange = { phone = it },
+                    label = { Text("Phone Number (+923...)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    singleLine = true
+                )
+                Spacer(Modifier.height(16.dp))
+                Button(
+                    onClick = {
+                        if (phone.length < 10) {
+                            Toast.makeText(context, "Enter valid phone with +92", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        isLoading = true
+                        val options = PhoneAuthOptions.newBuilder(auth)
+                            .setPhoneNumber(phone.trim())
+                            .setTimeout(60L, TimeUnit.SECONDS)
+                            .setActivity(context as Activity)
+                            .setCallbacks(object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
+                                override fun onVerificationCompleted(credential: PhoneAuthCredential) {
+                                    auth.signInWithCredential(credential).addOnSuccessListener { res ->
+                                        saveUserToFirestore(db, res.user?.uid, name, phone)
+                                        isLoading = false
+                                        onLoginSuccess()
+                                    }
+                                }
+                                override fun onVerificationFailed(e: FirebaseException) {
+                                    isLoading = false
+                                    Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                                }
+                                override fun onCodeSent(verId: String, token: PhoneAuthProvider.ForceResendingToken) {
+                                    isLoading = false
+                                    verificationId = verId
+                                    Toast.makeText(context, "OTP Sent!", Toast.LENGTH_SHORT).show()
+                                }
+                            }).build()
+                        PhoneAuthProvider.verifyPhoneNumber(options)
+                    },
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Green)
+                ) {
+                    Text(if (isLoading) "Sending OTP..." else "Send OTP Code")
+                }
+            } else {
+                OutlinedTextField(
+                    value = otpCode,
+                    onValueChange = { otpCode = it },
+                    label = { Text("Enter 6-Digit OTP") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    singleLine = true
+                )
+                Spacer(Modifier.height(16.dp))
+                Button(
+                    onClick = {
+                        if (otpCode.length < 6) return@Button
+                        isLoading = true
+                        val credential = PhoneAuthProvider.getCredential(verificationId!!, otpCode.trim())
+                        auth.signInWithCredential(credential)
+                            .addOnSuccessListener { res ->
+                                saveUserToFirestore(db, res.user?.uid, name, phone)
+                                isLoading = false
+                                onLoginSuccess()
+                            }
+                            .addOnFailureListener { e ->
+                                isLoading = false
+                                Toast.makeText(context, "Invalid OTP: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                    },
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Green)
+                ) {
+                    Text(if (isLoading) "Verifying..." else "Verify & Login")
+                }
+            }
+        } else {
+            // EMAIL / PASSWORD LOGIN (Works 100% Free without SHA-1 or Billing)
+            OutlinedTextField(
+                value = email,
+                onValueChange = { email = it },
+                label = { Text("Email Address") },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                singleLine = true
+            )
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = password,
+                onValueChange = { password = it },
+                label = { Text("Password (6+ chars)") },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                singleLine = true
+            )
+            Spacer(Modifier.height(16.dp))
+            Button(
+                onClick = {
+                    if (email.isBlank() || password.length < 6) {
+                        Toast.makeText(context, "Enter valid email & 6+ char password", Toast.LENGTH_SHORT).show()
+                        return@Button
+                    }
+                    isLoading = true
+                    auth.signInWithEmailAndPassword(email.trim(), password)
+                        .addOnSuccessListener { res ->
+                            saveUserToFirestore(db, res.user?.uid, name, email)
+                            isLoading = false
+                            onLoginSuccess()
+                        }
+                        .addOnFailureListener {
+                            // If account doesn't exist, create it automatically
+                            auth.createUserWithEmailAndPassword(email.trim(), password)
+                                .addOnSuccessListener { res ->
+                                    saveUserToFirestore(db, res.user?.uid, name, email)
+                                    isLoading = false
+                                    onLoginSuccess()
+                                }
+                                .addOnFailureListener { e ->
+                                    isLoading = false
+                                    Toast.makeText(context, "Auth failed: ${e.message}", Toast.LENGTH_LONG).show()
+                                }
+                        }
+                },
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Green)
+            ) {
+                Text(if (isLoading) "Signing in..." else "Continue with Email")
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
+        TextButton(onClick = { useEmailMode = !useEmailMode }) {
+            Text(
+                if (useEmailMode) "Use Phone Number (OTP) instead" else "Use Email Login instead (No SMS needed)",
+                color = Green
+            )
+        }
+    }
+}
+
+private fun saveUserToFirestore(db: FirebaseFirestore, uid: String?, name: String, contact: String) {
+    if (uid == null) return
+    val userMap = hashMapOf(
+        "uid" to uid,
+        "name" to name.ifBlank { "Khahish User" },
+        "contact" to contact,
+        "updatedAt" to System.currentTimeMillis()
+    )
+    db.collection("users").document(uid).set(userMap)
 }
 
 @Composable
@@ -172,7 +375,6 @@ fun ConversationScreen(chat: Chat, onBack: () -> Unit) {
     var messages by remember { mutableStateOf(listOf<MessageItem>()) }
     var isUploading by remember { mutableStateOf(false) }
 
-    // Real-time Firestore Listener
     LaunchedEffect(chat.id) {
         db.collection("chats").document(chat.id).collection("messages")
             .orderBy("timestamp", Query.Direction.ASCENDING)
@@ -191,7 +393,6 @@ fun ConversationScreen(chat: Chat, onBack: () -> Unit) {
             }
     }
 
-    // Gallery Picker for Cloudinary Image Upload
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
         if (uri != null) {
             isUploading = true
@@ -288,7 +489,6 @@ fun ConversationScreen(chat: Chat, onBack: () -> Unit) {
     }
 }
 
-// Direct Cloudinary Unsigned Upload Function
 fun uploadToCloudinary(context: Context, uri: Uri, onSuccess: (String) -> Unit, onError: (String) -> Unit) {
     val bytes = context.contentResolver.openInputStream(uri)?.readBytes()
     if (bytes == null) {
@@ -335,7 +535,7 @@ fun PlaceholderPage(modifier: Modifier, title: String) {
 }
 
 @Composable
-fun SettingsPage(modifier: Modifier) {
+fun SettingsPage(modifier: Modifier, onLogout: () -> Unit) {
     Column(modifier.fillMaxSize().padding(18.dp)) {
         listOf(Icons.Default.Person to "Profile", Icons.Default.Lock to "Privacy and security",
             Icons.Default.Notifications to "Notifications", Icons.Default.Storage to "Storage and data",
@@ -345,6 +545,17 @@ fun SettingsPage(modifier: Modifier) {
                 Icon(icon, null, tint = Green); Spacer(Modifier.width(14.dp)); Text(label, color = Ink)
             }
             Spacer(Modifier.height(9.dp))
+        }
+        Spacer(Modifier.height(12.dp))
+        Button(
+            onClick = onLogout,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD9534F)),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Icon(Icons.Default.Logout, null, tint = Color.White)
+            Spacer(Modifier.width(8.dp))
+            Text("Log Out", color = Color.White)
         }
     }
 }
