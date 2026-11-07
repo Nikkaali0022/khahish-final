@@ -181,7 +181,7 @@ jobs:
                 }
             }
 
-            dependencies {"""", 1)
+            dependencies {""", 1)
 
               if "firebase-bom" not in app_text:
                   app_text = app_text.replace("dependencies {", """dependencies {
