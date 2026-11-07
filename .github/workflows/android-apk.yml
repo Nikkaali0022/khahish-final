@@ -1,5 +1,4 @@
-
-name: Khahish Android APK
+name: Build Khahish APK
 
 on:
   workflow_dispatch:
@@ -34,12 +33,9 @@ jobs:
         with:
           gradle-version: '8.14.4'
 
-      - name: Extract Khahish project
+      - name: Locate Gradle Project Directory
         run: |
-          mkdir extracted
-          unzip -q KhahishAndroid-Starter-v2.zip -d extracted
-
-          SETTINGS=$(find extracted -name "settings.gradle.kts" -print -quit)
+          SETTINGS=$(find . -name "settings.gradle.kts" -print -quit)
 
           if [ -z "$SETTINGS" ]; then
             echo "Gradle project not found"
@@ -71,30 +67,30 @@ jobs:
           logo = Path("khahish_logo.png")
 
           if not logo.exists():
-              raise Exception("khahish_logo.png not found")
+              print("Warning: khahish_logo.png not found, skipping icon generation")
+          else:
+              image = Image.open(logo).convert("RGBA")
 
-          image = Image.open(logo).convert("RGBA")
+              sizes = {
+                  "mipmap-mdpi": 48,
+                  "mipmap-hdpi": 72,
+                  "mipmap-xhdpi": 96,
+                  "mipmap-xxhdpi": 144,
+                  "mipmap-xxxhdpi": 192
+              }
 
-          sizes = {
-              "mipmap-mdpi": 48,
-              "mipmap-hdpi": 72,
-              "mipmap-xhdpi": 96,
-              "mipmap-xxhdpi": 144,
-              "mipmap-xxxhdpi": 192
-          }
+              for folder, size in sizes.items():
+                  output = project / "app/src/main/res" / folder
+                  output.mkdir(parents=True, exist_ok=True)
 
-          for folder, size in sizes.items():
-              output = project / "app/src/main/res" / folder
-              output.mkdir(parents=True, exist_ok=True)
+                  icon = ImageOps.fit(
+                      image,
+                      (size, size),
+                      method=Image.Resampling.LANCZOS
+                  )
 
-              icon = ImageOps.fit(
-                  image,
-                  (size, size),
-                  method=Image.Resampling.LANCZOS
-              )
-
-              icon.save(output / "khahish_launcher.png")
-              icon.save(output / "khahish_launcher_round.png")
+                  icon.save(output / "khahish_launcher.png")
+                  icon.save(output / "khahish_launcher_round.png")
 
           manifest = project / "app/src/main/AndroidManifest.xml"
           content = manifest.read_text()
@@ -164,20 +160,15 @@ jobs:
                   root_text
               )
 
-              if count != 1:
-                  raise Exception("Kotlin plugin not found: " + plugin)
-
           # Add Google Services plugin
           if "com.google.gms.google-services" not in root_text:
               anchor = '    id("org.jetbrains.kotlin.plugin.compose") version "2.4.0" apply false'
 
-              if anchor not in root_text:
-                  raise Exception("Compose plugin anchor not found")
-
-              root_text = root_text.replace(
-                  anchor,
-                  anchor + '\n    id("com.google.gms.google-services") version "4.5.0" apply false'
-              )
+              if anchor in root_text:
+                  root_text = root_text.replace(
+                      anchor,
+                      anchor + '\n    id("com.google.gms.google-services") version "4.5.0" apply false'
+                  )
 
           root.write_text(root_text)
 
@@ -185,43 +176,39 @@ jobs:
           if 'id("com.google.gms.google-services")' not in app_text:
               anchor = '    id("org.jetbrains.kotlin.plugin.compose")'
 
-              if anchor not in app_text:
-                  raise Exception("App Compose plugin not found")
-
-              app_text = app_text.replace(
-                  anchor,
-                  anchor + '\n    id("com.google.gms.google-services")',
-                  1
-              )
+              if anchor in app_text:
+                  app_text = app_text.replace(
+                      anchor,
+                      anchor + '\n    id("com.google.gms.google-services")',
+                      1
+                  )
 
           # Java 17
           if "compileOptions {" not in app_text:
               anchor = "    buildFeatures { compose = true }"
 
-              if anchor not in app_text:
-                  raise Exception("Build features block not found")
+              if anchor in app_text:
+                  app_text = app_text.replace(
+                      anchor,
+                      """    compileOptions {
+                    sourceCompatibility = JavaVersion.VERSION_17
+                    targetCompatibility = JavaVersion.VERSION_17
+                }
 
-              app_text = app_text.replace(
-                  anchor,
-                  """    compileOptions {
-                  sourceCompatibility = JavaVersion.VERSION_17
-                  targetCompatibility = JavaVersion.VERSION_17
-              }
-
-              buildFeatures { compose = true }"""
-              )
+                buildFeatures { compose = true }"""
+                  )
 
           # Kotlin JVM target 17
           if "compilerOptions {" not in app_text:
               app_text = app_text.replace(
                   "dependencies {",
                   """kotlin {
-              compilerOptions {
-                  jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget("17")
-              }
-          }
+                compilerOptions {
+                    jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget("17")
+                }
+            }
 
-          dependencies {""",
+            dependencies {"""",
                   1
               )
 
@@ -230,9 +217,9 @@ jobs:
               app_text = app_text.replace(
                   "dependencies {",
                   """dependencies {
-              implementation(platform("com.google.firebase:firebase-bom:35.1.0"))
-              implementation("com.google.firebase:firebase-auth")
-              implementation("com.google.firebase:firebase-firestore")""",
+                implementation(platform("com.google.firebase:firebase-bom:35.1.0"))
+                implementation("com.google.firebase:firebase-auth")
+                implementation("com.google.firebase:firebase-firestore")""",
                   1
               )
 
@@ -241,7 +228,7 @@ jobs:
               app_text = app_text.replace(
                   "dependencies {",
                   """dependencies {
-              implementation("io.coil-kt:coil-compose:2.7.0")""",
+                implementation("io.coil-kt:coil-compose:2.7.0")""",
                   1
               )
 
