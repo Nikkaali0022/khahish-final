@@ -42,7 +42,7 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 // --- CLOUDINARY CONFIG ---
-private const val CLOUDINARY_CLOUD_NAME = "YOUR_CLOUD_NAME"
+private const val CLOUDINARY_CLOUD_NAME = "koctiaes"
 private const val CLOUDINARY_UPLOAD_PRESET = "YOUR_UNSIGNED_PRESET"
 
 private val Green = Color(0xFF18A889)
@@ -61,7 +61,6 @@ data class Chat(val id: String, val name: String, val message: String, val time:
 data class MessageItem(
     val id: String = "",
     val senderId: String = "",
-    val senderName: String = "",
     val text: String = "",
     val imageUrl: String = "",
     val timestamp: Long = 0L
@@ -173,7 +172,6 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
         Spacer(Modifier.height(12.dp))
 
         if (!useEmailMode) {
-            // PHONE NUMBER OTP LOGIN
             if (verificationId == null) {
                 OutlinedTextField(
                     value = phone,
@@ -255,7 +253,6 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                 }
             }
         } else {
-            // EMAIL / PASSWORD LOGIN (Works 100% Free without SHA-1 or Billing)
             OutlinedTextField(
                 value = email,
                 onValueChange = { email = it },
@@ -288,7 +285,6 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                             onLoginSuccess()
                         }
                         .addOnFailureListener {
-                            // If account doesn't exist, create it automatically
                             auth.createUserWithEmailAndPassword(email.trim(), password)
                                 .addOnSuccessListener { res ->
                                     saveUserToFirestore(db, res.user?.uid, name, email)
