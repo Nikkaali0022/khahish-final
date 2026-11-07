@@ -1,0 +1,267 @@
+
+name: Khahish Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14.4'
+
+      - name: Extract Khahish project
+        run: |
+          mkdir extracted
+          unzip -q KhahishAndroid-Starter-v2.zip -d extracted
+
+          SETTINGS=$(find extracted -name "settings.gradle.kts" -print -quit)
+
+          if [ -z "$SETTINGS" ]; then
+            echo "Gradle project not found"
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$SETTINGS")
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Project found: $PROJECT_DIR"
+
+      - name: Copy updated MainActivity
+        run: |
+          TARGET="$PROJECT_DIR/app/src/main/java/com/khahish/app"
+          mkdir -p "$TARGET"
+          cp MainActivity.kt "$TARGET/MainActivity.kt"
+          echo "MainActivity copied successfully"
+
+      - name: Create Khahish App Icon
+        run: |
+          python3 -m pip install pillow
+
+          python3 - <<'PY'
+          from PIL import Image, ImageOps
+          from pathlib import Path
+          import os
+          import re
+
+          project = Path(os.environ["PROJECT_DIR"])
+          logo = Path("khahish_logo.png")
+
+          if not logo.exists():
+              raise Exception("khahish_logo.png not found")
+
+          image = Image.open(logo).convert("RGBA")
+
+          sizes = {
+              "mipmap-mdpi": 48,
+              "mipmap-hdpi": 72,
+              "mipmap-xhdpi": 96,
+              "mipmap-xxhdpi": 144,
+              "mipmap-xxxhdpi": 192
+          }
+
+          for folder, size in sizes.items():
+              output = project / "app/src/main/res" / folder
+              output.mkdir(parents=True, exist_ok=True)
+
+              icon = ImageOps.fit(
+                  image,
+                  (size, size),
+                  method=Image.Resampling.LANCZOS
+              )
+
+              icon.save(output / "khahish_launcher.png")
+              icon.save(output / "khahish_launcher_round.png")
+
+          manifest = project / "app/src/main/AndroidManifest.xml"
+          content = manifest.read_text()
+
+          match = re.search(r'<application\b[^>]*>', content)
+
+          if not match:
+              raise Exception("Application tag not found")
+
+          tag = match.group(0)
+
+          for attribute, value in [
+              ("android:icon", "@mipmap/khahish_launcher"),
+              ("android:roundIcon", "@mipmap/khahish_launcher_round")
+          ]:
+              pattern = rf'{attribute}="[^"]*"'
+
+              if re.search(pattern, tag):
+                  tag = re.sub(pattern, f'{attribute}="{value}"', tag)
+              else:
+                  tag = tag[:-1] + f' {attribute}="{value}">'
+
+          content = content[:match.start()] + tag + content[match.end():]
+
+          if "android.permission.INTERNET" not in content:
+              content = content.replace(
+                  '<application',
+                  '<uses-permission android:name="android.permission.INTERNET" />\n    <application',
+                  1
+              )
+
+          manifest.write_text(content)
+          print("Icon and Internet permission configured")
+          PY
+
+      - name: Place Firebase config
+        run: |
+          cp google-services.json "$PROJECT_DIR/app/google-services.json"
+
+      - name: Configure Firebase, Kotlin and Coil
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          project = Path(os.environ["PROJECT_DIR"])
+          root = project / "build.gradle.kts"
+          app = project / "app" / "build.gradle.kts"
+
+          root_text = root.read_text()
+          app_text = app.read_text()
+
+          # Configure Kotlin plugins
+          for plugin in [
+              "org.jetbrains.kotlin.android",
+              "org.jetbrains.kotlin.plugin.compose"
+          ]:
+              pattern = (
+                  r'(id\("' + re.escape(plugin) +
+                  r'"\)\s+version\s+")[^"]+(" apply false)'
+              )
+
+              root_text, count = re.subn(
+                  pattern,
+                  r'\g<1>2.4.0\g<2>',
+                  root_text
+              )
+
+              if count != 1:
+                  raise Exception("Kotlin plugin not found: " + plugin)
+
+          # Add Google Services plugin
+          if "com.google.gms.google-services" not in root_text:
+              anchor = '    id("org.jetbrains.kotlin.plugin.compose") version "2.4.0" apply false'
+
+              if anchor not in root_text:
+                  raise Exception("Compose plugin anchor not found")
+
+              root_text = root_text.replace(
+                  anchor,
+                  anchor + '\n    id("com.google.gms.google-services") version "4.5.0" apply false'
+              )
+
+          root.write_text(root_text)
+
+          # Apply Google Services plugin in app
+          if 'id("com.google.gms.google-services")' not in app_text:
+              anchor = '    id("org.jetbrains.kotlin.plugin.compose")'
+
+              if anchor not in app_text:
+                  raise Exception("App Compose plugin not found")
+
+              app_text = app_text.replace(
+                  anchor,
+                  anchor + '\n    id("com.google.gms.google-services")',
+                  1
+              )
+
+          # Java 17
+          if "compileOptions {" not in app_text:
+              anchor = "    buildFeatures { compose = true }"
+
+              if anchor not in app_text:
+                  raise Exception("Build features block not found")
+
+              app_text = app_text.replace(
+                  anchor,
+                  """    compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+
+              buildFeatures { compose = true }"""
+              )
+
+          # Kotlin JVM target 17
+          if "compilerOptions {" not in app_text:
+              app_text = app_text.replace(
+                  "dependencies {",
+                  """kotlin {
+              compilerOptions {
+                  jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget("17")
+              }
+          }
+
+          dependencies {""",
+                  1
+              )
+
+          # Firebase Auth and Firestore
+          if "firebase-bom" not in app_text:
+              app_text = app_text.replace(
+                  "dependencies {",
+                  """dependencies {
+              implementation(platform("com.google.firebase:firebase-bom:35.1.0"))
+              implementation("com.google.firebase:firebase-auth")
+              implementation("com.google.firebase:firebase-firestore")""",
+                  1
+              )
+
+          # Coil image loading
+          if "io.coil-kt:coil-compose" not in app_text:
+              app_text = app_text.replace(
+                  "dependencies {",
+                  """dependencies {
+              implementation("io.coil-kt:coil-compose:2.7.0")""",
+                  1
+              )
+
+          app.write_text(app_text)
+
+          print("Kotlin 2.4.0 configured")
+          print("Firebase Auth configured")
+          print("Firestore configured")
+          print("Google Services configured")
+          print("Coil image loading configured")
+          PY
+
+      - name: Build Khahish APK
+        run: |
+          cd "$PROJECT_DIR"
+          gradle assembleDebug
+
+      - name: Upload Khahish APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Khahish-APK
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
