@@ -43,7 +43,7 @@ import java.util.concurrent.TimeUnit
 
 // --- CLOUDINARY CONFIG ---
 private const val CLOUDINARY_CLOUD_NAME = "koctiaes"
-private const val CLOUDINARY_UPLOAD_PRESET = "YOUR_UNSIGNED_PRESET"
+private const val CLOUDINARY_UPLOAD_PRESET = "ml_default"
 
 private val Green = Color(0xFF18A889)
 private val Ink = Color(0xFF101A19)
