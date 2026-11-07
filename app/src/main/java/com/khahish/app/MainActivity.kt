@@ -155,18 +155,22 @@ fun KhahishApp() {
                 containerColor = Pale,
                 topBar = {
                     Column(
-                        Modifier.background(Color.White)
+                        Modifier
+                            .background(Color.White)
                             .padding(horizontal = 20.dp, vertical = 14.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
-                                Modifier.size(42.dp)
+                                Modifier
+                                    .size(42.dp)
                                     .background(Green, RoundedCornerShape(14.dp)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(Icons.Default.Forum, null, tint = Color.White)
                             }
+
                             Spacer(Modifier.width(12.dp))
+
                             Column(Modifier.weight(1f)) {
                                 Text(
                                     "Khahish",
@@ -180,14 +184,18 @@ fun KhahishApp() {
                                     color = Muted
                                 )
                             }
+
                             IconButton(onClick = { tab = "Settings" }) {
                                 Icon(Icons.Default.Settings, "Settings")
                             }
                         }
+
                         Spacer(Modifier.height(18.dp))
+
                         Text(
-                            if (tab == "Chats") "Messages" else
-                                if (tab == "New chat") "New conversation" else tab,
+                            if (tab == "Chats") "Messages"
+                            else if (tab == "New chat") "New conversation"
+                            else tab,
                             fontSize = 23.sp,
                             fontWeight = FontWeight.Bold,
                             color = Ink
@@ -229,6 +237,7 @@ fun KhahishApp() {
                         currentUid = user.uid,
                         onOpen = { selectedChat = it }
                     )
+
                     "New chat" -> NewChatScreen(
                         modifier = Modifier.padding(padding),
                         currentUid = user.uid,
@@ -237,6 +246,7 @@ fun KhahishApp() {
                             selectedChat = it
                         }
                     )
+
                     "Settings" -> SettingsPage(
                         Modifier.padding(padding),
                         onLogout = {
@@ -246,6 +256,7 @@ fun KhahishApp() {
                             tab = "Chats"
                         }
                     )
+
                     else -> PlaceholderPage(Modifier.padding(padding), tab)
                 }
             }
@@ -269,23 +280,43 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
     var isLoading by remember { mutableStateOf(false) }
 
     Column(
-        modifier = Modifier.fillMaxSize().background(Pale).padding(24.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Pale)
+            .padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
-            Modifier.size(64.dp).background(Green, RoundedCornerShape(20.dp)),
+            Modifier
+                .size(64.dp)
+                .background(Green, RoundedCornerShape(20.dp)),
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Default.Forum, null, tint = Color.White, modifier = Modifier.size(34.dp))
+            Icon(
+                Icons.Default.Forum,
+                null,
+                tint = Color.White,
+                modifier = Modifier.size(34.dp)
+            )
         }
+
         Spacer(Modifier.height(16.dp))
-        Text("Welcome to Khahish", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Ink)
+
         Text(
-            if (useEmailMode) "Sign in with Email" else "Sign in with Phone Number",
+            "Welcome to Khahish",
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+            color = Ink
+        )
+
+        Text(
+            if (useEmailMode) "Sign in with Email"
+            else "Sign in with Phone Number",
             fontSize = 13.sp,
             color = Muted
         )
+
         Spacer(Modifier.height(24.dp))
 
         OutlinedTextField(
@@ -296,6 +327,7 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
             shape = RoundedCornerShape(14.dp),
             singleLine = true
         )
+
         Spacer(Modifier.height(12.dp))
 
         if (!useEmailMode) {
@@ -308,50 +340,82 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                     shape = RoundedCornerShape(14.dp),
                     singleLine = true
                 )
+
                 Spacer(Modifier.height(16.dp))
+
                 Button(
                     onClick = {
                         if (phone.length < 10) {
-                            Toast.makeText(context, "Enter valid phone number", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(
+                                context,
+                                "Enter valid phone number",
+                                Toast.LENGTH_SHORT
+                            ).show()
                             return@Button
                         }
+
                         isLoading = true
+
                         val options = PhoneAuthOptions.newBuilder(auth)
                             .setPhoneNumber(phone.trim())
                             .setTimeout(60L, TimeUnit.SECONDS)
                             .setActivity(context as Activity)
-                            .setCallbacks(object :
-                                PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
-                                override fun onVerificationCompleted(credential: PhoneAuthCredential) {
-                                    auth.signInWithCredential(credential)
-                                        .addOnSuccessListener { result ->
-                                            saveUserToFirestore(db, result.user?.uid, name, phone)
-                                            isLoading = false
-                                            onLoginSuccess()
-                                        }
-                                        .addOnFailureListener {
-                                            isLoading = false
-                                            Toast.makeText(context, it.message, Toast.LENGTH_LONG).show()
-                                        }
-                                }
+                            .setCallbacks(
+                                object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
+                                    override fun onVerificationCompleted(
+                                        credential: PhoneAuthCredential
+                                    ) {
+                                        auth.signInWithCredential(credential)
+                                            .addOnSuccessListener { result ->
+                                                saveUserToFirestore(
+                                                    db,
+                                                    result.user?.uid,
+                                                    name,
+                                                    phone
+                                                )
+                                                isLoading = false
+                                                onLoginSuccess()
+                                            }
+                                            .addOnFailureListener {
+                                                isLoading = false
+                                                Toast.makeText(
+                                                    context,
+                                                    it.message,
+                                                    Toast.LENGTH_LONG
+                                                ).show()
+                                            }
+                                    }
 
-                                override fun onVerificationFailed(e: FirebaseException) {
-                                    isLoading = false
-                                    Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
-                                }
+                                    override fun onVerificationFailed(e: FirebaseException) {
+                                        isLoading = false
+                                        Toast.makeText(
+                                            context,
+                                            "Error: ${e.message}",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
 
-                                override fun onCodeSent(
-                                    verId: String,
-                                    token: PhoneAuthProvider.ForceResendingToken
-                                ) {
-                                    isLoading = false
-                                    verificationId = verId
-                                    Toast.makeText(context, "OTP Sent!", Toast.LENGTH_SHORT).show()
+                                    override fun onCodeSent(
+                                        verId: String,
+                                        token: PhoneAuthProvider.ForceResendingToken
+                                    ) {
+                                        isLoading = false
+                                        verificationId = verId
+                                        Toast.makeText(
+                                            context,
+                                            "OTP Sent!",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
                                 }
-                            }).build()
+                            )
+                            .build()
+
                         PhoneAuthProvider.verifyPhoneNumber(options)
                     },
-                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Green)
                 ) {
@@ -366,27 +430,43 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                     shape = RoundedCornerShape(14.dp),
                     singleLine = true
                 )
+
                 Spacer(Modifier.height(16.dp))
+
                 Button(
                     onClick = {
                         if (otpCode.length < 6) return@Button
+
                         isLoading = true
+
                         val credential = PhoneAuthProvider.getCredential(
                             verificationId!!,
                             otpCode.trim()
                         )
+
                         auth.signInWithCredential(credential)
                             .addOnSuccessListener { result ->
-                                saveUserToFirestore(db, result.user?.uid, name, phone)
+                                saveUserToFirestore(
+                                    db,
+                                    result.user?.uid,
+                                    name,
+                                    phone
+                                )
                                 isLoading = false
                                 onLoginSuccess()
                             }
                             .addOnFailureListener {
                                 isLoading = false
-                                Toast.makeText(context, "Invalid OTP: ${it.message}", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(
+                                    context,
+                                    "Invalid OTP: ${it.message}",
+                                    Toast.LENGTH_SHORT
+                                ).show()
                             }
                     },
-                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Green)
                 ) {
@@ -402,7 +482,9 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                 shape = RoundedCornerShape(14.dp),
                 singleLine = true
             )
+
             Spacer(Modifier.height(12.dp))
+
             OutlinedTextField(
                 value = password,
                 onValueChange = { password = it },
@@ -411,34 +493,61 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                 shape = RoundedCornerShape(14.dp),
                 singleLine = true
             )
+
             Spacer(Modifier.height(16.dp))
+
             Button(
                 onClick = {
                     if (email.isBlank() || password.length < 6) {
-                        Toast.makeText(context, "Enter valid email & password", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            context,
+                            "Enter valid email & password",
+                            Toast.LENGTH_SHORT
+                        ).show()
                         return@Button
                     }
+
                     isLoading = true
+
                     auth.signInWithEmailAndPassword(email.trim(), password)
                         .addOnSuccessListener { result ->
-                            saveUserToFirestore(db, result.user?.uid, name, email)
+                            saveUserToFirestore(
+                                db,
+                                result.user?.uid,
+                                name,
+                                email
+                            )
                             isLoading = false
                             onLoginSuccess()
                         }
                         .addOnFailureListener {
-                            auth.createUserWithEmailAndPassword(email.trim(), password)
+                            auth.createUserWithEmailAndPassword(
+                                email.trim(),
+                                password
+                            )
                                 .addOnSuccessListener { result ->
-                                    saveUserToFirestore(db, result.user?.uid, name, email)
+                                    saveUserToFirestore(
+                                        db,
+                                        result.user?.uid,
+                                        name,
+                                        email
+                                    )
                                     isLoading = false
                                     onLoginSuccess()
                                 }
                                 .addOnFailureListener { error ->
                                     isLoading = false
-                                    Toast.makeText(context, "Auth failed: ${error.message}", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(
+                                        context,
+                                        "Auth failed: ${error.message}",
+                                        Toast.LENGTH_LONG
+                                    ).show()
                                 }
                         }
                 },
-                modifier = Modifier.fillMaxWidth().height(50.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp),
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Green)
             ) {
@@ -447,6 +556,7 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
         }
 
         Spacer(Modifier.height(14.dp))
+
         TextButton(onClick = { useEmailMode = !useEmailMode }) {
             Text(
                 if (useEmailMode) "Use Phone Number (OTP) instead"
@@ -465,6 +575,8 @@ fun NewChatScreen(
     onChatCreated: (Chat) -> Unit
 ) {
     val db = remember { FirebaseFirestore.getInstance() }
+    val context = LocalContext.current
+
     var search by remember { mutableStateOf("") }
     var users by remember { mutableStateOf(listOf<AppUser>()) }
     var loading by remember { mutableStateOf(false) }
@@ -472,11 +584,13 @@ fun NewChatScreen(
 
     LaunchedEffect(search) {
         val queryText = search.trim().lowercase()
+
         if (queryText.length < 2) {
             users = emptyList()
             loading = false
         } else {
             loading = true
+
             db.collection("publicProfiles")
                 .orderBy("nameLowercase")
                 .startAt(queryText)
@@ -490,20 +604,29 @@ fun NewChatScreen(
                     }
                     loading = false
                 }
-                .addOnFailureListener {
+                .addOnFailureListener { error ->
                     loading = false
+                    Toast.makeText(
+                        context,
+                        "Search failed: ${error.message}",
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
         }
     }
 
     Column(modifier.fillMaxSize().background(Pale)) {
         Row(
-            Modifier.fillMaxWidth().background(Color.White).padding(12.dp),
+            Modifier
+                .fillMaxWidth()
+                .background(Color.White)
+                .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
                 Icon(Icons.Default.ArrowBack, "Back")
             }
+
             OutlinedTextField(
                 value = search,
                 onValueChange = { search = it },
@@ -530,27 +653,38 @@ fun NewChatScreen(
         }
 
         if (search.trim().length < 2) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
                 Text("Type at least 2 letters to search", color = Muted)
             }
         } else if (!loading && users.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
                 Text("No users found", color = Muted)
             }
         } else {
             LazyColumn {
                 items(users, key = { it.uid }) { user ->
                     Row(
-                        Modifier.fillMaxWidth()
+                        Modifier
+                            .fillMaxWidth()
                             .clickable {
                                 if (creatingUid.isNotEmpty()) return@clickable
+
                                 creatingUid = user.uid
+
                                 val chatId = privateChatId(currentUid, user.uid)
                                 val members = listOf(currentUid, user.uid).sorted()
+
                                 val memberNames = mapOf(
                                     currentUid to "You",
                                     user.uid to user.name
                                 )
+
                                 val chatData = hashMapOf<String, Any>(
                                     "members" to members,
                                     "memberNames" to memberNames,
@@ -564,6 +698,7 @@ fun NewChatScreen(
                                     .addOnSuccessListener { existing ->
                                         if (existing.exists()) {
                                             creatingUid = ""
+
                                             onChatCreated(
                                                 Chat(
                                                     id = chatId,
@@ -579,6 +714,7 @@ fun NewChatScreen(
                                                 .set(chatData)
                                                 .addOnSuccessListener {
                                                     creatingUid = ""
+
                                                     onChatCreated(
                                                         Chat(
                                                             id = chatId,
@@ -592,8 +728,9 @@ fun NewChatScreen(
                                                 }
                                                 .addOnFailureListener { error ->
                                                     creatingUid = ""
+
                                                     Toast.makeText(
-                                                        LocalContext.current,
+                                                        context,
                                                         "Chat create failed: ${error.message}",
                                                         Toast.LENGTH_LONG
                                                     ).show()
@@ -602,8 +739,9 @@ fun NewChatScreen(
                                     }
                                     .addOnFailureListener { error ->
                                         creatingUid = ""
+
                                         Toast.makeText(
-                                            LocalContext.current,
+                                            context,
                                             "Error: ${error.message}",
                                             Toast.LENGTH_LONG
                                         ).show()
@@ -613,7 +751,9 @@ fun NewChatScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(
-                            Modifier.size(48.dp).background(Color(0xFFDCEFE9), CircleShape),
+                            Modifier
+                                .size(48.dp)
+                                .background(Color(0xFFDCEFE9), CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
@@ -622,11 +762,22 @@ fun NewChatScreen(
                                 fontWeight = FontWeight.Bold
                             )
                         }
+
                         Spacer(Modifier.width(13.dp))
+
                         Column(Modifier.weight(1f)) {
-                            Text(user.name.ifBlank { "Khahish User" }, color = Ink, fontWeight = FontWeight.SemiBold)
-                            Text("Tap to start private chat", color = Muted, fontSize = 12.sp)
+                            Text(
+                                user.name.ifBlank { "Khahish User" },
+                                color = Ink,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                "Tap to start private chat",
+                                color = Muted,
+                                fontSize = 12.sp
+                            )
                         }
+
                         if (creatingUid == user.uid) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(22.dp),
@@ -637,6 +788,7 @@ fun NewChatScreen(
                             Icon(Icons.Default.Chat, null, tint = Green)
                         }
                     }
+
                     HorizontalDivider(color = Color(0xFFEAF0ED))
                 }
             }
@@ -651,6 +803,7 @@ fun ChatList(
     onOpen: (Chat) -> Unit
 ) {
     val db = remember { FirebaseFirestore.getInstance() }
+
     var chats by remember { mutableStateOf(listOf<Chat>()) }
     var loading by remember { mutableStateOf(true) }
     var search by remember { mutableStateOf("") }
@@ -666,15 +819,18 @@ fun ChatList(
 
                 if (snapshot != null) {
                     val chatDocs = snapshot.documents
+
                     val mapped = chatDocs.mapNotNull { doc ->
                         val members = doc.get("members") as? List<*>
+
                         val peerUid = members
                             ?.filterIsInstance<String>()
                             ?.firstOrNull { it != currentUid }
                             ?: return@mapNotNull null
 
                         val names = doc.get("memberNames") as? Map<*, *>
-                        val peerName = names?.get(peerUid) as? String ?: "Khahish User"
+                        val peerName = names?.get(peerUid) as? String
+                            ?: "Khahish User"
 
                         Chat(
                             id = doc.id,
@@ -688,6 +844,7 @@ fun ChatList(
                         chatDocs.firstOrNull { it.id == chat.id }
                             ?.getLong("lastMessageAt") ?: 0L
                     }
+
                     chats = mapped
                     loading = false
                 }
@@ -707,58 +864,115 @@ fun ChatList(
             onValueChange = { search = it },
             placeholder = { Text("Search conversations") },
             leadingIcon = { Icon(Icons.Default.Search, null) },
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
             shape = RoundedCornerShape(18.dp),
             singleLine = true
         )
 
         when {
-            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = Green)
-            }
-            filtered.isEmpty() -> Box(
-                Modifier.fillMaxSize().padding(24.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.ChatBubbleOutline, null, tint = Green, modifier = Modifier.size(42.dp))
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        if (search.isBlank()) "No private chats yet" else "No matching conversations",
-                        color = Ink,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text("Tap the edit button to find a user", color = Muted, fontSize = 12.sp)
+            loading -> {
+                Box(
+                    Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = Green)
                 }
             }
-            else -> LazyColumn(contentPadding = PaddingValues(bottom = 90.dp)) {
-                items(filtered, key = { it.id }) { chat ->
-                    Row(
-                        Modifier.fillMaxWidth()
-                            .clickable { onOpen(chat) }
-                            .padding(horizontal = 18.dp, vertical = 13.dp),
-                        verticalAlignment = Alignment.CenterVertically
+
+            filtered.isEmpty() -> {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Box(
-                            Modifier.size(52.dp).background(Color(0xFFDCEFE9), CircleShape),
-                            contentAlignment = Alignment.Center
+                        Icon(
+                            Icons.Default.ChatBubbleOutline,
+                            null,
+                            tint = Green,
+                            modifier = Modifier.size(42.dp)
+                        )
+
+                        Spacer(Modifier.height(12.dp))
+
+                        Text(
+                            if (search.isBlank()) "No private chats yet"
+                            else "No matching conversations",
+                            color = Ink,
+                            fontWeight = FontWeight.SemiBold
+                        )
+
+                        Text(
+                            "Tap the edit button to find a user",
+                            color = Muted,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+
+            else -> {
+                LazyColumn(
+                    contentPadding = PaddingValues(bottom = 90.dp)
+                ) {
+                    items(filtered, key = { it.id }) { chat ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { onOpen(chat) }
+                                .padding(horizontal = 18.dp, vertical = 13.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(chat.initials, color = Green, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        }
-                        Spacer(Modifier.width(13.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(chat.name, fontWeight = FontWeight.SemiBold, color = Ink)
-                            Spacer(Modifier.height(5.dp))
-                            Text(
-                                chat.message.ifBlank { "Start your conversation" },
-                                color = Muted,
-                                fontSize = 12.sp,
-                                maxLines = 1
+                            Box(
+                                Modifier
+                                    .size(52.dp)
+                                    .background(Color(0xFFDCEFE9), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    chat.initials,
+                                    color = Green,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp
+                                )
+                            }
+
+                            Spacer(Modifier.width(13.dp))
+
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    chat.name,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Ink
+                                )
+
+                                Spacer(Modifier.height(5.dp))
+
+                                Text(
+                                    chat.message.ifBlank { "Start your conversation" },
+                                    color = Muted,
+                                    fontSize = 12.sp,
+                                    maxLines = 1
+                                )
+                            }
+
+                            Icon(
+                                Icons.Default.ChevronRight,
+                                null,
+                                tint = Muted
                             )
                         }
-                        Icon(Icons.Default.ChevronRight, null, tint = Muted)
+
+                        HorizontalDivider(
+                            color = Color(0xFFEAF0ED),
+                            modifier = Modifier.padding(start = 82.dp)
+                        )
                     }
-                    HorizontalDivider(color = Color(0xFFEAF0ED), modifier = Modifier.padding(start = 82.dp))
                 }
             }
         }
@@ -777,7 +991,8 @@ fun ConversationScreen(chat: Chat, onBack: () -> Unit) {
     var isSending by remember { mutableStateOf(false) }
 
     DisposableEffect(chat.id) {
-        val registration = db.collection("chats").document(chat.id)
+        val registration = db.collection("chats")
+            .document(chat.id)
             .collection("messages")
             .orderBy("timestamp", Query.Direction.ASCENDING)
             .addSnapshotListener { snapshot, _ ->
@@ -793,6 +1008,7 @@ fun ConversationScreen(chat: Chat, onBack: () -> Unit) {
                     }
                 }
             }
+
         onDispose { registration.remove() }
     }
 
@@ -800,7 +1016,9 @@ fun ConversationScreen(chat: Chat, onBack: () -> Unit) {
         if (messageText.isBlank() && imageUrl.isBlank()) return
 
         isSending = true
+
         val now = System.currentTimeMillis()
+
         val msgData = hashMapOf<String, Any>(
             "senderId" to currentUserId,
             "text" to messageText,
@@ -813,6 +1031,7 @@ fun ConversationScreen(chat: Chat, onBack: () -> Unit) {
         chatRef.collection("messages").add(msgData)
             .addOnSuccessListener {
                 val preview = if (imageUrl.isNotBlank()) "Photo" else messageText
+
                 chatRef.update(
                     mapOf(
                         "lastMessage" to preview,
@@ -825,7 +1044,12 @@ fun ConversationScreen(chat: Chat, onBack: () -> Unit) {
             }
             .addOnFailureListener { error ->
                 isSending = false
-                Toast.makeText(context, "Message failed: ${error.message}", Toast.LENGTH_LONG).show()
+
+                Toast.makeText(
+                    context,
+                    "Message failed: ${error.message}",
+                    Toast.LENGTH_LONG
+                ).show()
             }
     }
 
@@ -834,6 +1058,7 @@ fun ConversationScreen(chat: Chat, onBack: () -> Unit) {
     ) { uri: Uri? ->
         if (uri != null) {
             isUploading = true
+
             uploadToCloudinary(
                 context,
                 uri,
@@ -843,36 +1068,76 @@ fun ConversationScreen(chat: Chat, onBack: () -> Unit) {
                 },
                 onError = { error ->
                     isUploading = false
-                    Toast.makeText(context, "Upload failed: $error", Toast.LENGTH_SHORT).show()
+
+                    Toast.makeText(
+                        context,
+                        "Upload failed: $error",
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
             )
         }
     }
 
-    Column(Modifier.fillMaxSize().background(Pale)) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(Pale)
+    ) {
         Row(
-            Modifier.fillMaxWidth().background(Color.White).padding(8.dp),
+            Modifier
+                .fillMaxWidth()
+                .background(Color.White)
+                .padding(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
                 Icon(Icons.Default.ArrowBack, "Back")
             }
+
             Box(
-                Modifier.size(38.dp).background(Color(0xFFDCEFE9), CircleShape),
+                Modifier
+                    .size(38.dp)
+                    .background(Color(0xFFDCEFE9), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                Text(chat.initials, color = Green, fontWeight = FontWeight.Bold)
+                Text(
+                    chat.initials,
+                    color = Green,
+                    fontWeight = FontWeight.Bold
+                )
             }
+
             Spacer(Modifier.width(10.dp))
-            Text(chat.name, Modifier.weight(1f), fontWeight = FontWeight.SemiBold, color = Ink)
-            IconButton(onClick = {
-                Toast.makeText(context, "Voice calling will be added in the calling phase", Toast.LENGTH_SHORT).show()
-            }) {
+
+            Text(
+                chat.name,
+                Modifier.weight(1f),
+                fontWeight = FontWeight.SemiBold,
+                color = Ink
+            )
+
+            IconButton(
+                onClick = {
+                    Toast.makeText(
+                        context,
+                        "Voice calling will be added in the calling phase",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            ) {
                 Icon(Icons.Default.Call, "Voice call", tint = Green)
             }
-            IconButton(onClick = {
-                Toast.makeText(context, "Video calling will be added in the calling phase", Toast.LENGTH_SHORT).show()
-            }) {
+
+            IconButton(
+                onClick = {
+                    Toast.makeText(
+                        context,
+                        "Video calling will be added in the calling phase",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            ) {
                 Icon(Icons.Default.Videocam, "Video call", tint = Green)
             }
         }
@@ -885,14 +1150,24 @@ fun ConversationScreen(chat: Chat, onBack: () -> Unit) {
         }
 
         LazyColumn(
-            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp),
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp),
             contentPadding = PaddingValues(vertical = 12.dp)
         ) {
             items(messages, key = { it.id }) { msg ->
                 val isMe = msg.senderId == currentUserId
+
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                    horizontalArrangement = if (isMe) Arrangement.End else Arrangement.Start
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = if (isMe) {
+                        Arrangement.End
+                    } else {
+                        Arrangement.Start
+                    }
                 ) {
                     Column(
                         modifier = Modifier
@@ -907,10 +1182,13 @@ fun ConversationScreen(chat: Chat, onBack: () -> Unit) {
                             AsyncImage(
                                 model = msg.imageUrl,
                                 contentDescription = "Uploaded Photo",
-                                modifier = Modifier.size(180.dp).clip(RoundedCornerShape(10.dp)),
+                                modifier = Modifier
+                                    .size(180.dp)
+                                    .clip(RoundedCornerShape(10.dp)),
                                 contentScale = ContentScale.Crop
                             )
                         }
+
                         if (msg.text.isNotEmpty()) {
                             Text(
                                 msg.text,
@@ -924,12 +1202,22 @@ fun ConversationScreen(chat: Chat, onBack: () -> Unit) {
         }
 
         Row(
-            Modifier.fillMaxWidth().background(Color.White).padding(8.dp),
+            Modifier
+                .fillMaxWidth()
+                .background(Color.White)
+                .padding(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = { imagePicker.launch("image/*") }) {
-                Icon(Icons.Default.AttachFile, "Attach Image", tint = Green)
+            IconButton(
+                onClick = { imagePicker.launch("image/*") }
+            ) {
+                Icon(
+                    Icons.Default.AttachFile,
+                    "Attach Image",
+                    tint = Green
+                )
             }
+
             OutlinedTextField(
                 value = text,
                 onValueChange = { text = it },
@@ -938,17 +1226,23 @@ fun ConversationScreen(chat: Chat, onBack: () -> Unit) {
                 shape = RoundedCornerShape(24.dp),
                 singleLine = true
             )
+
             IconButton(
                 enabled = !isSending && !isUploading,
                 onClick = {
                     val message = text.trim()
+
                     if (message.isNotBlank()) {
                         text = ""
                         sendMessage(message)
                     }
                 }
             ) {
-                Icon(Icons.Default.Send, "Send", tint = Green)
+                Icon(
+                    Icons.Default.Send,
+                    "Send",
+                    tint = Green
+                )
             }
         }
     }
@@ -960,7 +1254,10 @@ fun uploadToCloudinary(
     onSuccess: (String) -> Unit,
     onError: (String) -> Unit
 ) {
-    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+    val bytes = context.contentResolver
+        .openInputStream(uri)
+        ?.use { it.readBytes() }
+
     if (bytes == null) {
         onError("File read error")
         return
@@ -973,15 +1270,21 @@ fun uploadToCloudinary(
             "image.jpg",
             bytes.toRequestBody("image/*".toMediaTypeOrNull())
         )
-        .addFormDataPart("upload_preset", CLOUDINARY_UPLOAD_PRESET)
+        .addFormDataPart(
+            "upload_preset",
+            CLOUDINARY_UPLOAD_PRESET
+        )
         .build()
 
     val request = Request.Builder()
-        .url("https://api.cloudinary.com/v1_1/$CLOUDINARY_CLOUD_NAME/image/upload")
+        .url(
+            "https://api.cloudinary.com/v1_1/$CLOUDINARY_CLOUD_NAME/image/upload"
+        )
         .post(requestBody)
         .build()
 
     OkHttpClient().newCall(request).enqueue(object : Callback {
+
         override fun onFailure(call: Call, e: IOException) {
             android.os.Handler(context.mainLooper).post {
                 onError(e.message ?: "Network error")
@@ -990,11 +1293,16 @@ fun uploadToCloudinary(
 
         override fun onResponse(call: Call, response: Response) {
             val body = response.body?.string()
+
             android.os.Handler(context.mainLooper).post {
                 if (response.isSuccessful && body != null) {
                     val secureUrl = JSONObject(body).optString("secure_url")
-                    if (secureUrl.isNotBlank()) onSuccess(secureUrl)
-                    else onError("Image URL missing")
+
+                    if (secureUrl.isNotBlank()) {
+                        onSuccess(secureUrl)
+                    } else {
+                        onError("Image URL missing")
+                    }
                 } else {
                     onError("Check Cloudinary configuration")
                 }
@@ -1006,20 +1314,45 @@ fun uploadToCloudinary(
 @Composable
 fun PlaceholderPage(modifier: Modifier, title: String) {
     Column(
-        modifier.fillMaxSize().padding(28.dp),
+        modifier
+            .fillMaxSize()
+            .padding(28.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Icon(Icons.Default.AutoAwesome, null, tint = Green, modifier = Modifier.size(42.dp))
+        Icon(
+            Icons.Default.AutoAwesome,
+            null,
+            tint = Green,
+            modifier = Modifier.size(42.dp)
+        )
+
         Spacer(Modifier.height(14.dp))
-        Text(title, fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Ink)
-        Text("This section will be connected in a later development phase.", color = Muted)
+
+        Text(
+            title,
+            fontWeight = FontWeight.Bold,
+            fontSize = 20.sp,
+            color = Ink
+        )
+
+        Text(
+            "This section will be connected in a later development phase.",
+            color = Muted
+        )
     }
 }
 
 @Composable
-fun SettingsPage(modifier: Modifier, onLogout: () -> Unit) {
-    Column(modifier.fillMaxSize().padding(18.dp)) {
+fun SettingsPage(
+    modifier: Modifier,
+    onLogout: () -> Unit
+) {
+    Column(
+        modifier
+            .fillMaxSize()
+            .padding(18.dp)
+    ) {
         listOf(
             Icons.Default.Person to "Profile",
             Icons.Default.Lock to "Privacy and security",
@@ -1027,28 +1360,42 @@ fun SettingsPage(modifier: Modifier, onLogout: () -> Unit) {
             Icons.Default.Storage to "Storage and data",
             Icons.Default.Help to "Help and support"
         ).forEach { (icon, label) ->
+
             Row(
-                Modifier.fillMaxWidth()
+                Modifier
+                    .fillMaxWidth()
                     .background(Color.White, RoundedCornerShape(16.dp))
                     .padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(icon, null, tint = Green)
+
                 Spacer(Modifier.width(14.dp))
+
                 Text(label, color = Ink)
             }
+
             Spacer(Modifier.height(9.dp))
         }
 
         Spacer(Modifier.height(12.dp))
+
         Button(
             onClick = onLogout,
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD9534F)),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFFD9534F)
+            ),
             shape = RoundedCornerShape(16.dp)
         ) {
-            Icon(Icons.Default.Logout, null, tint = Color.White)
+            Icon(
+                Icons.Default.Logout,
+                null,
+                tint = Color.White
+            )
+
             Spacer(Modifier.width(8.dp))
+
             Text("Log Out", color = Color.White)
         }
     }
