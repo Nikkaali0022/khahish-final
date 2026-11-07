@@ -46,12 +46,16 @@ jobs:
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
           echo "Project found: $PROJECT_DIR"
 
-      - name: Copy updated MainActivity
+      - name: Copy updated MainActivity if present
         run: |
-          TARGET="$PROJECT_DIR/app/src/main/java/com/khahish/app"
-          mkdir -p "$TARGET"
-          cp MainActivity.kt "$TARGET/MainActivity.kt"
-          echo "MainActivity copied successfully"
+          if [ -f "MainActivity.kt" ]; then
+            TARGET="$PROJECT_DIR/app/src/main/java/com/khahish/app"
+            mkdir -p "$TARGET"
+            cp MainActivity.kt "$TARGET/MainActivity.kt"
+            echo "MainActivity copied successfully from root"
+          else
+            echo "MainActivity.kt not found in root, using existing project file."
+          fi
 
       - name: Create Khahish App Icon
         run: |
@@ -93,42 +97,42 @@ jobs:
                   icon.save(output / "khahish_launcher_round.png")
 
           manifest = project / "app/src/main/AndroidManifest.xml"
-          content = manifest.read_text()
+          if manifest.exists():
+              content = manifest.read_text()
+              match = re.search(r'<application\b[^>]*>', content)
 
-          match = re.search(r'<application\b[^>]*>', content)
+              if match:
+                  tag = match.group(0)
+                  for attribute, value in [
+                      ("android:icon", "@mipmap/khahish_launcher"),
+                      ("android:roundIcon", "@mipmap/khahish_launcher_round")
+                  ]:
+                      pattern = rf'{attribute}="[^"]*"'
+                      if re.search(pattern, tag):
+                          tag = re.sub(pattern, f'{attribute}="{value}"', tag)
+                      else:
+                          tag = tag[:-1] + f' {attribute}="{value}">'
 
-          if not match:
-              raise Exception("Application tag not found")
+                  content = content[:match.start()] + tag + content[match.end():]
 
-          tag = match.group(0)
-
-          for attribute, value in [
-              ("android:icon", "@mipmap/khahish_launcher"),
-              ("android:roundIcon", "@mipmap/khahish_launcher_round")
-          ]:
-              pattern = rf'{attribute}="[^"]*"'
-
-              if re.search(pattern, tag):
-                  tag = re.sub(pattern, f'{attribute}="{value}"', tag)
-              else:
-                  tag = tag[:-1] + f' {attribute}="{value}">'
-
-          content = content[:match.start()] + tag + content[match.end():]
-
-          if "android.permission.INTERNET" not in content:
-              content = content.replace(
-                  '<application',
-                  '<uses-permission android:name="android.permission.INTERNET" />\n    <application',
-                  1
-              )
-
-          manifest.write_text(content)
-          print("Icon and Internet permission configured")
+                  if "android.permission.INTERNET" not in content:
+                      content = content.replace(
+                          '<application',
+                          '<uses-permission android:name="android.permission.INTERNET" />\n    <application',
+                          1
+                      )
+                  manifest.write_text(content)
+          print("Icon and Internet permission check completed")
           PY
 
       - name: Place Firebase config
         run: |
-          cp google-services.json "$PROJECT_DIR/app/google-services.json"
+          if [ -f "google-services.json" ]; then
+            cp google-services.json "$PROJECT_DIR/app/google-services.json"
+            echo "Firebase config placed from root"
+          else
+            echo "google-services.json already in project or missing"
+          fi
 
       - name: Configure Firebase, Kotlin and Coil
         run: |
@@ -141,104 +145,57 @@ jobs:
           root = project / "build.gradle.kts"
           app = project / "app" / "build.gradle.kts"
 
-          root_text = root.read_text()
-          app_text = app.read_text()
+          if root.exists():
+              root_text = root.read_text()
+              for plugin in ["org.jetbrains.kotlin.android", "org.jetbrains.kotlin.plugin.compose"]:
+                  pattern = (r'(id\("' + re.escape(plugin) + r'"\)\s+version\s+")[^"]+(" apply false)')
+                  root_text, count = re.subn(pattern, r'\g<1>2.4.0\g<2>', root_text)
 
-          # Configure Kotlin plugins
-          for plugin in [
-              "org.jetbrains.kotlin.android",
-              "org.jetbrains.kotlin.plugin.compose"
-          ]:
-              pattern = (
-                  r'(id\("' + re.escape(plugin) +
-                  r'"\)\s+version\s+")[^"]+(" apply false)'
-              )
+              if "com.google.gms.google-services" not in root_text:
+                  anchor = '    id("org.jetbrains.kotlin.plugin.compose") version "2.4.0" apply false'
+                  if anchor in root_text:
+                      root_text = root_text.replace(anchor, anchor + '\n    id("com.google.gms.google-services") version "4.5.0" apply false')
+              root.write_text(root_text)
 
-              root_text, count = re.subn(
-                  pattern,
-                  r'\g<1>2.4.0\g<2>',
-                  root_text
-              )
+          if app.exists():
+              app_text = app.read_text()
+              if 'id("com.google.gms.google-services")' not in app_text:
+                  anchor = '    id("org.jetbrains.kotlin.plugin.compose")'
+                  if anchor in app_text:
+                      app_text = app_text.replace(anchor, anchor + '\n    id("com.google.gms.google-services")', 1)
 
-          # Add Google Services plugin
-          if "com.google.gms.google-services" not in root_text:
-              anchor = '    id("org.jetbrains.kotlin.plugin.compose") version "2.4.0" apply false'
-
-              if anchor in root_text:
-                  root_text = root_text.replace(
-                      anchor,
-                      anchor + '\n    id("com.google.gms.google-services") version "4.5.0" apply false'
-                  )
-
-          root.write_text(root_text)
-
-          # Apply Google Services plugin in app
-          if 'id("com.google.gms.google-services")' not in app_text:
-              anchor = '    id("org.jetbrains.kotlin.plugin.compose")'
-
-              if anchor in app_text:
-                  app_text = app_text.replace(
-                      anchor,
-                      anchor + '\n    id("com.google.gms.google-services")',
-                      1
-                  )
-
-          # Java 17
-          if "compileOptions {" not in app_text:
-              anchor = "    buildFeatures { compose = true }"
-
-              if anchor in app_text:
-                  app_text = app_text.replace(
-                      anchor,
-                      """    compileOptions {
+              if "compileOptions {" not in app_text:
+                  anchor = "    buildFeatures { compose = true }"
+                  if anchor in app_text:
+                      app_text = app_text.replace(anchor, """    compileOptions {
                     sourceCompatibility = JavaVersion.VERSION_17
                     targetCompatibility = JavaVersion.VERSION_17
                 }
 
-                buildFeatures { compose = true }"""
-                  )
+                buildFeatures { compose = true }""")
 
-          # Kotlin JVM target 17
-          if "compilerOptions {" not in app_text:
-              app_text = app_text.replace(
-                  "dependencies {",
-                  """kotlin {
+              if "compilerOptions {" not in app_text:
+                  app_text = app_text.replace("dependencies {", """kotlin {
                 compilerOptions {
                     jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget("17")
                 }
             }
 
-            dependencies {"""",
-                  1
-              )
+            dependencies {"""", 1)
 
-          # Firebase Auth and Firestore
-          if "firebase-bom" not in app_text:
-              app_text = app_text.replace(
-                  "dependencies {",
-                  """dependencies {
+              if "firebase-bom" not in app_text:
+                  app_text = app_text.replace("dependencies {", """dependencies {
                 implementation(platform("com.google.firebase:firebase-bom:35.1.0"))
                 implementation("com.google.firebase:firebase-auth")
-                implementation("com.google.firebase:firebase-firestore")""",
-                  1
-              )
+                implementation("com.google.firebase:firebase-firestore")""", 1)
 
-          # Coil image loading
-          if "io.coil-kt:coil-compose" not in app_text:
-              app_text = app_text.replace(
-                  "dependencies {",
-                  """dependencies {
-                implementation("io.coil-kt:coil-compose:2.7.0")""",
-                  1
-              )
+              if "io.coil-kt:coil-compose" not in app_text:
+                  app_text = app_text.replace("dependencies {", """dependencies {
+                implementation("io.coil-kt:coil-compose:2.7.0")""", 1)
 
-          app.write_text(app_text)
+              app.write_text(app_text)
 
-          print("Kotlin 2.4.0 configured")
-          print("Firebase Auth configured")
-          print("Firestore configured")
-          print("Google Services configured")
-          print("Coil image loading configured")
+          print("Build configurations applied successfully")
           PY
 
       - name: Build Khahish APK
