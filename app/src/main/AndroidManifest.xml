@@ -9,7 +9,7 @@
         android:icon="@mipmap/khahish_launcher"
         android:roundIcon="@mipmap/khahish_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Khahish">
+        android:theme="@style/Theme.Material3.DayNight.NoActionBar">
         
         <activity
             android:name=".MainActivity"
