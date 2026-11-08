@@ -40,6 +40,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.statusBarsPadding
 import coil.compose.AsyncImage
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
@@ -56,6 +57,7 @@ import okhttp3.Request
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.io.File
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
@@ -97,9 +99,8 @@ data class MessageItem(
     val readBy: List<String> = emptyList()
 )
 
-private fun privateChatId(uid1: String, uid2: String): String {
-    return listOf(uid1, uid2).sorted().joinToString("_")
-}
+private fun privateChatId(uid1: String, uid2: String): String =
+    listOf(uid1, uid2).sorted().joinToString("_")
 
 private fun showToast(context: Context, message: String) {
     Toast.makeText(context, message, Toast.LENGTH_LONG).show()
@@ -170,12 +171,8 @@ fun KhahishApp() {
         val listener = FirebaseAuth.AuthStateListener {
             currentUser = it.currentUser
         }
-
         auth.addAuthStateListener(listener)
-
-        onDispose {
-            auth.removeAuthStateListener(listener)
-        }
+        onDispose { auth.removeAuthStateListener(listener) }
     }
 
     BackHandler(
@@ -203,16 +200,12 @@ fun KhahishApp() {
             label = "authentication_transition"
         ) { loggedIn ->
             if (!loggedIn) {
-                AuthScreen {
-                    currentUser = auth.currentUser
-                }
+                AuthScreen { currentUser = auth.currentUser }
             } else {
                 val user = currentUser
 
                 if (user == null) {
-                    AuthScreen {
-                        currentUser = auth.currentUser
-                    }
+                    AuthScreen { currentUser = auth.currentUser }
                 } else if (selectedChat != null) {
                     ConversationScreen(
                         chat = selectedChat!!,
@@ -222,8 +215,8 @@ fun KhahishApp() {
                     NewChatScreen(
                         currentUid = user.uid,
                         onBack = { showNewChat = false },
-                        onChatCreated = { chat ->
-                            selectedChat = chat
+                        onChatCreated = {
+                            selectedChat = it
                             showNewChat = false
                         }
                     )
@@ -235,6 +228,7 @@ fun KhahishApp() {
                                 Modifier
                                     .fillMaxWidth()
                                     .background(Color.White)
+                                    .statusBarsPadding()
                                     .padding(horizontal = 20.dp, vertical = 12.dp)
                             ) {
                                 Row(
@@ -553,6 +547,7 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
         }
     }
 }
+
 @Composable
 fun NewChatScreen(
     modifier: Modifier = Modifier,
@@ -576,7 +571,6 @@ fun NewChatScreen(
             loading = false
         } else {
             loading = true
-
             db.collection("publicProfiles")
                 .orderBy("nameLowercase")
                 .startAt(queryText)
@@ -762,7 +756,6 @@ fun NewChatScreen(
                             Icon(Icons.Default.Chat, null, tint = Green)
                         }
                     }
-
                     HorizontalDivider(color = Color(0xFFEAF0ED))
                 }
             }
@@ -936,7 +929,6 @@ fun ChatList(
         }
     }
 }
-
 @Composable
 fun ConversationScreen(
     chat: Chat,
@@ -1067,6 +1059,8 @@ fun ConversationScreen(
                     )
                 }
 
+                // Sirf un messages par receipt update karein
+                // jin par current user ki receipt abhi maujood nahi.
                 snapshot.documents.forEach { doc ->
                     val senderId = doc.getString("senderId") ?: ""
                     val delivered = doc.get("deliveredTo") as? List<*>
@@ -1074,20 +1068,22 @@ fun ConversationScreen(
                     val read = doc.get("readBy") as? List<*>
                         ?: emptyList<Any>()
 
-                    if (
-                        senderId.isNotBlank() &&
-                        senderId != currentUserId &&
-                        (
-                            currentUserId !in delivered ||
-                            currentUserId !in read
-                        )
-                    ) {
-                        doc.reference.update(
-                            mapOf(
-                                "deliveredTo" to FieldValue.arrayUnion(currentUserId),
-                                "readBy" to FieldValue.arrayUnion(currentUserId)
-                            )
-                        )
+                    if (senderId.isNotBlank() && senderId != currentUserId) {
+                        val updates = mutableMapOf<String, Any>()
+
+                        if (currentUserId !in delivered) {
+                            updates["deliveredTo"] =
+                                FieldValue.arrayUnion(currentUserId)
+                        }
+
+                        if (currentUserId !in read) {
+                            updates["readBy"] =
+                                FieldValue.arrayUnion(currentUserId)
+                        }
+
+                        if (updates.isNotEmpty()) {
+                            doc.reference.update(updates)
+                        }
                     }
                 }
             }
@@ -1133,6 +1129,7 @@ fun ConversationScreen(
             Modifier
                 .fillMaxWidth()
                 .background(Color.White)
+                .statusBarsPadding()
                 .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1160,15 +1157,15 @@ fun ConversationScreen(
                 )
             }
 
-            IconButton(
-                onClick = { startKhahishCall(context, chat, false) }
-            ) {
+            IconButton(onClick = {
+                startKhahishCall(context, chat, false)
+            }) {
                 Icon(Icons.Default.Call, "Voice call", tint = Green)
             }
 
-            IconButton(
-                onClick = { startKhahishCall(context, chat, true) }
-            ) {
+            IconButton(onClick = {
+                startKhahishCall(context, chat, true)
+            }) {
                 Icon(Icons.Default.Videocam, "Video call", tint = Green)
             }
         }
@@ -1267,7 +1264,8 @@ fun ConversationScreen(
 
                             if (isMe) {
                                 val read = msg.readBy.any { it != currentUserId }
-                                val delivered = msg.deliveredTo.any { it != currentUserId }
+                                val delivered =
+                                    msg.deliveredTo.any { it != currentUserId }
 
                                 Spacer(Modifier.width(4.dp))
                                 Text(
@@ -1311,6 +1309,7 @@ fun ConversationScreen(
                             imagePicker.launch("image/*")
                         }
                     )
+
                     DropdownMenuItem(
                         text = { Text("Video") },
                         leadingIcon = { Icon(Icons.Default.Videocam, null) },
@@ -1319,6 +1318,7 @@ fun ConversationScreen(
                             videoPicker.launch("video/*")
                         }
                     )
+
                     DropdownMenuItem(
                         text = { Text("Audio file") },
                         leadingIcon = { Icon(Icons.Default.MusicNote, null) },
@@ -1327,6 +1327,7 @@ fun ConversationScreen(
                             audioPicker.launch("audio/*")
                         }
                     )
+
                     DropdownMenuItem(
                         text = { Text("Document / PDF") },
                         leadingIcon = { Icon(Icons.Default.Description, null) },
@@ -1335,6 +1336,7 @@ fun ConversationScreen(
                             documentPicker.launch("*/*")
                         }
                     )
+
                     DropdownMenuItem(
                         text = { Text("Share location") },
                         leadingIcon = { Icon(Icons.Default.LocationOn, null) },
@@ -1342,7 +1344,7 @@ fun ConversationScreen(
                             attachmentMenu = false
                             showToast(
                                 context,
-                                "Live location sharing is not integrated yet"
+                                "Location sharing is not available in this build."
                             )
                         }
                     )
@@ -1361,14 +1363,12 @@ fun ConversationScreen(
                 singleLine = true
             )
 
-            IconButton(
-                onClick = {
-                    showToast(
-                        context,
-                        "Voice recording is not integrated yet. You can attach an audio file."
-                    )
-                }
-            ) {
+            IconButton(onClick = {
+                showToast(
+                    context,
+                    "Voice recording is not available yet. You can attach an audio file."
+                )
+            }) {
                 Icon(Icons.Default.Mic, "Voice message", tint = Green)
             }
 
@@ -1399,6 +1399,7 @@ fun ConversationScreen(
         }
     }
 }
+
 @Composable
 private fun MediaOpenRow(
     label: String,
@@ -1458,13 +1459,19 @@ private fun sendChatMessage(
                     "lastMessageAt" to now,
                     "updatedAt" to now
                 )
-            ).addOnCompleteListener {
+            ).addOnCompleteListener { updateTask ->
+                if (!updateTask.isSuccessful) {
+                    showToast(
+                        context,
+                        "Message sent, but chat preview could not update."
+                    )
+                }
                 onComplete()
             }
         }
-        .addOnFailureListener {
+        .addOnFailureListener { error ->
             onComplete()
-            showToast(context, "Message failed: ${it.message}")
+            showToast(context, "Message failed: ${error.message}")
         }
 }
 
@@ -1475,9 +1482,7 @@ private fun openSharedUrl(context: Context, url: String) {
     }
 
     try {
-        context.startActivity(
-            Intent(Intent.ACTION_VIEW, Uri.parse(url))
-        )
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
     } catch (_: Exception) {
         showToast(context, "Unable to open this file")
     }
@@ -1497,7 +1502,6 @@ private fun startKhahishCall(
         }
     )
 }
-
 @Composable
 fun SettingsPage(
     modifier: Modifier = Modifier,
@@ -1509,6 +1513,7 @@ fun SettingsPage(
     val uid = auth.currentUser?.uid ?: ""
 
     var showBlocked by remember { mutableStateOf(false) }
+    var showStorage by remember { mutableStateOf(false) }
     var blockedUsers by remember { mutableStateOf(listOf<String>()) }
     var loadingBlocked by remember { mutableStateOf(false) }
 
@@ -1529,6 +1534,14 @@ fun SettingsPage(
                     showToast(context, "Unable to load blocked users")
                 }
         }
+    }
+
+    if (showStorage) {
+        StorageMediaPage(
+            modifier = modifier,
+            onBack = { showStorage = false }
+        )
+        return
     }
 
     Column(
@@ -1564,10 +1577,7 @@ fun SettingsPage(
                 "Edit profile",
                 "Manage your public profile"
             ) {
-                showToast(
-                    context,
-                    "Profile editing is not included in this version."
-                )
+                showToast(context, "Profile editing is not included in this update.")
             }
 
             SettingsItem(
@@ -1575,10 +1585,7 @@ fun SettingsPage(
                 "Privacy and security",
                 "Manage your privacy"
             ) {
-                showToast(
-                    context,
-                    "Privacy controls are not connected yet."
-                )
+                showToast(context, "Privacy controls are not connected yet.")
             }
 
             SettingsItem(
@@ -1650,10 +1657,7 @@ fun SettingsPage(
                 "Chat settings",
                 "Message and conversation preferences"
             ) {
-                showToast(
-                    context,
-                    "Additional chat preferences will be added later."
-                )
+                showToast(context, "Chat preferences are not connected yet.")
             }
 
             SettingsItem(
@@ -1679,12 +1683,9 @@ fun SettingsPage(
             SettingsItem(
                 Icons.Default.Storage,
                 "Storage and media",
-                "Media and file preferences"
+                "Auto-download and storage information"
             ) {
-                showToast(
-                    context,
-                    "Storage preferences are not connected yet."
-                )
+                showStorage = true
             }
         }
 
@@ -1696,10 +1697,7 @@ fun SettingsPage(
                 "Help and support",
                 "Get assistance"
             ) {
-                showToast(
-                    context,
-                    "Help and support will be connected in a later update."
-                )
+                showToast(context, "Help and support will be connected later.")
             }
 
             SettingsItem(
@@ -1730,6 +1728,263 @@ fun SettingsPage(
 }
 
 @Composable
+private fun StorageMediaPage(
+    modifier: Modifier = Modifier,
+    onBack: () -> Unit
+) {
+    val context = LocalContext.current
+    val preferences = remember {
+        context.getSharedPreferences("khahish_media_settings", Context.MODE_PRIVATE)
+    }
+
+    var autoPhotos by remember {
+        mutableStateOf(preferences.getBoolean("auto_photos", true))
+    }
+    var autoVideos by remember {
+        mutableStateOf(preferences.getBoolean("auto_videos", false))
+    }
+    var autoAudio by remember {
+        mutableStateOf(preferences.getBoolean("auto_audio", false))
+    }
+    var autoDocuments by remember {
+        mutableStateOf(preferences.getBoolean("auto_documents", false))
+    }
+    var saveToGallery by remember {
+        mutableStateOf(preferences.getBoolean("save_gallery", false))
+    }
+    var storageBytes by remember { mutableStateOf(0L) }
+    var calculating by remember { mutableStateOf(true) }
+
+    fun refreshStorage() {
+        calculating = true
+        Thread {
+            val total = directorySize(context.cacheDir) +
+                directorySize(context.filesDir)
+
+            Handler(Looper.getMainLooper()).post {
+                storageBytes = total
+                calculating = false
+            }
+        }.start()
+    }
+
+    LaunchedEffect(Unit) {
+        refreshStorage()
+    }
+
+    fun savePreference(key: String, value: Boolean) {
+        preferences.edit().putBoolean(key, value).apply()
+    }
+
+    Column(
+        modifier
+            .fillMaxSize()
+            .background(Pale)
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, "Back")
+            }
+
+            Text(
+                "Storage and media",
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = Ink
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        SettingsGroup("STORAGE USAGE") {
+            Text(
+                "Khahish app storage",
+                color = Ink,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            if (calculating) {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = Green
+                )
+            } else {
+                Text(
+                    formatStorageSize(storageBytes),
+                    color = Green,
+                    fontSize = 25.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "App files and cache on this device",
+                    color = Muted,
+                    fontSize = 12.sp
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            OutlinedButton(
+                onClick = { refreshStorage() },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.Refresh, null)
+                Spacer(Modifier.width(8.dp))
+                Text("Refresh storage information")
+            }
+
+            OutlinedButton(
+                onClick = {
+                    try {
+                        context.cacheDir.deleteRecursively()
+                        showToast(context, "Temporary cache cleared")
+                        refreshStorage()
+                    } catch (_: Exception) {
+                        showToast(context, "Unable to clear cache")
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.DeleteOutline, null)
+                Spacer(Modifier.width(8.dp))
+                Text("Clear temporary cache")
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        SettingsGroup("MEDIA AUTO-DOWNLOAD") {
+            Text(
+                "Choose which media types may be automatically downloaded when auto-download is supported.",
+                color = Muted,
+                fontSize = 12.sp
+            )
+
+            MediaPreferenceRow(
+                title = "Photos",
+                subtitle = "Photo auto-download preference",
+                checked = autoPhotos,
+                onCheckedChange = {
+                    autoPhotos = it
+                    savePreference("auto_photos", it)
+                }
+            )
+
+            MediaPreferenceRow(
+                title = "Videos",
+                subtitle = "Video auto-download preference",
+                checked = autoVideos,
+                onCheckedChange = {
+                    autoVideos = it
+                    savePreference("auto_videos", it)
+                }
+            )
+
+            MediaPreferenceRow(
+                title = "Audio",
+                subtitle = "Audio auto-download preference",
+                checked = autoAudio,
+                onCheckedChange = {
+                    autoAudio = it
+                    savePreference("auto_audio", it)
+                }
+            )
+
+            MediaPreferenceRow(
+                title = "Documents",
+                subtitle = "PDF and other document preference",
+                checked = autoDocuments,
+                onCheckedChange = {
+                    autoDocuments = it
+                    savePreference("auto_documents", it)
+                }
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        SettingsGroup("MEDIA VISIBILITY") {
+            MediaPreferenceRow(
+                title = "Save media to gallery",
+                subtitle = "Gallery saving preference",
+                checked = saveToGallery,
+                onCheckedChange = {
+                    saveToGallery = it
+                    savePreference("save_gallery", it)
+                }
+            )
+        }
+
+        Spacer(Modifier.height(14.dp))
+
+        Text(
+            "Note: These preferences are saved on this device. Automatic downloading and gallery saving will take effect when those features are connected to the media system. Storage usage currently reports Khahish app files and cache, not your Cloudinary online files.",
+            color = Muted,
+            fontSize = 12.sp
+        )
+
+        Spacer(Modifier.height(30.dp))
+    }
+}
+
+@Composable
+private fun MediaPreferenceRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = Ink, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = Muted, fontSize = 11.sp)
+        }
+
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Green
+            )
+        )
+    }
+}
+
+private fun directorySize(file: File): Long {
+    if (!file.exists()) return 0L
+    if (file.isFile) return file.length()
+
+    return file.listFiles()?.sumOf { child ->
+        directorySize(child)
+    } ?: 0L
+}
+
+private fun formatStorageSize(bytes: Long): String {
+    if (bytes < 1024L) return "$bytes B"
+
+    val kb = bytes / 1024.0
+    if (kb < 1024.0) return String.format(Locale.US, "%.1f KB", kb)
+
+    val mb = kb / 1024.0
+    if (mb < 1024.0) return String.format(Locale.US, "%.1f MB", mb)
+
+    val gb = mb / 1024.0
+    return String.format(Locale.US, "%.2f GB", gb)
+}
+
+@Composable
 private fun SettingsGroup(
     title: String,
     content: @Composable ColumnScope.() -> Unit
@@ -1748,7 +2003,6 @@ private fun SettingsGroup(
         )
 
         Spacer(Modifier.height(8.dp))
-
         content()
     }
 }
@@ -1838,7 +2092,7 @@ private fun uploadToCloudinary(
                 val responseText = response.body?.string().orEmpty()
 
                 if (!response.isSuccessful) {
-                    throw Exception("Upload error: ${response.code}")
+                    throw Exception("Upload error: ${response.code} $responseText")
                 }
 
                 val json = JSONObject(responseText)
