@@ -82,6 +82,7 @@ class KhahishCallRepository(
                 "calleeUid" to call.calleeUid,
                 "callerName" to call.callerName,
                 "calleeName" to call.calleeName,
+                "participants" to listOf(call.callerUid, call.calleeUid),
                 "channelName" to call.channelName,
                 "callType" to call.callType,
                 "status" to call.status,
