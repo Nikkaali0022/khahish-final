@@ -181,14 +181,17 @@ fun KhahishApp() {
 
     DisposableEffect(currentUser?.uid) {
         val uid = currentUser?.uid
-        if (uid.isNullOrBlank()) return@DisposableEffect onDispose { }
-        val registration = KhahishCallRepository().listenForIncomingCalls(uid) { incoming ->
-            if (incoming != null && latestActiveCall == null) {
-                incomingCall = true
-                activeCall = incoming
+        if (uid.isNullOrBlank()) {
+            onDispose { }
+        } else {
+            val registration = KhahishCallRepository().listenForIncomingCalls(uid) { incoming ->
+                if (incoming != null && latestActiveCall == null) {
+                    incomingCall = true
+                    activeCall = incoming
+                }
             }
+            onDispose { registration.remove() }
         }
-        onDispose { registration.remove() }
     }
 
     BackHandler(
