@@ -1672,6 +1672,7 @@ fun ConversationScreen(
 
 @Composable
 private fun AudioMessagePlayer(url: String) {
+    val context = LocalContext.current
     var player by remember(url) { mutableStateOf<MediaPlayer?>(null) }
     var playing by remember(url) { mutableStateOf(false) }
     var loading by remember(url) { mutableStateOf(false) }
@@ -1718,7 +1719,7 @@ private fun AudioMessagePlayer(url: String) {
                 } catch (_: Exception) {
                     loading = false
                     created.release()
-                    Toast.makeText(LocalContext.current, "Unable to play this voice message", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Unable to play this voice message", Toast.LENGTH_SHORT).show()
                 }
             }
         }) {
