@@ -94,6 +94,7 @@ data class AppUser(
     val nameLowercase: String = "",
     val photoUrl: String = "",
     val username: String = "",
+    val bio: String = "",
     val isOnline: Boolean = false,
     val lastSeenAt: Long = 0L,
     val lastSeenVisible: Boolean = true,
@@ -852,17 +853,14 @@ fun NewChatScreen(
                             .padding(horizontal = 18.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            Modifier
-                                .size(48.dp)
-                                .background(Color(0xFFDCEFE9), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                user.name.firstOrNull()?.uppercase() ?: "K",
-                                color = Green,
-                                fontWeight = FontWeight.Bold
-                            )
+                        if (user.photoUrl.isNotBlank()) {
+                            AsyncImage(model = user.photoUrl, contentDescription = "Profile picture",
+                                modifier = Modifier.size(48.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                        } else {
+                            Box(Modifier.size(48.dp).background(Color(0xFFDCEFE9), CircleShape),
+                                contentAlignment = Alignment.Center) {
+                                Text(user.name.firstOrNull()?.uppercase() ?: "K", color = Green, fontWeight = FontWeight.Bold)
+                            }
                         }
 
                         Spacer(Modifier.width(13.dp))
@@ -881,6 +879,9 @@ fun NewChatScreen(
                                 else -> "Tap to start private chat"
                             }
                             Text(statusText, color = if (statusText == "Online") Green else Muted, fontSize = 12.sp)
+                            if (user.bio.isNotBlank()) {
+                                Text(user.bio, color = Muted, fontSize = 11.sp, maxLines = 2)
+                            }
                         }
 
                         if (creatingUid == user.uid) {
