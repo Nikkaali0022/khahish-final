@@ -42,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -359,49 +360,74 @@ fun KhahishApp() {
                             Column(
                                 Modifier
                                     .fillMaxWidth()
-                                    .background(Color.White)
+                                    .background(
+                                        Brush.linearGradient(
+                                            listOf(
+                                                Color(0xFF031D1B),
+                                                Color(0xFF075C4C),
+                                                Color(0xFF003B42)
+                                            )
+                                        )
+                                    )
                                     .statusBarsPadding()
-                                    .padding(horizontal = 20.dp, vertical = 12.dp)
+                                    .padding(horizontal = 18.dp, vertical = 12.dp)
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Box(
                                         Modifier
-                                            .size(42.dp)
+                                            .size(44.dp)
                                             .background(
-                                                Green,
-                                                RoundedCornerShape(14.dp)
+                                                Brush.linearGradient(
+                                                    listOf(Color(0xFF00E6A0), Color(0xFF00A98B))
+                                                ),
+                                                RoundedCornerShape(15.dp)
                                             ),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Icon(
-                                            Icons.Default.Forum,
-                                            contentDescription = null,
-                                            tint = Color.White
+                                        Text(
+                                            "K",
+                                            color = Color.White,
+                                            fontSize = 27.sp,
+                                            fontWeight = FontWeight.Black
                                         )
                                     }
 
                                     Spacer(Modifier.width(12.dp))
 
-                                    Column(Modifier.weight(1f)) {
+                                    Row(
+                                        modifier = Modifier.weight(1f),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
                                         Text(
-                                            "Khahish (خواہش)",
-                                            fontSize = 22.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Ink
+                                            "Khahish",
+                                            fontSize = 27.sp,
+                                            fontWeight = FontWeight.Black,
+                                            color = Color.White,
+                                            letterSpacing = 0.4.sp
                                         )
-                                        Text(
-                                            "Connect. Share. Stay Close.",
-                                            fontSize = 11.sp,
-                                            color = Muted
-                                        )
+                                        Spacer(Modifier.width(7.dp))
+                                        Text("🦎", fontSize = 27.sp)
                                     }
 
                                     IconButton(onClick = { tab = "Settings" }) {
-                                        Icon(Icons.Default.Settings, "Settings")
+                                        Icon(
+                                            Icons.Default.Settings,
+                                            "Settings",
+                                            tint = Color.White
+                                        )
                                     }
                                 }
+
+                                Spacer(Modifier.height(7.dp))
+
+                                Text(
+                                    "Connect. Share. Stay Close.",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFFB7F7E5),
+                                    letterSpacing = 0.5.sp
+                                )
 
                                 Spacer(Modifier.height(12.dp))
 
@@ -409,7 +435,7 @@ fun KhahishApp() {
                                     if (tab == "Chats") "Messages" else tab,
                                     fontSize = 22.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Ink
+                                    color = Color.White
                                 )
                             }
                         },
@@ -1772,57 +1798,185 @@ private fun AudioMessagePlayer(url: String) {
     var player by remember(url) { mutableStateOf<MediaPlayer?>(null) }
     var playing by remember(url) { mutableStateOf(false) }
     var loading by remember(url) { mutableStateOf(false) }
+    var durationMs by remember(url) { mutableStateOf(0) }
+    var seekProgress by remember(url) { mutableStateOf(0f) }
+
     DisposableEffect(url) {
         onDispose {
             try { player?.release() } catch (_: Exception) { }
             player = null
         }
     }
-    Row(
-        Modifier.fillMaxWidth().background(Pale, RoundedCornerShape(12.dp)).padding(8.dp),
-        verticalAlignment = Alignment.CenterVertically
+
+    LaunchedEffect(player, playing) {
+        while (playing) {
+            val activePlayer = player
+            if (activePlayer != null) {
+                val duration = durationMs.coerceAtLeast(1)
+                seekProgress = (activePlayer.currentPosition.toFloat() / duration).coerceIn(0f, 1f)
+            }
+            kotlinx.coroutines.delay(100)
+        }
+    }
+
+    fun timeLabel(milliseconds: Int): String {
+        val seconds = (milliseconds.coerceAtLeast(0) / 1000)
+        return String.format(Locale.US, "%02d:%02d", seconds / 60, seconds % 60)
+    }
+
+    val currentPosition = (durationMs * seekProgress).toInt()
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(
+                Brush.linearGradient(listOf(Color(0xFF071B26), Color(0xFF102B3A))),
+                RoundedCornerShape(18.dp)
+            )
+            .padding(horizontal = 12.dp, vertical = 10.dp)
     ) {
-        IconButton(enabled = !loading, onClick = {
-            if (playing) {
-                player?.pause()
-                playing = false
-            } else if (player != null) {
-                player?.start()
-                playing = true
-            } else {
-                loading = true
-                val created = MediaPlayer()
-                try {
-                    created.setDataSource(url)
-                    created.setOnPreparedListener { prepared ->
-                        loading = false
-                        player = prepared
-                        prepared.start()
-                        playing = true
-                    }
-                    created.setOnCompletionListener { completed ->
-                        playing = false
-                        completed.seekTo(0)
-                    }
-                    created.setOnErrorListener { failed, _, _ ->
-                        loading = false
-                        playing = false
-                        failed.release()
-                        player = null
-                        true
-                    }
-                    created.prepareAsync()
-                } catch (_: Exception) {
-                    loading = false
-                    created.release()
-                    Toast.makeText(context, "Unable to play this voice message", Toast.LENGTH_SHORT).show()
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(48.dp)
+                    .background(
+                        Brush.linearGradient(
+                            listOf(Color(0xFF00E676), Color(0xFF00CFA8), Color(0xFF00B8D4))
+                        ),
+                        CircleShape
+                    )
+                    .clickable(enabled = !loading) {
+                        if (playing) {
+                            player?.pause()
+                            playing = false
+                        } else if (player != null) {
+                            if (durationMs > 0 && seekProgress >= 0.999f) {
+                                player?.seekTo(0)
+                                seekProgress = 0f
+                            }
+                            player?.start()
+                            playing = true
+                        } else {
+                            loading = true
+                            val created = MediaPlayer()
+                            try {
+                                created.setDataSource(url)
+                                created.setOnPreparedListener { prepared ->
+                                    loading = false
+                                    durationMs = prepared.duration.coerceAtLeast(0)
+                                    player = prepared
+                                    prepared.start()
+                                    playing = true
+                                }
+                                created.setOnCompletionListener { completed ->
+                                    playing = false
+                                    completed.seekTo(0)
+                                    seekProgress = 0f
+                                }
+                                created.setOnErrorListener { failed, _, _ ->
+                                    loading = false
+                                    playing = false
+                                    failed.release()
+                                    player = null
+                                    Toast.makeText(context, "Unable to play this voice message", Toast.LENGTH_SHORT).show()
+                                    true
+                                }
+                                created.prepareAsync()
+                            } catch (_: Exception) {
+                                loading = false
+                                created.release()
+                                Toast.makeText(context, "Unable to play this voice message", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                if (loading) {
+                    CircularProgressIndicator(
+                        Modifier.size(23.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Icon(
+                        if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = if (playing) "Pause voice message" else "Play voice message",
+                        tint = Color.White,
+                        modifier = Modifier.size(29.dp)
+                    )
                 }
             }
-        }) {
-            if (loading) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-            else Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (playing) "Pause voice message" else "Play voice message", tint = Green)
+
+            Spacer(Modifier.width(12.dp))
+            Text(
+                "Voice Message",
+                modifier = Modifier.weight(1f),
+                color = Color.White,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 13.sp
+            )
+            Text(
+                "${timeLabel(currentPosition)} / ${timeLabel(durationMs)}",
+                color = Color.White,
+                fontSize = 12.sp
+            )
         }
-        Text(if (loading) "Loading voice message…" else if (playing) "Playing voice message" else "Voice message", color = Ink, fontSize = 13.sp)
+
+        Spacer(Modifier.height(7.dp))
+
+        BoxWithConstraints(
+            Modifier.fillMaxWidth().height(54.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            val barCount = 40
+            Row(
+                Modifier.fillMaxWidth().height(48.dp),
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                repeat(barCount) { index ->
+                    val wave = kotlin.math.abs(kotlin.math.sin(index * 0.73)).toFloat()
+                    val height = (12 + wave * 29).dp
+                    val passed = index.toFloat() / (barCount - 1) <= seekProgress
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .height(height)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(
+                                if (passed) {
+                                    Brush.verticalGradient(listOf(Color(0xFF00F5A0), Color(0xFF00B8D4)))
+                                } else {
+                                    Brush.verticalGradient(listOf(Color(0x6657C6D5), Color(0x443A7194)))
+                                }
+                            )
+                    )
+                }
+            }
+            Text(
+                "🦎",
+                modifier = Modifier
+                    .offset(x = (maxWidth - 28.dp) * seekProgress)
+                    .align(Alignment.CenterStart),
+                fontSize = 23.sp
+            )
+        }
+
+        Slider(
+            value = seekProgress,
+            onValueChange = { seekProgress = it },
+            onValueChangeFinished = {
+                if (durationMs > 0) {
+                    player?.seekTo((durationMs * seekProgress).toInt())
+                }
+            },
+            enabled = durationMs > 0 && !loading,
+            modifier = Modifier.fillMaxWidth().height(28.dp),
+            colors = SliderDefaults.colors(
+                thumbColor = Color.White,
+                activeTrackColor = Color(0xFF00E6A0),
+                inactiveTrackColor = Color(0xFF40536A)
+            )
+        )
     }
 }
 
