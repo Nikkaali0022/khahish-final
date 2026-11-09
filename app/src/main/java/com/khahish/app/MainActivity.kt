@@ -1800,6 +1800,7 @@ private fun AudioMessagePlayer(url: String) {
     var loading by remember(url) { mutableStateOf(false) }
     var durationMs by remember(url) { mutableStateOf(0) }
     var seekProgress by remember(url) { mutableStateOf(0f) }
+    var isSeeking by remember(url) { mutableStateOf(false) }
 
     DisposableEffect(url) {
         onDispose {
@@ -1811,7 +1812,7 @@ private fun AudioMessagePlayer(url: String) {
     LaunchedEffect(player, playing) {
         while (playing) {
             val activePlayer = player
-            if (activePlayer != null) {
+            if (activePlayer != null && !isSeeking) {
                 val duration = durationMs.coerceAtLeast(1)
                 seekProgress = (activePlayer.currentPosition.toFloat() / duration).coerceIn(0f, 1f)
             }
@@ -1963,11 +1964,15 @@ private fun AudioMessagePlayer(url: String) {
 
         Slider(
             value = seekProgress,
-            onValueChange = { seekProgress = it },
+            onValueChange = {
+                isSeeking = true
+                seekProgress = it
+            },
             onValueChangeFinished = {
                 if (durationMs > 0) {
                     player?.seekTo((durationMs * seekProgress).toInt())
                 }
+                isSeeking = false
             },
             enabled = durationMs > 0 && !loading,
             modifier = Modifier.fillMaxWidth().height(28.dp),
