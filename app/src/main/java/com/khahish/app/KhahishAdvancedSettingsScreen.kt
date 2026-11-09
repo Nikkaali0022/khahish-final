@@ -207,7 +207,7 @@ fun KhahishAdvancedSettingsScreen(
         Spacer(Modifier.height(12.dp))
 
         AdvancedGroup("ACCESSIBILITY & EXPERIENCE") {
-            AdvancedSwitch("One-handed mode", "Save preference for easier reach on large screens", oneHanded) {
+            AdvancedSwitch("One-handed mode preference", "Saves your choice; full screen layout adaptation is still being completed", oneHanded) {
                 oneHanded = it
                 prefs.edit().putBoolean("one_handed", it).apply()
             }
@@ -221,7 +221,7 @@ fun KhahishAdvancedSettingsScreen(
                 try { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
                 catch (_: Exception) { Toast.makeText(context, "Open Android Settings → Accessibility → TalkBack", Toast.LENGTH_LONG).show() }
             }
-            AdvancedRow("App language", when (language) { "ur" -> "Urdu selected"; "roman" -> "Roman Urdu selected"; else -> "English selected" }) {
+            AdvancedRow("Language preference", when (language) { "ur" -> "Urdu selected"; "roman" -> "Roman Urdu selected"; else -> "English selected" } + " • Full translation rollout pending") {
                 showLanguage = true
             }
         }
