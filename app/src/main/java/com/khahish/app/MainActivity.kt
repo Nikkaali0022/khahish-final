@@ -251,7 +251,7 @@ fun KhahishApp() {
                                     activeCall = call
                                 },
                                 onError = { message ->
-                                    Toast.makeText(this@KhahishAppContextPlaceholder, message, Toast.LENGTH_LONG).show()
+                                    Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
                                 }
                             )
                         }
