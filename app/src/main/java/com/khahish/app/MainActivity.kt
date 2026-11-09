@@ -94,7 +94,9 @@ data class AppUser(
     val photoUrl: String = "",
     val username: String = "",
     val isOnline: Boolean = false,
-    val lastSeenAt: Long = 0L
+    val lastSeenAt: Long = 0L,
+    val lastSeenVisible: Boolean = true,
+    val onlineStatusVisible: Boolean = true
 )
 
 data class MessageItem(
@@ -105,7 +107,8 @@ data class MessageItem(
     val mediaType: String = "text",
     val timestamp: Long = 0L,
     val deliveredTo: List<String> = emptyList(),
-    val readBy: List<String> = emptyList()
+    val readBy: List<String> = emptyList(),
+    val hiddenFor: List<String> = emptyList()
 )
 
 private fun privateChatId(uid1: String, uid2: String): String =
