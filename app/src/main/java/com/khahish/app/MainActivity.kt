@@ -1098,6 +1098,8 @@ fun ConversationScreen(
     var peerLastSeenAt by remember { mutableStateOf(0L) }
     var peerLastSeenVisible by remember { mutableStateOf(true) }
     var peerOnlineStatusVisible by remember { mutableStateOf(true) }
+    var peerPhotoUrl by remember { mutableStateOf("") }
+    var peerBio by remember { mutableStateOf("") }
     var attachmentMenu by remember { mutableStateOf(false) }
     var isRecordingVoice by remember { mutableStateOf(false) }
     var voiceRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
@@ -1292,6 +1294,8 @@ fun ConversationScreen(
         val profileRegistration = db.collection("publicProfiles").document(chat.peerUid)
             .addSnapshotListener { snapshot, _ ->
                 peerOnline = snapshot?.getBoolean("isOnline") == true
+                peerPhotoUrl = snapshot?.getString("photoUrl").orEmpty()
+                peerBio = snapshot?.getString("bio").orEmpty()
                 peerLastSeenAt = snapshot?.getLong("lastSeenAt") ?: 0L
                 peerLastSeenVisible = snapshot?.getBoolean("lastSeenVisible") ?: true
                 peerOnlineStatusVisible = snapshot?.getBoolean("onlineStatusVisible") ?: true
@@ -1414,9 +1418,13 @@ fun ConversationScreen(
                     Text("Delete")
                 }
             } else {
-                Box(Modifier.size(40.dp).background(Color(0xFFDCEFE9), CircleShape),
-                    contentAlignment = Alignment.Center) {
-                    Text(chat.initials, color = Green, fontWeight = FontWeight.Bold)
+                if (peerPhotoUrl.isNotBlank()) {
+                    AsyncImage(model = peerPhotoUrl, contentDescription = "Profile picture",
+                        modifier = Modifier.size(40.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                } else {
+                    Box(Modifier.size(40.dp).background(Color(0xFFDCEFE9), CircleShape), contentAlignment = Alignment.Center) {
+                        Text(chat.initials, color = Green, fontWeight = FontWeight.Bold)
+                    }
                 }
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
@@ -1430,6 +1438,7 @@ fun ConversationScreen(
                         else -> "Khahish private chat"
                     }
                     Text(peerStatusText, color = if (peerTyping || peerStatusText == "Online") Green else Muted, fontSize = 11.sp)
+                    if (peerBio.isNotBlank()) Text(peerBio, color = Muted, fontSize = 10.sp, maxLines = 1)
                 }
                 IconButton(onClick = { showDisappearingOptions = true }) {
                     Icon(Icons.Default.Timer, "Disappearing messages", tint = if (disappearingDurationMs > 0L) Green else Muted)
