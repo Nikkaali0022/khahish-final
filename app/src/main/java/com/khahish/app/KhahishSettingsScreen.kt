@@ -129,7 +129,6 @@ fun KhahishSettingsScreen(
                 Toast.makeText(context, user?.email ?: "Account information unavailable", Toast.LENGTH_LONG).show()
             }
             KhahishSettingsItem(Icons.Default.Edit, "Edit profile", "Change your photo, name and bio") {
-                editName = user?.displayName.orEmpty()
                 showEditProfile = true
             }
             KhahishSettingsItem(Icons.Default.Block, "Blocked accounts", "Review and unblock people") {
