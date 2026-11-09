@@ -15,6 +15,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "842550847233-hdlnjjglkkkuo8bdlf1hlgfndf7s6p78.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.khahish.app",
+            "certificate_hash": "479128c15ede9d4dfc715ff4973a1acd1c79623d"
+          }
+        },
+        {
           "client_id": "842550847233-5bn5bkthbj7k3r6rh9enc8kiktiuqnkt.apps.googleusercontent.com",
           "client_type": 3
         }
