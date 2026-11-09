@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.sp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.SetOptions
 import java.util.Locale
 
@@ -51,6 +52,7 @@ fun KhahishSettingsScreen(
     var blockedUsers by remember { mutableStateOf(emptyList<String>()) }
     var loadingBlocked by remember { mutableStateOf(false) }
     var lastSeenVisible by remember { mutableStateOf(privacyPrefs.getBoolean("last_seen_visible", true)) }
+    var onlineStatusVisible by remember { mutableStateOf(privacyPrefs.getBoolean("online_status_visible", true)) }
     var readReceipts by remember { mutableStateOf(privacyPrefs.getBoolean("read_receipts", true)) }
     var animations by remember { mutableStateOf(prefs.getBoolean("animations_enabled", true)) }
     var slideTransitions by remember { mutableStateOf(prefs.getBoolean("slide_transitions_enabled", true)) }
@@ -122,26 +124,55 @@ fun KhahishSettingsScreen(
             }
             if (showPrivacy) {
                 KhahishSettingsSwitch(
-                    "Show last seen preference",
-                    "Save whether you want last-seen visibility enabled",
-                    lastSeenVisible
-                ) {
-                    lastSeenVisible = it
-                    privacyPrefs.edit().putBoolean("last_seen_visible", it).apply()
-                    if (uid.isNotBlank()) db.collection("users").document(uid)
-                        .set(mapOf("privacy" to mapOf("lastSeenVisible" to it, "readReceipts" to readReceipts)), SetOptions.merge())
+                    "Show online status",
+                    "Let contacts see when you are online",
+                    onlineStatusVisible
+                ) { enabled ->
+                    onlineStatusVisible = enabled
+                    privacyPrefs.edit().putBoolean("online_status_visible", enabled).apply()
+                    if (uid.isNotBlank()) {
+                        db.collection("users").document(uid).set(
+                            mapOf("privacy" to mapOf("onlineStatusVisible" to enabled, "lastSeenVisible" to lastSeenVisible, "readReceipts" to readReceipts)),
+                            SetOptions.merge()
+                        )
+                        db.collection("publicProfiles").document(uid).set(
+                            mapOf("onlineStatusVisible" to enabled, "isOnline" to enabled), SetOptions.merge()
+                        )
+                    }
                 }
                 KhahishSettingsSwitch(
-                    "Read receipts preference",
-                    "Save whether read receipts should be enabled",
-                    readReceipts
-                ) {
-                    readReceipts = it
-                    privacyPrefs.edit().putBoolean("read_receipts", it).apply()
-                    if (uid.isNotBlank()) db.collection("users").document(uid)
-                        .set(mapOf("privacy" to mapOf("lastSeenVisible" to lastSeenVisible, "readReceipts" to it)), SetOptions.merge())
+                    "Show last seen",
+                    "Let contacts see the time you were last active",
+                    lastSeenVisible
+                ) { enabled ->
+                    lastSeenVisible = enabled
+                    privacyPrefs.edit().putBoolean("last_seen_visible", enabled).apply()
+                    if (uid.isNotBlank()) {
+                        db.collection("users").document(uid).set(
+                            mapOf("privacy" to mapOf("onlineStatusVisible" to onlineStatusVisible, "lastSeenVisible" to enabled, "readReceipts" to readReceipts)),
+                            SetOptions.merge()
+                        )
+                        val publicUpdate = mutableMapOf<String, Any>(
+                            "lastSeenVisible" to enabled,
+                            "onlineStatusVisible" to onlineStatusVisible
+                        )
+                        if (!enabled) publicUpdate["lastSeenAt"] = FieldValue.delete()
+                        db.collection("publicProfiles").document(uid).set(publicUpdate, SetOptions.merge())
+                    }
                 }
-                Text("These preferences are saved; chat presence and receipt enforcement will be connected to these controls in the next integration pass.", color = Muted, fontSize = 11.sp)
+                KhahishSettingsSwitch(
+                    "Read receipts",
+                    "Let contacts know when you have read their messages",
+                    readReceipts
+                ) { enabled ->
+                    readReceipts = enabled
+                    privacyPrefs.edit().putBoolean("read_receipts", enabled).apply()
+                    if (uid.isNotBlank()) db.collection("users").document(uid).set(
+                        mapOf("privacy" to mapOf("onlineStatusVisible" to onlineStatusVisible, "lastSeenVisible" to lastSeenVisible, "readReceipts" to enabled)),
+                        SetOptions.merge()
+                    )
+                }
+                Text("Your online status, last seen and read-receipt preferences are now connected to your profile and chat behavior.", color = Muted, fontSize = 11.sp)
             }
         }
 
