@@ -2,8 +2,15 @@ package com.khahish.app
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -44,6 +51,9 @@ fun KhahishSettingsScreen(
 
     var showEditProfile by remember { mutableStateOf(false) }
     var editName by remember { mutableStateOf(user?.displayName.orEmpty()) }
+    var editBio by remember { mutableStateOf("") }
+    var profilePhotoUrl by remember { mutableStateOf(user?.photoUrl?.toString().orEmpty()) }
+    var uploadingPhoto by remember { mutableStateOf(false) }
     var savingProfile by remember { mutableStateOf(false) }
     var showBlocked by remember { mutableStateOf(false) }
     var showPrivacy by remember { mutableStateOf(false) }
@@ -56,6 +66,35 @@ fun KhahishSettingsScreen(
     var readReceipts by remember { mutableStateOf(privacyPrefs.getBoolean("read_receipts", true)) }
     var animations by remember { mutableStateOf(prefs.getBoolean("animations_enabled", true)) }
     var slideTransitions by remember { mutableStateOf(prefs.getBoolean("slide_transitions_enabled", true)) }
+
+    LaunchedEffect(uid) {
+        if (uid.isNotBlank()) {
+            db.collection("publicProfiles").document(uid).get()
+                .addOnSuccessListener { profile ->
+                    editBio = profile.getString("bio").orEmpty()
+                    profilePhotoUrl = profile.getString("photoUrl") ?: user?.photoUrl?.toString().orEmpty()
+                    editName = profile.getString("name") ?: user?.displayName.orEmpty()
+                }
+        }
+    }
+
+    val profilePhotoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null && uid.isNotBlank()) {
+            uploadingPhoto = true
+            uploadToCloudinary(context, uri, "image",
+                onSuccess = { url ->
+                    profilePhotoUrl = url
+                    val updates = mapOf("photoUrl" to url, "updatedAt" to System.currentTimeMillis())
+                    db.collection("users").document(uid).set(updates, SetOptions.merge())
+                    db.collection("publicProfiles").document(uid).set(updates, SetOptions.merge())
+                    user?.updateProfile(com.google.firebase.auth.UserProfileChangeRequest.Builder().setPhotoUri(Uri.parse(url)).build())
+                    uploadingPhoto = false
+                    Toast.makeText(context, "Profile picture updated", Toast.LENGTH_SHORT).show()
+                },
+                onError = { uploadingPhoto = false; Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
+            )
+        }
+    }
 
     LaunchedEffect(uid, showBlocked) {
         if (uid.isNotBlank() && showBlocked) {
@@ -89,7 +128,7 @@ fun KhahishSettingsScreen(
             KhahishSettingsItem(Icons.Default.Person, "Account information", user?.email ?: "Email unavailable") {
                 Toast.makeText(context, user?.email ?: "Account information unavailable", Toast.LENGTH_LONG).show()
             }
-            KhahishSettingsItem(Icons.Default.Edit, "Edit profile", "Change your display name") {
+            KhahishSettingsItem(Icons.Default.Edit, "Edit profile", "Change your photo, name and bio") {
                 editName = user?.displayName.orEmpty()
                 showEditProfile = true
             }
@@ -249,24 +288,44 @@ fun KhahishSettingsScreen(
             onDismissRequest = { if (!savingProfile) showEditProfile = false },
             title = { Text("Edit profile") },
             text = {
-                OutlinedTextField(
-                    value = editName,
-                    onValueChange = { editName = it },
-                    label = { Text("Display name") },
-                    singleLine = true
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        if (profilePhotoUrl.isNotBlank()) {
+                            AsyncImage(model = profilePhotoUrl, contentDescription = "Profile picture",
+                                modifier = Modifier.size(88.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                        } else {
+                            Box(Modifier.size(88.dp).clip(CircleShape).background(Green), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Person, null, tint = Color.White, modifier = Modifier.size(42.dp))
+                            }
+                        }
+                    }
+                    OutlinedButton(onClick = { profilePhotoPicker.launch("image/*") }, enabled = !uploadingPhoto, modifier = Modifier.fillMaxWidth()) {
+                        if (uploadingPhoto) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        else Icon(Icons.Default.PhotoCamera, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (uploadingPhoto) "Uploading photo…" else "Choose profile picture")
+                    }
+                    OutlinedTextField(value = editName, onValueChange = { editName = it },
+                        label = { Text("Display name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(value = editBio, onValueChange = { if (it.length <= 160) editBio = it },
+                        label = { Text("Bio") }, placeholder = { Text("Write something about yourself…") },
+                        minLines = 3, maxLines = 4, modifier = Modifier.fillMaxWidth())
+                    Text("${editBio.length}/160", color = Muted, fontSize = 11.sp)
+                }
             },
             confirmButton = {
-                TextButton(enabled = editName.isNotBlank() && !savingProfile, onClick = {
+                TextButton(enabled = editName.isNotBlank() && !savingProfile && !uploadingPhoto, onClick = {
                     val cleanName = editName.trim()
                     val current = auth.currentUser
                     if (current == null || uid.isBlank()) return@TextButton
                     savingProfile = true
-                    val profileRequest = UserProfileChangeRequest.Builder().setDisplayName(cleanName).build()
+                    val profileRequest = UserProfileChangeRequest.Builder().setDisplayName(cleanName).setPhotoUri(if (profilePhotoUrl.isBlank()) null else Uri.parse(profilePhotoUrl)).build()
                     current.updateProfile(profileRequest).addOnCompleteListener { authTask ->
                         val updates = mapOf(
                             "name" to cleanName,
                             "nameLowercase" to cleanName.lowercase(Locale.ROOT),
+                            "bio" to editBio.trim(),
+                            "photoUrl" to profilePhotoUrl,
                             "updatedAt" to System.currentTimeMillis()
                         )
                         db.collection("users").document(uid).set(updates, SetOptions.merge())
