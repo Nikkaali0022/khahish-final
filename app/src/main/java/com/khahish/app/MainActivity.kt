@@ -166,6 +166,8 @@ fun KhahishApp() {
     var tab by remember { mutableStateOf("Chats") }
     var selectedChat by remember { mutableStateOf<Chat?>(null) }
     var showNewChat by remember { mutableStateOf(false) }
+    var activeCall by remember { mutableStateOf<KhahishCall?>(null) }
+    var incomingCall by remember { mutableStateOf(false) }
 
     DisposableEffect(auth) {
         val listener = FirebaseAuth.AuthStateListener {
@@ -175,11 +177,27 @@ fun KhahishApp() {
         onDispose { auth.removeAuthStateListener(listener) }
     }
 
+    DisposableEffect(currentUser?.uid) {
+        val uid = currentUser?.uid
+        if (uid.isNullOrBlank()) return@DisposableEffect onDispose { }
+        val registration = KhahishCallRepository().listenForIncomingCalls(uid) { incoming ->
+            if (incoming != null && activeCall == null) {
+                incomingCall = true
+                activeCall = incoming
+            }
+        }
+        onDispose { registration.remove() }
+    }
+
     BackHandler(
         enabled = currentUser != null &&
-            (selectedChat != null || showNewChat || tab != "Chats")
+            (activeCall != null || selectedChat != null || showNewChat || tab != "Chats")
     ) {
         when {
+            activeCall != null -> {
+                activeCall = null
+                incomingCall = false
+            }
             selectedChat != null -> selectedChat = null
             showNewChat -> showNewChat = false
             tab != "Chats" -> tab = "Chats"
@@ -206,10 +224,35 @@ fun KhahishApp() {
 
                 if (user == null) {
                     AuthScreen { currentUser = auth.currentUser }
+                } else if (activeCall != null) {
+                    KhahishCallScreen(
+                        call = activeCall!!,
+                        isIncoming = incomingCall,
+                        onExit = {
+                            activeCall = null
+                            incomingCall = false
+                        }
+                    )
                 } else if (selectedChat != null) {
                     ConversationScreen(
                         chat = selectedChat!!,
-                        onBack = { selectedChat = null }
+                        onBack = { selectedChat = null },
+                        onStartCall = { isVideo ->
+                            KhahishCallRepository().createOutgoingCall(
+                                callerUid = user.uid,
+                                callerName = user.displayName ?: "Khahish User",
+                                calleeUid = selectedChat!!.peerUid,
+                                calleeName = selectedChat!!.name,
+                                isVideo = isVideo,
+                                onSuccess = { call ->
+                                    incomingCall = false
+                                    activeCall = call
+                                },
+                                onError = { message ->
+                                    Toast.makeText(this@KhahishAppContextPlaceholder, message, Toast.LENGTH_LONG).show()
+                                }
+                            )
+                        }
                     )
                 } else if (showNewChat) {
                     NewChatScreen(
@@ -323,9 +366,8 @@ fun KhahishApp() {
                                 modifier = Modifier.padding(padding)
                             )
 
-                            "Calls" -> PlaceholderPage(
-                                title = "Calls",
-                                description = "Call history will appear here after calling is integrated.",
+                            "Calls" -> KhahishCallHistoryScreen(
+                                uid = user.uid,
                                 modifier = Modifier.padding(padding)
                             )
 
@@ -932,7 +974,8 @@ fun ChatList(
 @Composable
 fun ConversationScreen(
     chat: Chat,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onStartCall: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
     val db = remember { FirebaseFirestore.getInstance() }
@@ -1157,15 +1200,11 @@ fun ConversationScreen(
                 )
             }
 
-            IconButton(onClick = {
-                startKhahishCall(context, chat, false)
-            }) {
+            IconButton(onClick = { onStartCall(false) }) {
                 Icon(Icons.Default.Call, "Voice call", tint = Green)
             }
 
-            IconButton(onClick = {
-                startKhahishCall(context, chat, true)
-            }) {
+            IconButton(onClick = { onStartCall(true) }) {
                 Icon(Icons.Default.Videocam, "Video call", tint = Green)
             }
         }
