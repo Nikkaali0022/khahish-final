@@ -1091,6 +1091,10 @@ fun ConversationScreen(
     var isUploading by remember { mutableStateOf(false) }
     var isSending by remember { mutableStateOf(false) }
     var peerTyping by remember { mutableStateOf(false) }
+    var peerOnline by remember { mutableStateOf(false) }
+    var peerLastSeenAt by remember { mutableStateOf(0L) }
+    var peerLastSeenVisible by remember { mutableStateOf(true) }
+    var peerOnlineStatusVisible by remember { mutableStateOf(true) }
     var attachmentMenu by remember { mutableStateOf(false) }
     var isRecordingVoice by remember { mutableStateOf(false) }
     var voiceRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
@@ -1272,6 +1276,17 @@ fun ConversationScreen(
         }
     }
 
+    DisposableEffect(chat.peerUid) {
+        val profileRegistration = db.collection("publicProfiles").document(chat.peerUid)
+            .addSnapshotListener { snapshot, _ ->
+                peerOnline = snapshot?.getBoolean("isOnline") == true
+                peerLastSeenAt = snapshot?.getLong("lastSeenAt") ?: 0L
+                peerLastSeenVisible = snapshot?.getBoolean("lastSeenVisible") ?: true
+                peerOnlineStatusVisible = snapshot?.getBoolean("onlineStatusVisible") ?: true
+            }
+        onDispose { profileRegistration.remove() }
+    }
+
     DisposableEffect(chat.id, currentUserId) {
         val messagesRegistration = chatRef.collection("messages")
             .orderBy("timestamp", Query.Direction.ASCENDING)
@@ -1385,8 +1400,15 @@ fun ConversationScreen(
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Text(chat.name, fontWeight = FontWeight.SemiBold, color = Ink)
-                    Text(if (peerTyping) "typing..." else "Tap and hold a message to select",
-                        color = if (peerTyping) Green else Muted, fontSize = 11.sp)
+                    val peerStatusText = when {
+                        peerTyping -> "typing..."
+                        peerOnline && peerOnlineStatusVisible -> "Online"
+                        peerLastSeenVisible && peerLastSeenAt > 0L ->
+                            "Last seen " + java.text.SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault())
+                                .format(java.util.Date(peerLastSeenAt))
+                        else -> "Khahish private chat"
+                    }
+                    Text(peerStatusText, color = if (peerTyping || peerStatusText == "Online") Green else Muted, fontSize = 11.sp)
                 }
                 IconButton(onClick = { onStartCall(false) }) { Icon(Icons.Default.Call, "Voice call", tint = Green) }
                 IconButton(onClick = { onStartCall(true) }) { Icon(Icons.Default.Videocam, "Video call", tint = Green) }
