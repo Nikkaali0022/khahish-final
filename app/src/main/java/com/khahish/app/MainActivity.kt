@@ -1836,51 +1836,46 @@ private fun sendChatMessage(
     onComplete: () -> Unit
 ) {
     val now = System.currentTimeMillis()
-
-    val data = hashMapOf<String, Any>(
-        "senderId" to senderId,
-        "text" to messageText,
-        "imageUrl" to mediaUrl,
-        "mediaType" to mediaType,
-        "timestamp" to now,
-        "deliveredTo" to emptyList<String>(),
-        "readBy" to listOf(senderId)
-    )
-
-    chatRef.collection("messages")
-        .add(data)
-        .addOnSuccessListener {
-            val preview = when (mediaType) {
-                "image" -> "Photo"
-                "video" -> "Video"
-                "audio" -> "Audio"
-                "document" -> "Document"
-                "location" -> "Location"
-                else -> messageText
-            }
-
-            chatRef.update(
-                mapOf(
+    chatRef.get().addOnSuccessListener { chatSnapshot ->
+        val duration = chatSnapshot.getLong("disappearingDurationMs") ?: 0L
+        val data = hashMapOf<String, Any>(
+            "senderId" to senderId,
+            "text" to messageText,
+            "imageUrl" to mediaUrl,
+            "mediaType" to mediaType,
+            "timestamp" to now,
+            "deliveredTo" to emptyList<String>(),
+            "readBy" to listOf(senderId)
+        )
+        if (duration > 0L) data["expiresAt"] = now + duration
+        chatRef.collection("messages").add(data)
+            .addOnSuccessListener {
+                val preview = when (mediaType) {
+                    "image" -> "Photo"
+                    "video" -> "Video"
+                    "audio" -> "Audio"
+                    "document" -> "Document"
+                    "location" -> "Location"
+                    else -> messageText
+                }
+                chatRef.update(mapOf(
                     "lastMessage" to preview,
                     "lastMessageAt" to now,
                     "updatedAt" to now
-                )
-            ).addOnCompleteListener { updateTask ->
-                if (!updateTask.isSuccessful) {
-                    showToast(
-                        context,
-                        "Message sent, but chat preview could not update."
-                    )
+                )).addOnCompleteListener { updateTask ->
+                    if (!updateTask.isSuccessful) showToast(context, "Message sent, but chat preview could not update.")
+                    onComplete()
                 }
-                onComplete()
             }
-        }
-        .addOnFailureListener { error ->
-            onComplete()
-            showToast(context, "Message failed: ${error.message}")
-        }
+            .addOnFailureListener { error ->
+                onComplete()
+                showToast(context, "Message failed: ${error.message}")
+            }
+    }.addOnFailureListener { error ->
+        onComplete()
+        showToast(context, "Could not read chat settings: ${error.message}")
+    }
 }
-
 private fun openSharedUrl(context: Context, url: String) {
     if (url.isBlank()) {
         showToast(context, "Media link is not available")
