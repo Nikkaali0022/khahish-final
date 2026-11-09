@@ -1,6 +1,9 @@
 package com.khahish.app
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
+import android.media.MediaRecorder
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -40,6 +43,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.statusBarsPadding
 import coil.compose.AsyncImage
 import com.google.firebase.auth.FirebaseAuth
@@ -365,9 +369,9 @@ fun KhahishApp() {
                                 onOpen = { selectedChat = it }
                             )
 
-                            "Updates" -> PlaceholderPage(
-                                title = "Updates",
-                                description = "Your updates will appear here.",
+                            "Updates" -> KhahishUpdatesScreen(
+                                currentUid = user.uid,
+                                currentName = user.displayName ?: "Khahish User",
                                 modifier = Modifier.padding(padding)
                             )
 
@@ -997,6 +1001,9 @@ fun ConversationScreen(
     var isSending by remember { mutableStateOf(false) }
     var peerTyping by remember { mutableStateOf(false) }
     var attachmentMenu by remember { mutableStateOf(false) }
+    var isRecordingVoice by remember { mutableStateOf(false) }
+    var voiceRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
+    var voiceRecordingFile by remember { mutableStateOf<File?>(null) }
 
     val imagePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
@@ -1083,6 +1090,92 @@ fun ConversationScreen(
                     showToast(context, it)
                 }
             )
+        }
+    }
+
+
+    fun startVoiceRecording() {
+        try {
+            val output = File(context.cacheDir, "khahish_voice_${System.currentTimeMillis()}.m4a")
+            val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                MediaRecorder(context)
+            } else {
+                @Suppress("DEPRECATION")
+                MediaRecorder()
+            }
+            recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
+            recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+            recorder.setAudioEncodingBitRate(96000)
+            recorder.setAudioSamplingRate(44100)
+            recorder.setOutputFile(output.absolutePath)
+            recorder.prepare()
+            recorder.start()
+            voiceRecorder = recorder
+            voiceRecordingFile = output
+            isRecordingVoice = true
+            showToast(context, "Recording… tap the mic again to send")
+        } catch (error: Exception) {
+            voiceRecorder?.release()
+            voiceRecorder = null
+            isRecordingVoice = false
+            showToast(context, "Could not start recording: ${error.message}")
+        }
+    }
+
+    fun stopVoiceRecordingAndSend() {
+        val recorder = voiceRecorder
+        val file = voiceRecordingFile
+        try {
+            recorder?.stop()
+        } catch (_: Exception) {
+            file?.delete()
+            showToast(context, "Voice recording was too short. Please try again.")
+        } finally {
+            recorder?.release()
+            voiceRecorder = null
+            isRecordingVoice = false
+            voiceRecordingFile = null
+        }
+        if (file == null || !file.exists() || file.length() < 1000L) {
+            file?.delete()
+            return
+        }
+        isUploading = true
+        uploadToCloudinary(
+            context, Uri.fromFile(file), "video",
+            onSuccess = { url ->
+                isUploading = false
+                isSending = true
+                sendChatMessage(chatRef, currentUserId, "", url, "audio", context) {
+                    isSending = false
+                    file.delete()
+                }
+            },
+            onError = {
+                isUploading = false
+                file.delete()
+                showToast(context, it)
+            }
+        )
+    }
+
+    val voicePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) startVoiceRecording()
+        else showToast(context, "Microphone permission is required for voice messages.")
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            try {
+                voiceRecorder?.stop()
+            } catch (_: Exception) {
+            }
+            voiceRecorder?.release()
+            voiceRecorder = null
+            voiceRecordingFile?.delete()
         }
     }
 
@@ -1407,13 +1500,26 @@ fun ConversationScreen(
                 singleLine = true
             )
 
-            IconButton(onClick = {
-                showToast(
-                    context,
-                    "Voice recording is not available yet. You can attach an audio file."
+            IconButton(
+                enabled = !isUploading && !isSending,
+                onClick = {
+                    if (isRecordingVoice) {
+                        stopVoiceRecordingAndSend()
+                    } else if (ContextCompat.checkSelfPermission(
+                            context, Manifest.permission.RECORD_AUDIO
+                        ) == PackageManager.PERMISSION_GRANTED
+                    ) {
+                        startVoiceRecording()
+                    } else {
+                        voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                }
+            ) {
+                Icon(
+                    if (isRecordingVoice) Icons.Default.Stop else Icons.Default.Mic,
+                    if (isRecordingVoice) "Stop and send voice message" else "Record voice message",
+                    tint = if (isRecordingVoice) Color(0xFFE54848) else Green
                 )
-            }) {
-                Icon(Icons.Default.Mic, "Voice message", tint = Green)
             }
 
             IconButton(
@@ -2087,7 +2193,7 @@ private fun SettingsItem(
     }
 }
 
-private fun uploadToCloudinary(
+internal fun uploadToCloudinary(
     context: Context,
     uri: Uri,
     resourceType: String,
