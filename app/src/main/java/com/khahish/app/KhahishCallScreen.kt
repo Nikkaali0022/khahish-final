@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import io.agora.rtc2.video.VideoCanvas
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -44,7 +45,9 @@ fun KhahishCallScreen(
     var cameraEnabled by remember(call.id) { mutableStateOf(true) }
     var credentials by remember(call.id) { mutableStateOf<AgoraRtcCredentials?>(null) }
     var session by remember(call.id) { mutableStateOf<KhahishAgoraSession?>(null) }
-    var permissionRequested by remember(call.id) { mutableStateOf(false) }
+    var connectionStarted by remember(call.id) { mutableStateOf(false) }
+    var remoteUid by remember(call.id) { mutableStateOf<Int?>(null) }
+    val latestSession by rememberUpdatedState(session)
 
     val requiredPermissions = remember(call.isVideo) {
         if (call.isVideo) arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA)
@@ -66,7 +69,7 @@ fun KhahishCallScreen(
                     credentials = token,
                     isVideoCall = currentCall.isVideo,
                     onJoined = { isJoined = true; statusText = "Connected" },
-                    onRemoteUserJoined = { statusText = "Connected" },
+                    onRemoteUserJoined = { uid -> remoteUid = uid; statusText = "Connected" },
                     onRemoteUserLeft = { statusText = "The other person left the call" },
                     onFailure = { errorText = it }
                 )
@@ -80,16 +83,20 @@ fun KhahishCallScreen(
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
-        permissionRequested = true
         if (results.values.all { it }) requestCredentialsAndJoin()
-        else errorText = if (call.isVideo) {
+        else {
+            connectionStarted = false
+            errorText = if (call.isVideo) {
             "Microphone and camera permissions are required."
         } else {
             "Microphone permission is required."
+            }
         }
     }
 
     fun connectIfAllowed() {
+        if (connectionStarted) return
+        connectionStarted = true
         if (permissionsGranted()) {
             requestCredentialsAndJoin()
         } else {
@@ -104,7 +111,7 @@ fun KhahishCallScreen(
                 when (updated.status) {
                     "accepted" -> {
                         statusText = "Connecting…"
-                        if (!isIncoming && session == null && !permissionRequested) {
+                        if (!isIncoming && session == null && !connectionStarted) {
                             connectIfAllowed()
                         }
                     }
@@ -117,7 +124,7 @@ fun KhahishCallScreen(
         }
         onDispose {
             registration.remove()
-            session?.leave()
+            latestSession?.leave()
         }
     }
 
@@ -136,14 +143,26 @@ fun KhahishCallScreen(
 
         if (call.isVideo && credentials != null) {
             Spacer(Modifier.height(24.dp))
-            AndroidView(
-                modifier = Modifier.fillMaxWidth().height(300.dp),
-                factory = { viewContext ->
-                    SurfaceView(viewContext).also { surface ->
-                        // The Agora session attaches the local preview in the next UI integration step.
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                AndroidView(
+                    modifier = Modifier.weight(1f).height(280.dp),
+                    factory = { viewContext ->
+                        SurfaceView(viewContext).also { surface ->
+                            session?.setupLocalVideo(surface)
+                        }
                     }
+                )
+                if (remoteUid != null) {
+                    AndroidView(
+                        modifier = Modifier.weight(1f).height(280.dp),
+                        factory = { viewContext ->
+                            SurfaceView(viewContext).also { surface ->
+                                session?.setupRemoteVideo(surface, remoteUid!!)
+                            }
+                        }
+                    )
                 }
-            )
+            }
         } else {
             Spacer(Modifier.height(50.dp))
             Box(
