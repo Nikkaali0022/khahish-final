@@ -949,6 +949,7 @@ fun ChatList(
     val db = remember { FirebaseFirestore.getInstance() }
 
     var chats by remember { mutableStateOf(listOf<Chat>()) }
+    var unreadCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     var loading by remember { mutableStateOf(true) }
     var search by remember { mutableStateOf("") }
 
@@ -993,6 +994,30 @@ fun ChatList(
             }
 
         onDispose { registration.remove() }
+    }
+
+    // Har conversation ke unread messages ko real-time track karein.
+    // Existing readBy receipt se sirf doosre user ke unread messages count hote hain.
+    DisposableEffect(chats.map { it.id }.joinToString("|"), currentUid) {
+        val registrations = chats.map { chat ->
+            chat.id to db.collection("chats").document(chat.id)
+                .collection("messages")
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null || snapshot == null) return@addSnapshotListener
+                    val count = snapshot.documents.count { doc ->
+                        val senderId = doc.getString("senderId").orEmpty()
+                        val readBy = doc.get("readBy") as? List<*>
+                            ?: emptyList<Any>()
+                        senderId.isNotBlank() &&
+                            senderId != currentUid &&
+                            currentUid !in readBy
+                    }
+                    unreadCounts = unreadCounts.toMutableMap().apply {
+                        if (count > 0) put(chat.id, count) else remove(chat.id)
+                    }
+                }
+        }
+        onDispose { registrations.forEach { it.second.remove() } }
     }
 
     val filtered = chats.filter {
@@ -1088,6 +1113,25 @@ fun ChatList(
                                 fontSize = 12.sp,
                                 maxLines = 1
                             )
+                        }
+
+                        val unreadCount = unreadCounts[chat.id] ?: 0
+                        if (unreadCount > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .padding(end = 8.dp)
+                                    .defaultMinSize(minWidth = 25.dp, minHeight = 25.dp)
+                                    .background(Color(0xFF16A66A), CircleShape)
+                                    .padding(horizontal = 7.dp, vertical = 4.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = if (unreadCount > 99) "99+" else unreadCount.toString(),
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
 
                         Icon(
