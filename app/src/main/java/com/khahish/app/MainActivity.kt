@@ -193,7 +193,7 @@ fun KhahishApp() {
 
     BackHandler(
         enabled = currentUser != null &&
-            (activeCall != null || selectedChat != null || showNewChat || tab != "Chats")
+            (selectedChat != null || showNewChat || tab != "Chats")
     ) {
         when {
             activeCall != null -> {
