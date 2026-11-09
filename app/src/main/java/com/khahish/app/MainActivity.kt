@@ -64,10 +64,10 @@ import java.util.concurrent.TimeUnit
 private const val CLOUDINARY_CLOUD_NAME = "koctiaes"
 private const val CLOUDINARY_UPLOAD_PRESET = "ml_default"
 
-private val Green = Color(0xFF18A889)
-private val Ink = Color(0xFF101A19)
-private val Pale = Color(0xFFF4F8F6)
-private val Muted = Color(0xFF788681)
+internal val Green = Color(0xFF18A889)
+internal val Ink = Color(0xFF101A19)
+internal val Pale = Color(0xFFF4F8F6)
+internal val Muted = Color(0xFF788681)
 
 data class Chat(
     val id: String,
