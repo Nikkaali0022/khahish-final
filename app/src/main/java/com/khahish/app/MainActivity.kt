@@ -18,6 +18,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -166,6 +170,15 @@ class MainActivity : ComponentActivity() {
 fun KhahishApp() {
     val auth = remember { FirebaseAuth.getInstance() }
     val appContext = LocalContext.current
+    val uiPreferences = remember {
+        appContext.getSharedPreferences("khahish_ui_settings", Context.MODE_PRIVATE)
+    }
+    var animationsEnabled by remember {
+        mutableStateOf(uiPreferences.getBoolean("animations_enabled", true))
+    }
+    var slideTransitionsEnabled by remember {
+        mutableStateOf(uiPreferences.getBoolean("slide_transitions_enabled", true))
+    }
 
     var currentUser by remember { mutableStateOf(auth.currentUser) }
     var tab by remember { mutableStateOf("Chats") }
@@ -362,34 +375,50 @@ fun KhahishApp() {
                             }
                         }
                     ) { padding ->
-                        when (tab) {
-                            "Chats" -> ChatList(
-                                modifier = Modifier.padding(padding),
-                                currentUid = user.uid,
-                                onOpen = { selectedChat = it }
-                            )
-
-                            "Updates" -> KhahishUpdatesScreen(
-                                currentUid = user.uid,
-                                currentName = user.displayName ?: "Khahish User",
-                                modifier = Modifier.padding(padding)
-                            )
-
-                            "Calls" -> KhahishCallHistoryScreen(
-                                uid = user.uid,
-                                modifier = Modifier.padding(padding)
-                            )
-
-                            "Settings" -> SettingsPage(
-                                modifier = Modifier.padding(padding),
-                                onLogout = {
-                                    auth.signOut()
-                                    currentUser = null
-                                    selectedChat = null
-                                    showNewChat = false
-                                    tab = "Chats"
+                        AnimatedContent(
+                            targetState = tab,
+                            transitionSpec = {
+                                when {
+                                    animationsEnabled && slideTransitionsEnabled ->
+                                        (slideInHorizontally { it / 4 } + fadeIn()) togetherWith
+                                            (slideOutHorizontally { -it / 4 } + fadeOut())
+                                    animationsEnabled -> fadeIn() togetherWith fadeOut()
+                                    else -> EnterTransition.None togetherWith ExitTransition.None
                                 }
-                            )
+                            },
+                            label = "main_tab_transition"
+                        ) { selectedTab ->
+                            when (selectedTab) {
+                                "Chats" -> ChatList(
+                                    modifier = Modifier.padding(padding),
+                                    currentUid = user.uid,
+                                    onOpen = { selectedChat = it }
+                                )
+
+                                "Updates" -> KhahishUpdatesScreen(
+                                    currentUid = user.uid,
+                                    currentName = user.displayName ?: "Khahish User",
+                                    modifier = Modifier.padding(padding)
+                                )
+
+                                "Calls" -> KhahishCallHistoryScreen(
+                                    uid = user.uid,
+                                    modifier = Modifier.padding(padding)
+                                )
+
+                                "Settings" -> KhahishSettingsScreen(
+                                    modifier = Modifier.padding(padding),
+                                    onLogout = {
+                                        auth.signOut()
+                                        currentUser = null
+                                        selectedChat = null
+                                        showNewChat = false
+                                        tab = "Chats"
+                                    },
+                                    onAnimationsChanged = { animationsEnabled = it },
+                                    onSlideTransitionsChanged = { slideTransitionsEnabled = it }
+                                )
+                            }
                         }
                     }
                 }
@@ -1878,7 +1907,7 @@ fun SettingsPage(
 }
 
 @Composable
-private fun StorageMediaPage(
+internal fun StorageMediaPage(
     modifier: Modifier = Modifier,
     onBack: () -> Unit
 ) {
