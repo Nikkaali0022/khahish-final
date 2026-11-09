@@ -558,11 +558,32 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
         Spacer(Modifier.height(16.dp))
 
         Text(
-            "Khahish (خواہش)",
-            fontSize = 26.sp,
-            fontWeight = FontWeight.Bold,
+            "Khahish",
+            fontSize = 28.sp,
+            fontWeight = FontWeight.ExtraBold,
+            letterSpacing = 0.4.sp,
             color = Ink
         )
+
+        Spacer(Modifier.height(3.dp))
+
+        Text(
+            "Best Community Platform",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.6.sp,
+            color = Green
+        )
+
+        Text(
+            "Developed by Nikka Ali",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.3.sp,
+            color = Muted
+        )
+
+        Spacer(Modifier.height(8.dp))
 
         Text(
             if (isSignUp) "Create your account" else "Welcome back",
