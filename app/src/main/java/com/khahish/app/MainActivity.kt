@@ -161,6 +161,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun KhahishApp() {
     val auth = remember { FirebaseAuth.getInstance() }
+    val appContext = LocalContext.current
 
     var currentUser by remember { mutableStateOf(auth.currentUser) }
     var tab by remember { mutableStateOf("Chats") }
@@ -168,6 +169,7 @@ fun KhahishApp() {
     var showNewChat by remember { mutableStateOf(false) }
     var activeCall by remember { mutableStateOf<KhahishCall?>(null) }
     var incomingCall by remember { mutableStateOf(false) }
+    val latestActiveCall by rememberUpdatedState(activeCall)
 
     DisposableEffect(auth) {
         val listener = FirebaseAuth.AuthStateListener {
@@ -181,7 +183,7 @@ fun KhahishApp() {
         val uid = currentUser?.uid
         if (uid.isNullOrBlank()) return@DisposableEffect onDispose { }
         val registration = KhahishCallRepository().listenForIncomingCalls(uid) { incoming ->
-            if (incoming != null && activeCall == null) {
+            if (incoming != null && latestActiveCall == null) {
                 incomingCall = true
                 activeCall = incoming
             }
