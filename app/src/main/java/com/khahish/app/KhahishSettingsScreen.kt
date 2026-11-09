@@ -201,6 +201,15 @@ fun KhahishSettingsScreen(
             Spacer(Modifier.width(8.dp))
             Text("Log out")
         }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            "Developed by Nikka Ali",
+            modifier = Modifier.fillMaxWidth().padding(bottom = 18.dp),
+            color = Muted,
+            fontSize = 12.sp,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            fontWeight = FontWeight.Medium
+        )
         Spacer(Modifier.height(28.dp))
     }
 
