@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.MediaRecorder
+import android.media.MediaPlayer
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -1455,12 +1456,7 @@ fun ConversationScreen(
                                 context
                             )
 
-                            "audio" -> MediaOpenRow(
-                                "Audio file — tap to play",
-                                Icons.Default.PlayArrow,
-                                msg.imageUrl,
-                                context
-                            )
+                            "audio" -> AudioMessagePlayer(msg.imageUrl)
 
                             "document" -> MediaOpenRow(
                                 "Document — tap to open",
@@ -1671,6 +1667,65 @@ fun ConversationScreen(
             },
             dismissButton = { TextButton(onClick = { showDeleteOptions = false }) { Text("Cancel") } }
         )
+    }
+}
+
+@Composable
+private fun AudioMessagePlayer(url: String) {
+    var player by remember(url) { mutableStateOf<MediaPlayer?>(null) }
+    var playing by remember(url) { mutableStateOf(false) }
+    var loading by remember(url) { mutableStateOf(false) }
+    DisposableEffect(url) {
+        onDispose {
+            try { player?.release() } catch (_: Exception) { }
+            player = null
+        }
+    }
+    Row(
+        Modifier.fillMaxWidth().background(Pale, RoundedCornerShape(12.dp)).padding(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconButton(enabled = !loading, onClick = {
+            if (playing) {
+                player?.pause()
+                playing = false
+            } else if (player != null) {
+                player?.start()
+                playing = true
+            } else {
+                loading = true
+                val created = MediaPlayer()
+                try {
+                    created.setDataSource(url)
+                    created.setOnPreparedListener { prepared ->
+                        loading = false
+                        player = prepared
+                        prepared.start()
+                        playing = true
+                    }
+                    created.setOnCompletionListener { completed ->
+                        playing = false
+                        completed.seekTo(0)
+                    }
+                    created.setOnErrorListener { failed, _, _ ->
+                        loading = false
+                        playing = false
+                        failed.release()
+                        player = null
+                        true
+                    }
+                    created.prepareAsync()
+                } catch (_: Exception) {
+                    loading = false
+                    created.release()
+                    Toast.makeText(LocalContext.current, "Unable to play this voice message", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }) {
+            if (loading) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+            else Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (playing) "Pause voice message" else "Play voice message", tint = Green)
+        }
+        Text(if (loading) "Loading voice message…" else if (playing) "Playing voice message" else "Voice message", color = Ink, fontSize = 13.sp)
     }
 }
 
