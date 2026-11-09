@@ -152,9 +152,18 @@ private fun saveUserToFirestore(
 }
 
 class MainActivity : ComponentActivity() {
+    private var appInForeground = false
+    private var presenceUid: String? = null
+    private val presenceAuthListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+        val newUid = firebaseAuth.currentUser?.uid
+        if (presenceUid != null && presenceUid != newUid) updateKhahishPresence(presenceUid, false)
+        presenceUid = newUid
+        if (appInForeground) updateKhahishPresence(newUid, true)
+    }
+
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
-
+        FirebaseAuth.getInstance().addAuthStateListener(presenceAuthListener)
         window.statusBarColor = android.graphics.Color.WHITE
         window.navigationBarColor = android.graphics.Color.WHITE
 
@@ -167,6 +176,46 @@ class MainActivity : ComponentActivity() {
         setContent {
             KhahishApp()
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        appInForeground = true
+        presenceUid = FirebaseAuth.getInstance().currentUser?.uid
+        updateKhahishPresence(presenceUid, true)
+    }
+
+    override fun onStop() {
+        appInForeground = false
+        updateKhahishPresence(presenceUid, false)
+        super.onStop()
+    }
+
+    override fun onDestroy() {
+        FirebaseAuth.getInstance().removeAuthStateListener(presenceAuthListener)
+        super.onDestroy()
+    }
+
+    private fun updateKhahishPresence(uid: String?, foreground: Boolean) {
+        if (uid.isNullOrBlank()) return
+        val prefs = getSharedPreferences("khahish_privacy_settings", Context.MODE_PRIVATE)
+        val showOnline = prefs.getBoolean("online_status_visible", true)
+        val showLastSeen = prefs.getBoolean("last_seen_visible", true)
+        val now = System.currentTimeMillis()
+        val privateUpdates = hashMapOf<String, Any>(
+            "isOnline" to (foreground && showOnline),
+            "lastSeenAt" to if (foreground) FieldValue.delete() else now
+        )
+        val publicUpdates = hashMapOf<String, Any>(
+            "isOnline" to (foreground && showOnline),
+            "onlineStatusVisible" to showOnline,
+            "lastSeenVisible" to showLastSeen
+        )
+        if (!foreground && showLastSeen) publicUpdates["lastSeenAt"] = now
+        else if (!showLastSeen) publicUpdates["lastSeenAt"] = FieldValue.delete()
+        val db = FirebaseFirestore.getInstance()
+        db.collection("users").document(uid).set(privateUpdates, SetOptions.merge())
+        db.collection("publicProfiles").document(uid).set(publicUpdates, SetOptions.merge())
     }
 }
 
