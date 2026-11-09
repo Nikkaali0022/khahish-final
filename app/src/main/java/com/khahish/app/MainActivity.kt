@@ -110,7 +110,8 @@ data class MessageItem(
     val timestamp: Long = 0L,
     val deliveredTo: List<String> = emptyList(),
     val readBy: List<String> = emptyList(),
-    val hiddenFor: List<String> = emptyList()
+    val hiddenFor: List<String> = emptyList(),
+    val expiresAt: Long = 0L
 )
 
 private fun privateChatId(uid1: String, uid2: String): String =
@@ -799,7 +800,8 @@ fun NewChatScreen(
                                     ),
                                     "lastMessage" to "",
                                     "lastMessageAt" to 0L,
-                                    "updatedAt" to now
+                                    "updatedAt" to now,
+                                    "disappearingDurationMs" to 0L
                                 )
 
                                 chatRef.get()
@@ -1102,6 +1104,8 @@ fun ConversationScreen(
     var voiceRecordingFile by remember { mutableStateOf<File?>(null) }
     var selectedMessageIds by remember { mutableStateOf(setOf<String>()) }
     var showDeleteOptions by remember { mutableStateOf(false) }
+    var showDisappearingOptions by remember { mutableStateOf(false) }
+    var disappearingDurationMs by remember { mutableStateOf(0L) }
 
     val imagePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
@@ -1277,6 +1281,13 @@ fun ConversationScreen(
         }
     }
 
+    DisposableEffect(chat.id) {
+        val chatSettingsRegistration = chatRef.addSnapshotListener { snapshot, _ ->
+            disappearingDurationMs = snapshot?.getLong("disappearingDurationMs") ?: 0L
+        }
+        onDispose { chatSettingsRegistration.remove() }
+    }
+
     DisposableEffect(chat.peerUid) {
         val profileRegistration = db.collection("publicProfiles").document(chat.peerUid)
             .addSnapshotListener { snapshot, _ ->
@@ -1307,9 +1318,18 @@ fun ConversationScreen(
                         readBy = doc.get("readBy") as? List<String>
                             ?: emptyList(),
                         hiddenFor = doc.get("hiddenFor") as? List<String>
-                            ?: emptyList()
+                            ?: emptyList(),
+                        expiresAt = doc.getLong("expiresAt") ?: 0L
                     )
-                }.filter { currentUserId !in it.hiddenFor }
+                }.filter { currentUserId !in it.hiddenFor && (it.expiresAt == 0L || it.expiresAt > System.currentTimeMillis()) }
+
+                // Remove expired messages from Firestore once their deadline has passed.
+                snapshot.documents.forEach { doc ->
+                    val expiry = doc.getLong("expiresAt") ?: 0L
+                    if (expiry > 0L && expiry <= System.currentTimeMillis()) {
+                        doc.reference.delete()
+                    }
+                }
 
                 // Sirf un messages par receipt update karein
                 // jin par current user ki receipt abhi maujood nahi.
@@ -1410,6 +1430,9 @@ fun ConversationScreen(
                         else -> "Khahish private chat"
                     }
                     Text(peerStatusText, color = if (peerTyping || peerStatusText == "Online") Green else Muted, fontSize = 11.sp)
+                }
+                IconButton(onClick = { showDisappearingOptions = true }) {
+                    Icon(Icons.Default.Timer, "Disappearing messages", tint = if (disappearingDurationMs > 0L) Green else Muted)
                 }
                 IconButton(onClick = { onStartCall(false) }) { Icon(Icons.Default.Call, "Voice call", tint = Green) }
                 IconButton(onClick = { onStartCall(true) }) { Icon(Icons.Default.Videocam, "Video call", tint = Green) }
@@ -1656,6 +1679,36 @@ fun ConversationScreen(
                 Icon(Icons.Default.Send, "Send", tint = Green)
             }
         }
+    }
+
+    if (showDisappearingOptions) {
+        AlertDialog(
+            onDismissRequest = { showDisappearingOptions = false },
+            title = { Text("Disappearing messages") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Choose how long new messages stay in this chat. This applies to both participants.", color = Muted, fontSize = 13.sp)
+                    listOf(0L to "Off", 86_400_000L to "24 Hours", 604_800_000L to "7 Days", 7_776_000_000L to "90 Days").forEach { (duration, label) ->
+                        Row(Modifier.fillMaxWidth().clickable {
+                            chatRef.update("disappearingDurationMs", duration)
+                                .addOnSuccessListener { showToast(context, "Disappearing messages: $label") }
+                                .addOnFailureListener { showToast(context, "Could not update setting: ${it.message}") }
+                            showDisappearingOptions = false
+                        }.padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selected = disappearingDurationMs == duration, onClick = {
+                                chatRef.update("disappearingDurationMs", duration)
+                                    .addOnSuccessListener { showToast(context, "Disappearing messages: $label") }
+                                    .addOnFailureListener { showToast(context, "Could not update setting: ${it.message}") }
+                                showDisappearingOptions = false
+                            })
+                            Spacer(Modifier.width(8.dp))
+                            Text(label, color = Ink)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showDisappearingOptions = false }) { Text("Close") } }
+        )
     }
 
     if (showDeleteOptions && selectedMessageIds.isNotEmpty()) {
