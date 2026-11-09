@@ -1062,6 +1062,7 @@ fun ChatList(
         }
     }
 }
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun ConversationScreen(
     chat: Chat,
@@ -1405,21 +1406,26 @@ fun ConversationScreen(
             items(messages, key = { it.id }) { msg ->
                 val isMe = msg.senderId == currentUserId
 
+                val isSelected = msg.id in selectedMessageIds
                 Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    horizontalArrangement = if (isMe) {
-                        Arrangement.End
-                    } else {
-                        Arrangement.Start
-                    }
+                    Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    horizontalArrangement = if (isMe) Arrangement.End else Arrangement.Start
                 ) {
                     Column(
                         Modifier
                             .widthIn(max = 285.dp)
+                            .combinedClickable(
+                                onClick = {
+                                    if (selectedMessageIds.isNotEmpty()) {
+                                        selectedMessageIds = if (isSelected) selectedMessageIds - msg.id else selectedMessageIds + msg.id
+                                    }
+                                },
+                                onLongClick = {
+                                    selectedMessageIds = if (isSelected) selectedMessageIds - msg.id else selectedMessageIds + msg.id
+                                }
+                            )
                             .background(
-                                if (isMe) Color(0xFFD9F7EC) else Color.White,
+                                if (isSelected) Color(0xFFBCEBDD) else if (isMe) Color(0xFFD9F7EC) else Color.White,
                                 RoundedCornerShape(
                                     topStart = 16.dp,
                                     topEnd = 16.dp,
@@ -1628,6 +1634,40 @@ fun ConversationScreen(
                 Icon(Icons.Default.Send, "Send", tint = Green)
             }
         }
+    }
+
+    if (showDeleteOptions && selectedMessageIds.isNotEmpty()) {
+        val selectedMessages = messages.filter { it.id in selectedMessageIds }
+        val canDeleteForEveryone = selectedMessages.isNotEmpty() && selectedMessages.all { it.senderId == currentUserId }
+        AlertDialog(
+            onDismissRequest = { showDeleteOptions = false },
+            title = { Text("Delete selected messages?") },
+            text = { Text("Choose whether to remove these messages only from your chat or for everyone.") },
+            confirmButton = {
+                Column(horizontalAlignment = Alignment.End) {
+                    TextButton(onClick = {
+                        selectedMessageIds.toList().forEach { id ->
+                            chatRef.collection("messages").document(id)
+                                .update("hiddenFor", FieldValue.arrayUnion(currentUserId))
+                                .addOnFailureListener { showToast(context, "Could not delete message: ${it.message}") }
+                        }
+                        selectedMessageIds = emptySet()
+                        showDeleteOptions = false
+                    }) { Text("Delete for me") }
+                    if (canDeleteForEveryone) {
+                        TextButton(onClick = {
+                            selectedMessageIds.toList().forEach { id ->
+                                chatRef.collection("messages").document(id).delete()
+                                    .addOnFailureListener { showToast(context, "Could not delete for everyone: ${it.message}") }
+                            }
+                            selectedMessageIds = emptySet()
+                            showDeleteOptions = false
+                        }) { Text("Delete for everyone", color = MaterialTheme.colorScheme.error) }
+                    }
+                }
+            },
+            dismissButton = { TextButton(onClick = { showDeleteOptions = false }) { Text("Cancel") } }
+        )
     }
 }
 
