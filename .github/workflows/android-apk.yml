@@ -208,6 +208,12 @@ jobs:
           cd "$PROJECT_DIR"
           gradle assembleDebug
 
+      # NEW STEP: Print SHA-1 and SHA-256 fingerprints
+      - name: Show Android SHA fingerprints
+        run: |
+          cd "$PROJECT_DIR"
+          gradle :app:signingReport
+
       - name: Upload Khahish APK
         uses: actions/upload-artifact@v4
         with:
