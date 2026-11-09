@@ -1090,6 +1090,8 @@ fun ConversationScreen(
     var isRecordingVoice by remember { mutableStateOf(false) }
     var voiceRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
     var voiceRecordingFile by remember { mutableStateOf<File?>(null) }
+    var selectedMessageIds by remember { mutableStateOf(setOf<String>()) }
+    var showDeleteOptions by remember { mutableStateOf(false) }
 
     val imagePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
@@ -1282,9 +1284,11 @@ fun ConversationScreen(
                         deliveredTo = doc.get("deliveredTo") as? List<String>
                             ?: emptyList(),
                         readBy = doc.get("readBy") as? List<String>
+                            ?: emptyList(),
+                        hiddenFor = doc.get("hiddenFor") as? List<String>
                             ?: emptyList()
                     )
-                }
+                }.filter { currentUserId !in it.hiddenFor }
 
                 // Sirf un messages par receipt update karein
                 // jin par current user ki receipt abhi maujood nahi.
