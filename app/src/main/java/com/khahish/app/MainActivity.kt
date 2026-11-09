@@ -872,11 +872,14 @@ fun NewChatScreen(
                                 color = Ink,
                                 fontWeight = FontWeight.SemiBold
                             )
-                            Text(
-                                "Tap to start private chat",
-                                color = Muted,
-                                fontSize = 12.sp
-                            )
+                            val statusText = when {
+                                user.isOnline && user.onlineStatusVisible -> "Online"
+                                user.lastSeenVisible && user.lastSeenAt > 0L ->
+                                    "Last seen " + java.text.SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault())
+                                        .format(java.util.Date(user.lastSeenAt))
+                                else -> "Tap to start private chat"
+                            }
+                            Text(statusText, color = if (statusText == "Online") Green else Muted, fontSize = 12.sp)
                         }
 
                         if (creatingUid == user.uid) {
