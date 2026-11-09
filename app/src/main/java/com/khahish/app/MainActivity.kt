@@ -1019,6 +1019,10 @@ fun ConversationScreen(
     val db = remember { FirebaseFirestore.getInstance() }
     val auth = remember { FirebaseAuth.getInstance() }
     val currentUserId = auth.currentUser?.uid ?: return
+    val readReceiptsEnabled = remember {
+        context.getSharedPreferences("khahish_privacy_settings", Context.MODE_PRIVATE)
+            .getBoolean("read_receipts", true)
+    }
 
     val chatRef = remember(chat.id) {
         db.collection("chats").document(chat.id)
@@ -1246,7 +1250,7 @@ fun ConversationScreen(
                                 FieldValue.arrayUnion(currentUserId)
                         }
 
-                        if (currentUserId !in read) {
+                        if (readReceiptsEnabled && currentUserId !in read) {
                             updates["readBy"] =
                                 FieldValue.arrayUnion(currentUserId)
                         }
