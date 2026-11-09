@@ -3,6 +3,7 @@ package com.khahish.app
 import android.Manifest
 import android.content.pm.PackageManager
 import android.view.SurfaceView
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -14,6 +15,8 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import io.agora.rtc2.video.VideoCanvas
@@ -25,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.delay
 
 @Composable
 fun KhahishCallScreen(
@@ -43,6 +47,7 @@ fun KhahishCallScreen(
     var isJoined by remember(call.id) { mutableStateOf(false) }
     var isMuted by remember(call.id) { mutableStateOf(false) }
     var cameraEnabled by remember(call.id) { mutableStateOf(true) }
+    var speakerEnabled by remember(call.id) { mutableStateOf(true) }
     var credentials by remember(call.id) { mutableStateOf<AgoraRtcCredentials?>(null) }
     var session by remember(call.id) { mutableStateOf<KhahishAgoraSession?>(null) }
     var connectionStarted by remember(call.id) { mutableStateOf(false) }
@@ -125,6 +130,21 @@ fun KhahishCallScreen(
         onDispose {
             registration.remove()
             latestSession?.leave()
+        }
+    }
+
+    BackHandler(enabled = true) {
+        repository.endCall(call.id) { errorText = it }
+        session?.leave()
+        onExit()
+    }
+
+    LaunchedEffect(call.id, isIncoming, currentCall.status) {
+        if (!isIncoming && currentCall.status == "ringing") {
+            delay(45_000)
+            if (currentCall.status == "ringing") {
+                repository.markMissed(call.id) { errorText = it }
+            }
         }
     }
 
@@ -212,6 +232,12 @@ fun KhahishCallScreen(
                     }) {
                         Icon(if (cameraEnabled) Icons.Default.Videocam else Icons.Default.VideocamOff, null, tint = Color.White)
                     }
+                }
+                IconButton(onClick = {
+                    speakerEnabled = !speakerEnabled
+                    session?.setSpeakerEnabled(speakerEnabled)
+                }) {
+                    Icon(if (speakerEnabled) Icons.Default.VolumeUp else Icons.Default.VolumeOff, null, tint = Color.White)
                 }
                 IconButton(onClick = {
                     repository.endCall(call.id) { errorText = it }
