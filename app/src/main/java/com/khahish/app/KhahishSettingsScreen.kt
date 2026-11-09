@@ -49,6 +49,7 @@ fun KhahishSettingsScreen(
     val prefs = remember { context.getSharedPreferences("khahish_ui_settings", Context.MODE_PRIVATE) }
     val privacyPrefs = remember { context.getSharedPreferences("khahish_privacy_settings", Context.MODE_PRIVATE) }
 
+    var showAdvanced by remember { mutableStateOf(false) }
     var showEditProfile by remember { mutableStateOf(false) }
     var editName by remember { mutableStateOf(user?.displayName.orEmpty()) }
     var editBio by remember { mutableStateOf("") }
@@ -109,6 +110,17 @@ fun KhahishSettingsScreen(
                     Toast.makeText(context, "Unable to load blocked accounts: ${it.message}", Toast.LENGTH_LONG).show()
                 }
         }
+    }
+
+    if (showAdvanced) {
+        KhahishAdvancedSettingsScreen(
+            modifier = modifier,
+            onBack = { showAdvanced = false },
+            onLogout = onLogout,
+            onAnimationsChanged = onAnimationsChanged,
+            onSlideTransitionsChanged = onSlideTransitionsChanged
+        )
+        return
     }
 
     if (showStorage) {
@@ -251,6 +263,12 @@ fun KhahishSettingsScreen(
         }
 
         Spacer(Modifier.height(14.dp))
+        KhahishSettingsGroup("ADVANCED FEATURES") {
+            KhahishSettingsItem(Icons.Default.Tune, "Advanced settings", "Accessibility, multiple accounts, trusted devices, data export and more") {
+                showAdvanced = true
+            }
+        }
+
         KhahishSettingsGroup("HELP & ABOUT") {
             KhahishSettingsItem(Icons.Default.Help, "Help and support", "Contact and support information") {
                 Toast.makeText(context, "Khahish support will be connected in a later update.", Toast.LENGTH_LONG).show()
