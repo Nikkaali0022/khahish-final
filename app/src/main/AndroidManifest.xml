@@ -22,6 +22,7 @@
         android:required="false" />
 
     <application
+        android:label="Khahish"
         android:allowBackup="true"
         android:icon="@mipmap/khahish_launcher"
         android:roundIcon="@mipmap/khahish_launcher_round"
