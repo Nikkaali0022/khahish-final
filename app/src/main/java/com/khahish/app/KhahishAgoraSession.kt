@@ -6,6 +6,8 @@ import io.agora.rtc2.Constants
 import io.agora.rtc2.IRtcEngineEventHandler
 import io.agora.rtc2.RtcEngine
 import io.agora.rtc2.RtcEngineConfig
+import android.view.SurfaceView
+import io.agora.rtc2.video.VideoCanvas
 
 /**
  * Owns a single Agora RTC engine instance for an active Khahish call.
@@ -101,6 +103,21 @@ class KhahishAgoraSession(
         } catch (error: Exception) {
             onFailure(error.message ?: "Unable to initialize Agora calling.")
         }
+    }
+
+    fun setupLocalVideo(surfaceView: SurfaceView) {
+        if (!isVideoCall) return
+        engine?.setupLocalVideo(
+            VideoCanvas(surfaceView, VideoCanvas.RENDER_MODE_HIDDEN, credentials.uid)
+        )
+        engine?.startPreview()
+    }
+
+    fun setupRemoteVideo(surfaceView: SurfaceView, remoteUid: Int) {
+        if (!isVideoCall) return
+        engine?.setupRemoteVideo(
+            VideoCanvas(surfaceView, VideoCanvas.RENDER_MODE_HIDDEN, remoteUid)
+        )
     }
 
     fun setMicrophoneMuted(muted: Boolean) {
