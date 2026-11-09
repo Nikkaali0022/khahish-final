@@ -1,7 +1,6 @@
 package com.khahish.app
 
 import com.google.firebase.firestore.DocumentSnapshot
-import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import java.util.UUID
@@ -113,7 +112,6 @@ class KhahishCallRepository(
         onIncoming: (KhahishCall?) -> Unit
     ): ListenerRegistration = calls
         .whereEqualTo("calleeUid", uid)
-        .whereEqualTo("status", "ringing")
         .addSnapshotListener { snapshot, error ->
             if (error != null) {
                 onIncoming(null)
@@ -121,6 +119,7 @@ class KhahishCallRepository(
             }
             val incoming = snapshot?.documents
                 ?.map(KhahishCall::from)
+                ?.filter { it.status == "ringing" }
                 ?.maxByOrNull { it.createdAt }
             onIncoming(incoming)
         }
@@ -166,7 +165,7 @@ class KhahishCallRepository(
         calls.document(callId).update(
             mapOf(
                 "status" to status,
-                "updatedAt" to FieldValue.serverTimestamp()
+                "updatedAt" to System.currentTimeMillis()
             )
         ).addOnFailureListener { error ->
             onError(error.message ?: "Unable to update call status.")
