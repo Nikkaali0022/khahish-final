@@ -1357,43 +1357,34 @@ fun ConversationScreen(
             .background(Pale)
     ) {
         Row(
-            Modifier
-                .fillMaxWidth()
-                .background(Color.White)
-                .statusBarsPadding()
+            Modifier.fillMaxWidth().background(Color.White).statusBarsPadding()
                 .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, "Back")
-            }
-
-            Box(
-                Modifier
-                    .size(40.dp)
-                    .background(Color(0xFFDCEFE9), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(chat.initials, color = Green, fontWeight = FontWeight.Bold)
-            }
-
-            Spacer(Modifier.width(10.dp))
-
-            Column(Modifier.weight(1f)) {
-                Text(chat.name, fontWeight = FontWeight.SemiBold, color = Ink)
-                Text(
-                    if (peerTyping) "typing..." else "Khahish private chat",
-                    color = if (peerTyping) Green else Muted,
-                    fontSize = 11.sp
-                )
-            }
-
-            IconButton(onClick = { onStartCall(false) }) {
-                Icon(Icons.Default.Call, "Voice call", tint = Green)
-            }
-
-            IconButton(onClick = { onStartCall(true) }) {
-                Icon(Icons.Default.Videocam, "Video call", tint = Green)
+            IconButton(onClick = {
+                if (selectedMessageIds.isNotEmpty()) selectedMessageIds = emptySet() else onBack()
+            }) { Icon(Icons.Default.ArrowBack, "Back") }
+            if (selectedMessageIds.isNotEmpty()) {
+                Text("${selectedMessageIds.size} selected", modifier = Modifier.weight(1f),
+                    color = Ink, fontWeight = FontWeight.SemiBold)
+                TextButton(onClick = { showDeleteOptions = true }) {
+                    Icon(Icons.Default.DeleteOutline, null)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Delete")
+                }
+            } else {
+                Box(Modifier.size(40.dp).background(Color(0xFFDCEFE9), CircleShape),
+                    contentAlignment = Alignment.Center) {
+                    Text(chat.initials, color = Green, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(chat.name, fontWeight = FontWeight.SemiBold, color = Ink)
+                    Text(if (peerTyping) "typing..." else "Tap and hold a message to select",
+                        color = if (peerTyping) Green else Muted, fontSize = 11.sp)
+                }
+                IconButton(onClick = { onStartCall(false) }) { Icon(Icons.Default.Call, "Voice call", tint = Green) }
+                IconButton(onClick = { onStartCall(true) }) { Icon(Icons.Default.Videocam, "Video call", tint = Green) }
             }
         }
 
