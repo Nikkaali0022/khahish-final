@@ -356,9 +356,22 @@ test("call records are visible only to participants and support incoming-call qu
     collection(db("alice"), "calls"),
     where("participants", "array-contains", "alice")
   )));
+  const acceptedAt = Date.now();
   await assertSucceeds(updateDoc(doc(db("bob"), "calls/call1"), {
     status: "accepted",
-    updatedAt: Date.now()
+    updatedAt: acceptedAt,
+    acceptedAt
+  }));
+  await assertFails(updateDoc(doc(db("alice"), "calls/call1"), {
+    status: "accepted",
+    updatedAt: Date.now(),
+    acceptedAt: Date.now()
+  }));
+  const endedAt = Date.now();
+  await assertSucceeds(updateDoc(doc(db("bob"), "calls/call1"), {
+    status: "ended",
+    updatedAt: endedAt,
+    endedAt
   }));
   await assertFails(updateDoc(doc(db("carol"), "calls/call1"), {
     status: "ended",
@@ -386,13 +399,17 @@ test("caller timeout and incoming-call back navigation can close ringing calls",
     status: "missed",
     updatedAt: Date.now()
   }));
+  const callerEndedAt = Date.now();
   await assertSucceeds(updateDoc(doc(db("alice"), "calls/caller-timeout"), {
     status: "ended",
-    updatedAt: Date.now()
+    updatedAt: callerEndedAt,
+    endedAt: callerEndedAt
   }));
+  const calleeEndedAt = Date.now();
   await assertSucceeds(updateDoc(doc(db("bob"), "calls/callee-back"), {
     status: "ended",
-    updatedAt: Date.now()
+    updatedAt: calleeEndedAt,
+    endedAt: calleeEndedAt
   }));
 });
 
