@@ -1807,12 +1807,25 @@ fun ConversationScreen(
     var peerBio by remember { mutableStateOf("") }
     var showMediaPreviews by remember(chat.id) { mutableStateOf(true) }
 
-    DisposableEffect(currentUserId, chat.id) {
-        val settingsRegistration = db.collection("users").document(currentUserId)
+    val chatSettingsRef = remember(currentUserId, chat.id) {
+        db.collection("users").document(currentUserId)
             .collection("appSettings").document("chat_${chat.id}")
-            .addSnapshotListener { snapshot, _ ->
-                showMediaPreviews = snapshot?.getBoolean("showMediaPreviews") != false
-            }
+    }
+
+    fun saveChatSetting(key: String, value: Any) {
+        chatSettingsRef.set(
+            mapOf(key to value, "updatedAt" to System.currentTimeMillis()),
+            SetOptions.merge()
+        ).addOnFailureListener { showToast(context, "Could not save chat setting: ${it.message}") }
+    }
+
+    DisposableEffect(currentUserId, chat.id) {
+        val settingsRegistration = chatSettingsRef.addSnapshotListener { snapshot, _ ->
+            showMediaPreviews = snapshot?.getBoolean("showMediaPreviews") != false
+            notificationsMuted = snapshot?.getBoolean("notificationsMuted") == true
+            chatBubbleColorHex = snapshot?.getString("bubbleColor") ?: "#18A889"
+            chatWallpaperColorHex = snapshot?.getString("wallpaperColor") ?: "#F4F8F7"
+        }
         onDispose { settingsRegistration.remove() }
     }
     var attachmentMenu by remember { mutableStateOf(false) }
@@ -1836,6 +1849,11 @@ fun ConversationScreen(
     var groupMemberSearch by remember { mutableStateOf("") }
     var groupSearchResults by remember { mutableStateOf(emptyList<AppUser>()) }
     var peerMenuExpanded by remember { mutableStateOf(false) }
+    var chatMenuExpanded by remember { mutableStateOf(false) }
+    var showChatThemeDialog by remember { mutableStateOf(false) }
+    var notificationsMuted by remember(chat.id) { mutableStateOf(false) }
+    var chatBubbleColorHex by remember(chat.id) { mutableStateOf("#18A889") }
+    var chatWallpaperColorHex by remember(chat.id) { mutableStateOf("#F4F8F7") }
     var showPeerPicture by remember { mutableStateOf(false) }
     var videoToPlay by remember { mutableStateOf("") }
     var photoToView by remember { mutableStateOf("") }
@@ -2411,6 +2429,63 @@ fun ConversationScreen(
                     IconButton(onClick = { onStartCall(false) }) { Icon(Icons.Default.Call, "Voice call", tint = Green) }
                     IconButton(onClick = { onStartCall(true) }) { Icon(Icons.Default.Videocam, "Video call", tint = Green) }
                 }
+                Box {
+                    IconButton(onClick = { chatMenuExpanded = true }) {
+                        Icon(Icons.Default.MoreVert, "Chat options", tint = MaterialTheme.colorScheme.onSurface)
+                    }
+                    DropdownMenu(expanded = chatMenuExpanded, onDismissRequest = { chatMenuExpanded = false }) {
+                        if (!chat.isGroup) {
+                            DropdownMenuItem(
+                                text = { Text("View contact") },
+                                leadingIcon = { Icon(Icons.Default.Person, null) },
+                                onClick = { chatMenuExpanded = false; onViewProfile(chat.peerUid) }
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("Search") },
+                            leadingIcon = { Icon(Icons.Default.Search, null) },
+                            onClick = { chatMenuExpanded = false; chatSearchVisible = true; chatSearchQuery = "" }
+                        )
+                        if (!chat.isGroup) {
+                            DropdownMenuItem(
+                                text = { Text("Report") },
+                                leadingIcon = { Icon(Icons.Default.Report, null) },
+                                onClick = { chatMenuExpanded = false; onViewProfile(chat.peerUid) }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Block") },
+                                leadingIcon = { Icon(Icons.Default.Block, null) },
+                                onClick = { chatMenuExpanded = false; onViewProfile(chat.peerUid) }
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text(if (notificationsMuted) "Unmute notifications" else "Mute notifications") },
+                            leadingIcon = { Icon(Icons.Default.NotificationsOff, null) },
+                            onClick = {
+                                chatMenuExpanded = false
+                                notificationsMuted = !notificationsMuted
+                                saveChatSetting("notificationsMuted", notificationsMuted)
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Disappearing messages") },
+                            leadingIcon = { Icon(Icons.Default.Timer, null) },
+                            onClick = { chatMenuExpanded = false; showDisappearingOptions = true }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Chat Theme") },
+                            leadingIcon = { Icon(Icons.Default.Palette, null) },
+                            onClick = { chatMenuExpanded = false; showChatThemeDialog = true }
+                        )
+                        if (chat.isGroup) {
+                            DropdownMenuItem(
+                                text = { Text("Add members") },
+                                leadingIcon = { Icon(Icons.Default.GroupAdd, null) },
+                                onClick = { chatMenuExpanded = false; showAddGroupMembers = true }
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -2480,6 +2555,7 @@ fun ConversationScreen(
                 state = messageListState,
                 modifier = Modifier
                     .fillMaxSize()
+                    .background(Color(android.graphics.Color.parseColor(chatWallpaperColorHex)))
                     .padding(horizontal = 12.dp),
                 contentPadding = PaddingValues(vertical = 12.dp)
             ) {
@@ -2517,7 +2593,7 @@ fun ConversationScreen(
                             )
                             .border(2.dp, if (isSelected) Green else Color.Transparent, RoundedCornerShape(16.dp))
                             .background(
-                                if (isSelected) MaterialTheme.colorScheme.surfaceVariant else if (isMe) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+                                if (isSelected) MaterialTheme.colorScheme.surfaceVariant else if (isMe) Color(android.graphics.Color.parseColor(chatBubbleColorHex)) else MaterialTheme.colorScheme.surface,
                                 RoundedCornerShape(
                                     topStart = 16.dp,
                                     topEnd = 16.dp,
@@ -3193,6 +3269,80 @@ fun ConversationScreen(
                 }
             },
             confirmButton = { TextButton(onClick = { showLiveLocationOptions = false }) { Text("Cancel") } }
+        )
+    }
+
+    if (showChatThemeDialog) {
+        val themeGroups = listOf(
+            "Featured" to listOf(
+                Triple("Khahish Green", "#18A889", "#F4F8F7"),
+                Triple("Ocean", "#287DA8", "#EAF5FA"),
+                Triple("Sunset", "#C56A48", "#FFF1E8")
+            ),
+            "Nature" to listOf(
+                Triple("Forest", "#397A58", "#EAF4EC"),
+                Triple("Sage", "#66856B", "#F0F5EC"),
+                Triple("Earth", "#936B4D", "#F5EEE5")
+            ),
+            "Minimal" to listOf(
+                Triple("Lavender", "#8070A8", "#F4F0FA"),
+                Triple("Rose", "#B96E82", "#FFF1F4")
+            ),
+            "Dark" to listOf(
+                Triple("Midnight", "#4E9B87", "#101918"),
+                Triple("Graphite", "#8C9AA6", "#171C22")
+            )
+        )
+        AlertDialog(
+            onDismissRequest = { showChatThemeDialog = false },
+            title = { Text("Chat Theme") },
+            text = {
+                Column(
+                    Modifier.heightIn(max = 430.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    themeGroups.forEach { group ->
+                        Text(group.first, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        group.second.forEach { option ->
+                            Row(
+                                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                                    .clickable {
+                                        chatBubbleColorHex = option.second
+                                        chatWallpaperColorHex = option.third
+                                        saveChatSetting("bubbleColor", option.second)
+                                        saveChatSetting("wallpaperColor", option.third)
+                                        showChatThemeDialog = false
+                                    }
+                                    .padding(vertical = 7.dp, horizontal = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    Modifier.size(42.dp).clip(RoundedCornerShape(10.dp))
+                                        .background(Color(android.graphics.Color.parseColor(option.third))),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Box(
+                                        Modifier.size(24.dp).clip(CircleShape)
+                                            .background(Color(android.graphics.Color.parseColor(option.second)))
+                                    )
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Text(option.first, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    chatBubbleColorHex = "#18A889"
+                    chatWallpaperColorHex = "#F4F8F7"
+                    saveChatSetting("bubbleColor", "#18A889")
+                    saveChatSetting("wallpaperColor", "#F4F8F7")
+                    showChatThemeDialog = false
+                }) { Text("Reset default") }
+            },
+            dismissButton = { TextButton(onClick = { showChatThemeDialog = false }) { Text("Close") } }
         )
     }
 
