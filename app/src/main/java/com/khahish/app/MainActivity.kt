@@ -313,6 +313,49 @@ fun KhahishApp() {
         if (uid.isNullOrBlank()) {
             onDispose { }
         } else {
+            val deviceId = Settings.Secure.getString(appContext.contentResolver, Settings.Secure.ANDROID_ID)
+                ?.takeIf { it.isNotBlank() } ?: "android-device"
+            val deviceRef = FirebaseFirestore.getInstance().collection("users").document(uid)
+                .collection("trustedDevices").document(deviceId)
+            val deviceName = Build.MANUFACTURER + " " + Build.MODEL
+            var active = true
+            var deviceRegistration: com.google.firebase.firestore.ListenerRegistration? = null
+            deviceRef.set(mapOf(
+                "deviceName" to deviceName,
+                "platform" to "Android",
+                "lastActiveAt" to System.currentTimeMillis(),
+                "trusted" to true
+            ), SetOptions.merge()).addOnSuccessListener {
+                if (active) {
+                    deviceRegistration = deviceRef.addSnapshotListener { snapshot, _ ->
+                        if (snapshot != null && !snapshot.exists()) {
+                            auth.signOut()
+                            currentUser = null
+                            Toast.makeText(appContext, "This device was removed from trusted devices. Please sign in again.", Toast.LENGTH_LONG).show()
+                        } else if (snapshot != null) {
+                            deviceRef.update("lastActiveAt", System.currentTimeMillis())
+                        }
+                    }
+                    FirebaseFirestore.getInstance().collection("users").document(uid)
+                        .collection("loginHistory").add(mapOf(
+                            "time" to System.currentTimeMillis(),
+                            "deviceName" to deviceName,
+                            "platform" to "Android"
+                        ))
+                }
+            }
+            onDispose {
+                active = false
+                deviceRegistration?.remove()
+            }
+        }
+    }
+
+    DisposableEffect(currentUser?.uid) {
+        val uid = currentUser?.uid
+        if (uid.isNullOrBlank()) {
+            onDispose { }
+        } else {
             val registration = KhahishCallRepository().listenForIncomingCalls(uid) { incoming ->
                 if (incoming != null && latestActiveCall == null) {
                     incomingCall = true
