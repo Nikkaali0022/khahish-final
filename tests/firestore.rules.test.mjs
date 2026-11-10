@@ -383,6 +383,55 @@ test("caller timeout and incoming-call back navigation can close ringing calls",
   }));
 });
 
+test("reports can only be read by an admin", async () => {
+  await seed("reports/report-private", {
+    type: "user",
+    targetUid: "bob",
+    targetName: "Bob",
+    reporterUid: "alice",
+    reason: "Spam",
+    status: "pending",
+    createdAt: Date.now()
+  });
+
+  await assertFails(getDoc(doc(db("alice"), "reports/report-private")));
+  await assertFails(getDocs(collection(db("alice"), "reports")));
+
+  const adminDb = env.authenticatedContext("moderator", { admin: true }).firestore();
+  await assertSucceeds(getDoc(doc(adminDb, "reports/report-private")));
+  await assertSucceeds(getDocs(collection(adminDb, "reports")));
+});
+
+test("message receipts can only be advanced by the receiving member", async () => {
+  await seed("chats/alice_bob", {
+    members: ["alice", "bob"],
+    lastMessage: "",
+    lastMessageAt: 0,
+    updatedAt: Date.now()
+  });
+  const base = {
+    senderId: "alice",
+    text: "Hello",
+    imageUrl: "",
+    mediaType: "text",
+    timestamp: Date.now(),
+    deliveredTo: [],
+    readBy: ["alice"]
+  };
+  await seed("chats/alice_bob/messages/receipt-valid", base);
+  await seed("chats/alice_bob/messages/receipt-forged", base);
+
+  await assertSucceeds(updateDoc(doc(db("bob"), "chats/alice_bob/messages/receipt-valid"), {
+    deliveredTo: ["bob"],
+    readBy: ["alice", "bob"]
+  }));
+  await assertFails(updateDoc(doc(db("bob"), "chats/alice_bob/messages/receipt-forged"), {
+    deliveredTo: ["carol"],
+    readBy: ["alice", "carol"]
+  }));
+  await assertFails(getDoc(doc(db("carol"), "chats/alice_bob/messages/receipt-valid")));
+});
+
 test("backup imports preserve historical sender labels but are explicitly unverified", async () => {
   await seed("chats/alice_bob", {
     members: ["alice", "bob"],
