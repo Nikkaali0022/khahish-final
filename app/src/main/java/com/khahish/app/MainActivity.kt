@@ -3206,21 +3206,38 @@ fun ConversationScreen(
     }
 
     if (reactionTarget != null) {
-        AlertDialog(onDismissRequest = { reactionTarget = null }, title = { Text("React to message") }, text = {
-            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                listOf("❤️", "😂", "😮", "😢", "👍", "🙏").forEach { emoji ->
-                    TextButton(onClick = {
-                        if (reactionTarget!!.reactions[currentUserId] == emoji) {
-                            chatRef.collection("messages").document(reactionTarget!!.id).update("reactions.$currentUserId", FieldValue.delete())
-                        } else {
-                            chatRef.collection("messages").document(reactionTarget!!.id).update("reactions.$currentUserId", emoji)
+        Dialog(onDismissRequest = { reactionTarget = null }) {
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = MaterialTheme.colorScheme.surface,
+                shadowElevation = 12.dp
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    listOf("❤️", "😂", "😮", "😢", "👍", "🙏").forEach { emoji ->
+                        TextButton(onClick = {
+                            val target = reactionTarget ?: return@TextButton
+                            val messageRef = chatRef.collection("messages").document(target.id)
+                            val updateTask = if (target.reactions[currentUserId] == emoji) {
+                                messageRef.update("reactions.$currentUserId", FieldValue.delete())
+                            } else {
+                                messageRef.update("reactions.$currentUserId", emoji)
+                            }
+                            updateTask.addOnSuccessListener { reactionTarget = null }
+                                .addOnFailureListener {
+                                    showToast(context, "Reaction failed: ${it.message}")
+                                    reactionTarget = null
+                                }
+                        }) {
+                            Text(emoji, fontSize = 25.sp)
                         }
-                            .addOnSuccessListener { reactionTarget = null }
-                            .addOnFailureListener { showToast(context, "Reaction failed: ${it.message}"); reactionTarget = null }
-                    }) { Text(emoji, fontSize = 21.sp) }
+                    }
                 }
             }
-        }, confirmButton = { TextButton(onClick = { reactionTarget = null }) { Text("Close") } })
+        }
     }
     if (showPeerPicture && peerPhotoUrl.isNotBlank()) Dialog(onDismissRequest = { showPeerPicture = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(Modifier.fillMaxWidth().fillMaxHeight(.82f).background(Color.Black, RoundedCornerShape(18.dp)), contentAlignment = Alignment.Center) {
