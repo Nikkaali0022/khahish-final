@@ -78,6 +78,10 @@ service cloud.firestore {
         && (
           storyData.ownerUid == request.auth.uid
           || storyData.get('audience', 'everyone') == 'everyone'
+          || (
+            storyData.get('allowedUids', []) is list
+            && request.auth.uid in storyData.get('allowedUids', [])
+          )
         );
     }
 
@@ -236,6 +240,10 @@ service cloud.firestore {
         && request.resource.data.status in ['accepted', 'rejected']
         && request.resource.data.handledBy == request.auth.uid
         && (
+          request.resource.data.status != 'rejected'
+          || request.resource.data.rejectedAt is int
+        )
+        && (
           request.resource.data.status == 'rejected'
           || (
             request.resource.data.acceptedBy == request.auth.uid
@@ -270,6 +278,7 @@ service cloud.firestore {
             && request.resource.data.groupName is string
             && request.resource.data.groupAdmins is list
             && request.auth.uid in request.resource.data.groupAdmins
+            && request.resource.data.members.hasAll(request.resource.data.groupAdmins)
             && request.resource.data.createdBy == request.auth.uid
             && request.resource.data.createdAt is int
           )
@@ -304,6 +313,7 @@ service cloud.firestore {
             && (
               !request.resource.data.diff(resource.data).affectedKeys()
                 .hasAny(['pinnedBy'])
+              || !('pinnedBy' in request.resource.data)
               || request.resource.data.pinnedBy == request.auth.uid
             )
           )
@@ -518,6 +528,8 @@ service cloud.firestore {
         && request.resource.data.callerUid == request.auth.uid
         && request.resource.data.calleeUid is string
         && request.resource.data.calleeUid != request.auth.uid
+        && !isBlocked(request.auth.uid, request.resource.data.calleeUid)
+        && !isBlocked(request.resource.data.calleeUid, request.auth.uid)
         && request.resource.data.participants is list
         && request.resource.data.participants.size() == 2
         && request.auth.uid in request.resource.data.participants
@@ -535,7 +547,11 @@ service cloud.firestore {
         );
 
       allow list: if signedIn()
-        && request.auth.uid in resource.data.participants;
+        && (
+          request.auth.uid in resource.data.participants
+          || resource.data.callerUid == request.auth.uid
+          || resource.data.calleeUid == request.auth.uid
+        );
 
       allow update: if signedIn()
         && request.resource.data.callerUid == resource.data.callerUid
@@ -574,11 +590,7 @@ service cloud.firestore {
     match /stories/{storyId} {
       allow get, list: if canReadStory(resource.data)
         && resource.data.get('expiresAt', 0) is int
-        && resource.data.expiresAt > request.time.toMillis()
-        && (
-          resource.data.get('audience', 'everyone') == 'everyone'
-          || resource.data.ownerUid == request.auth.uid
-        );
+        && resource.data.expiresAt > request.time.toMillis();
 
       allow create: if signedIn()
         && request.resource.data.ownerUid == request.auth.uid
