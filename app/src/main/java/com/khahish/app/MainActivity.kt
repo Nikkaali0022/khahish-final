@@ -25,6 +25,7 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
@@ -579,7 +580,15 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                 onValueChange = { name = it },
                 label = { Text("Your name") },
                 modifier = Modifier.fillMaxWidth(),
-                singleLine = true
+                singleLine = true,
+            shape = RoundedCornerShape(16.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Green,
+                unfocusedBorderColor = Color(0xFFD8E5E0),
+                focusedContainerColor = Color.White,
+                unfocusedContainerColor = Color.White,
+                cursorColor = Green
+            )
             )
             Spacer(Modifier.height(12.dp))
         }
@@ -589,7 +598,15 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
             onValueChange = { email = it.trim() },
             label = { Text("Email address") },
             modifier = Modifier.fillMaxWidth(),
-            singleLine = true
+            singleLine = true,
+            shape = RoundedCornerShape(16.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Green,
+                unfocusedBorderColor = Color(0xFFD8E5E0),
+                focusedContainerColor = Color.White,
+                unfocusedContainerColor = Color.White,
+                cursorColor = Green
+            )
         )
 
         Spacer(Modifier.height(12.dp))
@@ -600,7 +617,15 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
             label = { Text("Password (6+ characters)") },
             visualTransformation = PasswordVisualTransformation(),
             modifier = Modifier.fillMaxWidth(),
-            singleLine = true
+            singleLine = true,
+            shape = RoundedCornerShape(16.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Green,
+                unfocusedBorderColor = Color(0xFFD8E5E0),
+                focusedContainerColor = Color.White,
+                unfocusedContainerColor = Color.White,
+                cursorColor = Green
+            )
         )
 
         if (!isSignUp) {
