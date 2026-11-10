@@ -1,5 +1,9 @@
 name: Build Khahish APK
 
+concurrency:
+  group: khahish-android-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
   push:
