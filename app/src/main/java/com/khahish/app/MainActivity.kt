@@ -1793,6 +1793,7 @@ fun ConversationScreen(
     var peerMenuExpanded by remember { mutableStateOf(false) }
     var showPeerPicture by remember { mutableStateOf(false) }
     var videoToPlay by remember { mutableStateOf("") }
+    var photoToView by remember { mutableStateOf("") }
     var showDeleteOptions by remember { mutableStateOf(false) }
     var showDisappearingOptions by remember { mutableStateOf(false) }
     var disappearingDurationMs by remember { mutableStateOf(0L) }
@@ -2492,10 +2493,11 @@ fun ConversationScreen(
                         when (msg.mediaType) {
                             "image" -> AsyncImage(
                                 model = msg.imageUrl,
-                                contentDescription = "Shared photo",
+                                contentDescription = "Shared photo — tap to view full screen",
                                 modifier = Modifier
                                     .sizeIn(maxWidth = 250.dp, maxHeight = 250.dp)
-                                    .clip(RoundedCornerShape(10.dp)),
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { photoToView = msg.imageUrl },
                                 contentScale = ContentScale.Crop
                             )
 
@@ -3055,6 +3057,27 @@ fun ConversationScreen(
         Box(Modifier.fillMaxWidth().fillMaxHeight(.82f).background(Color.Black, RoundedCornerShape(18.dp)), contentAlignment = Alignment.Center) {
             AsyncImage(model = peerPhotoUrl, contentDescription = "Profile picture", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
             IconButton(onClick = { showPeerPicture = false }, modifier = Modifier.align(Alignment.TopEnd)) { Icon(Icons.Default.Close, "Close", tint = Color.White) }
+        }
+    }
+    if (photoToView.isNotBlank()) Dialog(
+        onDismissRequest = { photoToView = "" },
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+    ) {
+        Box(
+            Modifier.fillMaxSize().background(Color.Black),
+            contentAlignment = Alignment.Center
+        ) {
+            AsyncImage(
+                model = photoToView,
+                contentDescription = "Full-screen photo",
+                modifier = Modifier.fillMaxSize().clickable { },
+                contentScale = ContentScale.Fit
+            )
+            IconButton(
+                onClick = { photoToView = "" },
+                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp)
+                    .background(Color.Black.copy(alpha = .45f), CircleShape)
+            ) { Icon(Icons.Default.Close, "Close photo", tint = Color.White) }
         }
     }
     if (videoToPlay.isNotBlank()) Dialog(onDismissRequest = { videoToPlay = "" }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
