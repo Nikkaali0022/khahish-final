@@ -745,7 +745,23 @@ fun KhahishApp() {
 
                                 "Calls" -> KhahishCallHistoryScreen(
                                     uid = user.uid,
-                                    modifier = Modifier.padding(padding)
+                                    modifier = Modifier.padding(padding),
+                                    onStartCall = { peerUid, peerName, isVideo ->
+                                        KhahishCallRepository().createOutgoingCall(
+                                            callerUid = user.uid,
+                                            callerName = user.displayName ?: "Khahish User",
+                                            calleeUid = peerUid,
+                                            calleeName = peerName,
+                                            isVideo = isVideo,
+                                            onSuccess = { call ->
+                                                incomingCall = false
+                                                activeCall = call
+                                            },
+                                            onError = { message ->
+                                                Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
+                                            }
+                                        )
+                                    }
                                 )
 
                                 "Settings" -> KhahishSettingsScreen(
