@@ -116,6 +116,16 @@ fun KhahishAdvancedSettingsScreen(
                         )
                         if (chatJson.has("isGroup")) chatData["isGroup"] = chatJson.optBoolean("isGroup")
                         if (chatJson.has("groupName")) chatData["groupName"] = chatJson.optString("groupName")
+                        val memberNamesJson = chatJson.optJSONObject("memberNames")
+                        if (memberNamesJson != null) {
+                            val memberNames = mutableMapOf<String, String>()
+                            memberNamesJson.keys().forEach { key -> memberNames[key] = memberNamesJson.optString(key) }
+                            chatData["memberNames"] = memberNames
+                        }
+                        val adminsJson = chatJson.optJSONArray("groupAdmins") ?: JSONArray()
+                        chatData["groupAdmins"] = (0 until adminsJson.length()).map { adminsJson.optString(it) }
+                        if (chatJson.has("createdBy")) chatData["createdBy"] = chatJson.optString("createdBy")
+                        if (chatJson.has("createdAt")) chatData["createdAt"] = chatJson.optLong("createdAt")
                         writeTasks.add(chatRef.set(chatData, com.google.firebase.firestore.SetOptions.merge()))
                         val messageArray = chatJson.optJSONArray("messages") ?: JSONArray()
                         var batch = db.batch()
@@ -130,9 +140,21 @@ fun KhahishAdvancedSettingsScreen(
                                 "imageUrl" to message.optString("imageUrl"),
                                 "mediaType" to message.optString("mediaType", "text"),
                                 "timestamp" to message.optLong("timestamp"),
-                                "deliveredTo" to emptyList<String>(),
-                                "readBy" to listOf(sender)
+                                "deliveredTo" to (message.optJSONArray("deliveredTo")?.let { array -> (0 until array.length()).map { array.optString(it) } } ?: emptyList<String>()),
+                                "readBy" to (message.optJSONArray("readBy")?.let { array -> (0 until array.length()).map { array.optString(it) } } ?: listOf(sender)),
+                                "hiddenFor" to (message.optJSONArray("hiddenFor")?.let { array -> (0 until array.length()).map { array.optString(it) } } ?: emptyList<String>()),
+                                "expiresAt" to message.optLong("expiresAt"),
+                                "replyToMessageId" to message.optString("replyToMessageId"),
+                                "replyToText" to message.optString("replyToText"),
+                                "editedAt" to message.optLong("editedAt"),
+                                "starredBy" to (message.optJSONArray("starredBy")?.let { array -> (0 until array.length()).map { array.optString(it) } } ?: emptyList<String>())
                             )
+                            val reactionsJson = message.optJSONObject("reactions")
+                            if (reactionsJson != null) {
+                                val reactions = mutableMapOf<String, String>()
+                                reactionsJson.keys().forEach { key -> reactions[key] = reactionsJson.optString(key) }
+                                if (reactions.isNotEmpty()) messageData["reactions"] = reactions
+                            }
                             val messageId = message.optString("id")
                             val messageRef = if (messageId.isBlank()) chatRef.collection("messages").document() else chatRef.collection("messages").document(messageId)
                             batch.set(messageRef, messageData, com.google.firebase.firestore.SetOptions.merge())
@@ -235,6 +257,10 @@ fun KhahishAdvancedSettingsScreen(
                                 .put("lastMessageAt", chatDoc.getLong("lastMessageAt") ?: 0L)
                                 .put("isGroup", chatDoc.getBoolean("isGroup") == true)
                                 .put("groupName", chatDoc.getString("groupName") ?: "")
+                                .put("memberNames", JSONObject(chatDoc.get("memberNames") as? Map<*, *> ?: emptyMap<Any, Any>()))
+                                .put("groupAdmins", JSONArray(chatDoc.get("groupAdmins") as? List<*> ?: emptyList<Any>()))
+                                .put("createdBy", chatDoc.getString("createdBy") ?: "")
+                                .put("createdAt", chatDoc.getLong("createdAt") ?: 0L)
                             val messageArray = JSONArray()
                             snapshots.getOrNull(index)?.documents?.forEach { msg ->
                                 messageArray.put(JSONObject()
@@ -243,7 +269,16 @@ fun KhahishAdvancedSettingsScreen(
                                     .put("text", msg.getString("text") ?: "")
                                     .put("mediaType", msg.getString("mediaType") ?: "text")
                                     .put("imageUrl", msg.getString("imageUrl") ?: "")
-                                    .put("timestamp", msg.getLong("timestamp") ?: 0L))
+                                    .put("timestamp", msg.getLong("timestamp") ?: 0L)
+                                    .put("deliveredTo", JSONArray(msg.get("deliveredTo") as? List<*> ?: emptyList<Any>()))
+                                    .put("readBy", JSONArray(msg.get("readBy") as? List<*> ?: emptyList<Any>()))
+                                    .put("hiddenFor", JSONArray(msg.get("hiddenFor") as? List<*> ?: emptyList<Any>()))
+                                    .put("expiresAt", msg.getLong("expiresAt") ?: 0L)
+                                    .put("replyToMessageId", msg.getString("replyToMessageId") ?: "")
+                                    .put("replyToText", msg.getString("replyToText") ?: "")
+                                    .put("editedAt", msg.getLong("editedAt") ?: 0L)
+                                    .put("starredBy", JSONArray(msg.get("starredBy") as? List<*> ?: emptyList<Any>()))
+                                    .put("reactions", JSONObject(msg.get("reactions") as? Map<*, *> ?: emptyMap<Any, Any>())))
                             }
                             chatJson.put("messages", messageArray)
                             chatArray.put(chatJson)
