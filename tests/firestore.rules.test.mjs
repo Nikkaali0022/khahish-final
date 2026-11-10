@@ -394,3 +394,35 @@ test("backup imports preserve historical sender labels but are explicitly unveri
     backupMemberUids: ["alice", "bob", "carol"]
   }));
 });
+
+test("only group admins can add members, while ordinary members can leave", async () => {
+  await seed("chats/group-admin-test", {
+    members: ["alice", "bob", "carol"],
+    memberNames: { alice: "Alice", bob: "Bob", carol: "Carol" },
+    isGroup: true,
+    groupName: "Friends",
+    groupAdmins: ["alice"],
+    createdBy: "alice",
+    createdAt: Date.now(),
+    lastMessage: "",
+    lastMessageAt: 0,
+    updatedAt: Date.now()
+  });
+
+  await assertSucceeds(updateDoc(doc(db("alice"), "chats/group-admin-test"), {
+    members: arrayUnion("dave"),
+    "memberNames.dave": "Dave",
+    updatedAt: Date.now()
+  }));
+
+  await assertFails(updateDoc(doc(db("bob"), "chats/group-admin-test"), {
+    members: arrayUnion("erin"),
+    "memberNames.erin": "Erin",
+    updatedAt: Date.now()
+  }));
+
+  await assertSucceeds(updateDoc(doc(db("bob"), "chats/group-admin-test"), {
+    members: ["alice", "carol", "dave"],
+    updatedAt: Date.now()
+  }));
+});
