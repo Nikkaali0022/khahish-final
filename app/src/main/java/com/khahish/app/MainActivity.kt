@@ -1151,6 +1151,9 @@ fun ChatList(
     var selectedPictureUrl by remember { mutableStateOf("") }
     var messageSearchResults by remember { mutableStateOf(emptyList<ChatMessageSearchResult>()) }
     var isSearchingMessages by remember { mutableStateOf(false) }
+    var messageSearchCursors by remember { mutableStateOf(emptyMap<String, com.google.firebase.firestore.DocumentSnapshot>()) }
+    var hasMoreMessageSearchPages by remember { mutableStateOf(false) }
+    var isLoadingMoreMessageSearch by remember { mutableStateOf(false) }
 
     DisposableEffect(currentUid) {
         val registration = db.collection("chats")
@@ -1243,14 +1246,17 @@ fun ChatList(
 
     LaunchedEffect(search, chats.map { it.id }.joinToString("|")) {
         val queryText = search.trim()
+        messageSearchResults = emptyList()
+        messageSearchCursors = emptyMap()
+        hasMoreMessageSearchPages = false
+        isLoadingMoreMessageSearch = false
+
         if (queryText.length < 2) {
-            messageSearchResults = emptyList()
             isSearchingMessages = false
         } else {
             kotlinx.coroutines.delay(350)
             val currentChats = chats
             if (currentChats.isEmpty()) {
-                messageSearchResults = emptyList()
                 isSearchingMessages = false
             } else {
                 isSearchingMessages = true
@@ -1263,18 +1269,24 @@ fun ChatList(
                 com.google.android.gms.tasks.Tasks.whenAllSuccess<com.google.firebase.firestore.QuerySnapshot>(tasks)
                     .addOnSuccessListener { snapshots ->
                         if (search.trim() == queryText) {
+                            val nextCursors = mutableMapOf<String, com.google.firebase.firestore.DocumentSnapshot>()
                             messageSearchResults = currentChats.flatMapIndexed { index, chat ->
-                                snapshots.getOrNull(index)?.documents.orEmpty()
-                                    .filter { it.getString("text").orEmpty().contains(queryText, ignoreCase = true) }
-                                    .map { doc ->
-                                        ChatMessageSearchResult(
-                                            chat = chat.copy(initialMessageId = doc.id),
-                                            messageId = doc.id,
-                                            text = doc.getString("text").orEmpty(),
-                                            timestamp = doc.getLong("timestamp") ?: 0L
-                                        )
-                                    }
+                                val docs = snapshots.getOrNull(index)?.documents.orEmpty()
+                                if (docs.size == 100) docs.lastOrNull()?.let { nextCursors[chat.id] = it }
+                                docs.filter { doc ->
+                                    doc.getString("text").orEmpty().contains(queryText, ignoreCase = true) ||
+                                        doc.getString("replyToText").orEmpty().contains(queryText, ignoreCase = true)
+                                }.map { doc ->
+                                    ChatMessageSearchResult(
+                                        chat = chat.copy(initialMessageId = doc.id),
+                                        messageId = doc.id,
+                                        text = doc.getString("text").orEmpty().ifBlank { doc.getString("replyToText").orEmpty() },
+                                        timestamp = doc.getLong("timestamp") ?: 0L
+                                    )
+                                }
                             }.sortedByDescending { it.timestamp }
+                            messageSearchCursors = nextCursors
+                            hasMoreMessageSearchPages = nextCursors.isNotEmpty()
                         }
                         isSearchingMessages = false
                     }
@@ -1284,6 +1296,67 @@ fun ChatList(
                     }
             }
         }
+    }
+
+    fun loadOlderMessageSearchResults() {
+        val queryText = search.trim()
+        if (queryText.length < 2 || isLoadingMoreMessageSearch) return
+        val pageChats = chats.mapNotNull { chat ->
+            messageSearchCursors[chat.id]?.let { cursor -> chat to cursor }
+        }
+        if (pageChats.isEmpty()) {
+            hasMoreMessageSearchPages = false
+            return
+        }
+
+        isLoadingMoreMessageSearch = true
+        val tasks = pageChats.map { (chat, cursor) ->
+            db.collection("chats").document(chat.id).collection("messages")
+                .orderBy("timestamp", Query.Direction.DESCENDING)
+                .startAfter(cursor)
+                .limit(100)
+                .get()
+        }
+        com.google.android.gms.tasks.Tasks.whenAllSuccess<com.google.firebase.firestore.QuerySnapshot>(tasks)
+            .addOnSuccessListener { snapshots ->
+                if (search.trim() == queryText) {
+                    val nextCursors = messageSearchCursors.toMutableMap()
+                    val nextResults = mutableListOf<ChatMessageSearchResult>()
+                    pageChats.forEachIndexed { index, (chat, _) ->
+                        val docs = snapshots.getOrNull(index)?.documents.orEmpty()
+                        if (docs.size == 100) {
+                            docs.lastOrNull()?.let { nextCursors[chat.id] = it }
+                        } else {
+                            nextCursors.remove(chat.id)
+                        }
+                        docs.filter { doc ->
+                            doc.getString("text").orEmpty().contains(queryText, ignoreCase = true) ||
+                                doc.getString("replyToText").orEmpty().contains(queryText, ignoreCase = true)
+                        }.forEach { doc ->
+                            nextResults.add(
+                                ChatMessageSearchResult(
+                                    chat = chat.copy(initialMessageId = doc.id),
+                                    messageId = doc.id,
+                                    text = doc.getString("text").orEmpty().ifBlank { doc.getString("replyToText").orEmpty() },
+                                    timestamp = doc.getLong("timestamp") ?: 0L
+                                )
+                            )
+                        }
+                    }
+                    messageSearchResults = (messageSearchResults + nextResults)
+                        .distinctBy { it.chat.id + "|" + it.messageId }
+                        .sortedByDescending { it.timestamp }
+                    messageSearchCursors = nextCursors
+                    hasMoreMessageSearchPages = nextCursors.isNotEmpty()
+                }
+                isLoadingMoreMessageSearch = false
+            }
+            .addOnFailureListener {
+                isLoadingMoreMessageSearch = false
+                if (search.trim() == queryText) {
+                    showToast(context, "Could not search older messages: ${it.message}")
+                }
+            }
     }
 
     val filtered = chats.filter {
@@ -1466,7 +1539,7 @@ fun ChatList(
                 if (search.trim().length >= 2) {
                     item {
                         Text(
-                            if (isSearchingMessages) "Searching recent messages…" else "Matching recent messages",
+                            if (isSearchingMessages) "Searching messages…" else "Matching messages",
                             color = Green,
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 12.sp,
@@ -1483,6 +1556,23 @@ fun ChatList(
                             Column(Modifier.weight(1f).padding(start = 12.dp)) {
                                 Text(result.chat.name, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                                 Text(result.text, color = Muted, fontSize = 12.sp, maxLines = 2)
+                            }
+                        }
+                    }
+                    if (hasMoreMessageSearchPages) {
+                        item {
+                            TextButton(
+                                onClick = { loadOlderMessageSearchResults() },
+                                enabled = !isLoadingMoreMessageSearch,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                            ) {
+                                if (isLoadingMoreMessageSearch) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Green)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Searching older messages…")
+                                } else {
+                                    Text("Search older messages", color = Green)
+                                }
                             }
                         }
                     }
