@@ -1,9 +1,7 @@
 package com.khahish.app
 
 import android.content.Context
-import android.content.Intent
 import android.os.Build
-import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -19,8 +17,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -393,10 +389,6 @@ fun KhahishAdvancedSettingsScreen(
                 onAnimationsChanged(!it)
                 onSlideTransitionsChanged(!it)
             }
-            AdvancedRow("Screen reader support", "Khahish uses labelled Compose controls; enable TalkBack in Android Accessibility settings") {
-                try { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
-                catch (_: Exception) { Toast.makeText(context, "Open Android Settings → Accessibility → TalkBack", Toast.LENGTH_LONG).show() }
-            }
             AdvancedRow("Language preference", when (language) { "ur" -> "Urdu selected"; "roman" -> "Roman Urdu selected"; else -> "English selected" } + " • Full translation rollout pending") {
                 showLanguage = true
             }
@@ -556,7 +548,6 @@ private fun AdvancedGroup(title: String, content: @Composable ColumnScope.() -> 
 private fun AdvancedRow(title: String, subtitle: String, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick)
-            .semantics { contentDescription = title + ". " + subtitle }
             .padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -577,8 +568,7 @@ private fun AdvancedSwitch(title: String, subtitle: String, checked: Boolean, on
         }
         Switch(
             checked = checked,
-            onCheckedChange = onChange,
-            modifier = Modifier.semantics { contentDescription = title + ". " + subtitle }
+            onCheckedChange = onChange
         )
     }
 }
