@@ -47,7 +47,7 @@ Story audience privacy and server-side block enforcement depend on the matching 
 - Firebase Auth multi-factor / two-step verification setup
 - Linked-device pairing and a web/desktop client (trusted-device revocation is separate)
 - Push notifications for background messages and incoming calls, including server-side FCM delivery
-- Server-side account deactivation and scheduled account deletion workers
+- Server-side account deactivation workflow
 - Full app-wide Urdu/Roman Urdu localization and a complete accessibility audit
 - Production Firebase rules deployment, emulator/security testing and real-device QA
 

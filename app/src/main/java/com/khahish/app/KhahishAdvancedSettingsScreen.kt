@@ -218,23 +218,22 @@ fun KhahishAdvancedSettingsScreen(
         storageText = calculateKhahishStorageBreakdown(context)
     }
 
-    fun sendAccountRequest(type: String) {
+    fun sendAccountRequest() {
         if (uid.isBlank() || busy) return
         busy = true
         val now = System.currentTimeMillis()
         val requestData = mutableMapOf<String, Any>(
             "uid" to uid,
-            "type" to type,
+            "type" to "deactivate",
             "status" to "pending",
             "createdAt" to now,
             "email" to (user?.email ?: ""),
             "note" to "User requested from Khahish Android app"
         )
-        if (type == "delete") requestData["scheduledFor"] = now + 30L * 24L * 60L * 60L * 1000L
         db.collection("accountRequests").document(uid).set(requestData).addOnSuccessListener {
             requestStatus = "pending"
             busy = false
-            Toast.makeText(context, if (type == "delete") "Deletion request saved. Recovery window: 30 days." else "Deactivation request saved.", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "Deactivation request saved. Backend enforcement will be completed in the backend phase.", Toast.LENGTH_LONG).show()
         }.addOnFailureListener {
             busy = false
             Toast.makeText(context, "Request failed: " + (it.message ?: "Unknown error"), Toast.LENGTH_LONG).show()
@@ -408,9 +407,6 @@ fun KhahishAdvancedSettingsScreen(
             AdvancedRow("Deactivate account", "Submit an account deactivation request") {
                 accountRequest = "deactivate"
             }
-            AdvancedRow("Delete account", "Request deletion with a 30-day recovery window") {
-                accountRequest = "delete"
-            }
             if (requestStatus == "pending") {
                 Text("You have a pending account request.", color = Color(0xFFB26A00), fontSize = 12.sp)
                 TextButton(onClick = {
@@ -530,19 +526,15 @@ fun KhahishAdvancedSettingsScreen(
     }
 
     if (accountRequest.isNotBlank()) {
-        val deleting = accountRequest == "delete"
         AlertDialog(
             onDismissRequest = { accountRequest = "" },
-            title = { Text(if (deleting) "Request account deletion?" else "Request deactivation?") },
+            title = { Text("Request deactivation?") },
             text = {
-                Text(if (deleting)
-                    "This records a deletion request and a 30-day recovery period. Your account is NOT automatically deleted until a trusted server-side deletion worker is configured. You can cancel the request during the recovery period."
-                else
-                    "This records your deactivation request. Account access is not automatically disabled until a trusted server-side account-management service is configured.")
+                Text("This records your deactivation request. Account access is not automatically disabled until a trusted server-side account-management service is configured.")
             },
             confirmButton = {
                 TextButton(enabled = !busy, onClick = {
-                    sendAccountRequest(accountRequest)
+                    sendAccountRequest()
                     accountRequest = ""
                 }) { Text(if (busy) "Saving…" else "Confirm request") }
             },
