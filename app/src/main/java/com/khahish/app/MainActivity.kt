@@ -1809,7 +1809,7 @@ fun ConversationScreen(
 
     DisposableEffect(currentUserId, chat.id) {
         val settingsRegistration = db.collection("users").document(currentUserId)
-            .collection("appSettings").document("chat_${chat.peerUid}")
+            .collection("appSettings").document("chat_${chat.id}")
             .addSnapshotListener { snapshot, _ ->
                 showMediaPreviews = snapshot?.getBoolean("showMediaPreviews") != false
             }
@@ -4189,7 +4189,7 @@ private fun KhahishUserProfileScreen(
     val currentUid = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
     val context = LocalContext.current
     val settingsRef = remember(currentUid, uid) {
-        db.collection("users").document(currentUid).collection("appSettings").document("chat_${uid}")
+        db.collection("users").document(currentUid).collection("appSettings").document("chat_${privateChatId(currentUid, uid)}")
     }
 
     var name by remember(uid) { mutableStateOf("Loading profile…") }
