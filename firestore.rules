@@ -104,8 +104,8 @@ service cloud.firestore {
       // Explicit subcollection rules avoid broad wildcard permissions
       // accidentally overriding stricter login-history permissions.
       match /blocked/{blockedUid} {
-        allow get: if isOwner(uid) || (signedIn() && request.auth.uid == blockedUid);
-        allow list: if isOwner(uid);
+        // Only the account owner can inspect their block list.
+        allow get, list: if isOwner(uid);
         allow create, update, delete: if isOwner(uid);
       }
 
