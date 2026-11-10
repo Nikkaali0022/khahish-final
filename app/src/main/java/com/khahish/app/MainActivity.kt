@@ -3171,7 +3171,8 @@ private fun sendChatMessage(
                 data["replyToText"] = replyToText
             }
             chatRef.collection("messages").add(data)
-                .addOnSuccessListener {
+                .addOnSuccessListener { messageDocument ->
+                    KhahishPushClient.notifyMessage(chatRef.id, messageDocument.id)
                     val preview = when (mediaType) {
                         "image" -> "Photo"
                         "video" -> "Video"

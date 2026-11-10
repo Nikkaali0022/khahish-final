@@ -89,6 +89,7 @@ class KhahishCallRepository(
                 "updatedAt" to call.updatedAt
             )
         ).addOnSuccessListener {
+            KhahishPushClient.notifyIncomingCall(call.id)
             onSuccess(call)
         }.addOnFailureListener { error ->
             onError(error.message ?: "Unable to start the call.")

@@ -39,6 +39,7 @@ class KhahishMessagingService : FirebaseMessagingService() {
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             payload["chatId"]?.let { putExtra("khahish_chat_id", it) }
+            payload["callId"]?.let { putExtra("khahish_call_id", it) }
             payload["type"]?.let { putExtra("khahish_notification_type", it) }
         }
         val pendingIntent = PendingIntent.getActivity(
