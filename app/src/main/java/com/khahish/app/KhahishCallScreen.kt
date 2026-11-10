@@ -156,8 +156,23 @@ fun KhahishCallScreen(
         verticalArrangement = Arrangement.Center
     ) {
         Text(if (call.isVideo) "Video call" else "Voice call", color = Color.White, fontSize = 16.sp)
-        Spacer(Modifier.height(20.dp))
-        Text(displayName, color = Color.White, fontSize = 27.sp)
+        Spacer(Modifier.height(30.dp))
+        Box(
+            Modifier.size(148.dp).background(Color(0xFF1B594B), CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = displayName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                color = Color.White,
+                fontSize = 58.sp
+            )
+        }
+        Spacer(Modifier.height(22.dp))
+        Text(
+            displayName.ifBlank { "Khahish user" },
+            color = Color.White,
+            fontSize = 27.sp
+        )
         Spacer(Modifier.height(10.dp))
         Text(statusText, color = Color(0xFFB7D8CE), fontSize = 14.sp)
 
