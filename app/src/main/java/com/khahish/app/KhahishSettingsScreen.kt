@@ -137,11 +137,11 @@ fun KhahishSettingsScreen(
     }
 
     Column(
-        modifier.fillMaxSize().background(Pale)
+        modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState()).padding(16.dp)
     ) {
-        Text("Settings", color = Ink, fontSize = 25.sp, fontWeight = FontWeight.Bold)
-        Text("Manage your Khahish account and app experience", color = Muted, fontSize = 12.sp)
+        Text("Settings", color = MaterialTheme.colorScheme.onSurface, fontSize = 25.sp, fontWeight = FontWeight.Bold)
+        Text("Manage your Khahish account and app experience", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         Spacer(Modifier.height(18.dp))
 
         KhahishSettingsGroup("ACCOUNT") {
@@ -412,7 +412,7 @@ private fun KhahishSettingsGroup(
     title: String,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Column(Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(16.dp)).padding(14.dp)) {
+    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp)).padding(14.dp)) {
         Text(title, color = Green, fontWeight = FontWeight.Bold, fontSize = 12.sp)
         Spacer(Modifier.height(8.dp))
         content()
@@ -450,7 +450,7 @@ private fun KhahishSettingsSwitch(
 ) {
     Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text(title, color = if (enabled) Ink else Muted, fontWeight = FontWeight.Medium)
+            Text(title, color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
             Text(subtitle, color = Muted, fontSize = 11.sp)
         }
         Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
