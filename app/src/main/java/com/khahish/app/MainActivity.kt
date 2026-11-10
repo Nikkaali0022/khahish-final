@@ -10,6 +10,8 @@ import android.media.MediaRecorder
 import android.media.MediaPlayer
 import android.content.Intent
 import android.net.Uri
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -155,7 +157,8 @@ data class MessageItem(
     val reactions: Map<String, String> = emptyMap(),
     val editedAt: Long = 0L,
     val starredBy: List<String> = emptyList(),
-    val restoredFromBackup: Boolean = false
+    val restoredFromBackup: Boolean = false,
+    val isPending: Boolean = false
 )
 
 private fun privateChatId(uid1: String, uid2: String): String =
@@ -2214,7 +2217,7 @@ fun ConversationScreen(
     DisposableEffect(chat.id, currentUserId) {
         val messagesRegistration = chatRef.collection("messages")
             .orderBy("timestamp", Query.Direction.ASCENDING)
-            .addSnapshotListener { snapshot, error ->
+            .addSnapshotListener(com.google.firebase.firestore.MetadataChanges.INCLUDE) { snapshot, error ->
                 if (error != null || snapshot == null) return@addSnapshotListener
 
                 messages = snapshot.documents.map { doc ->
@@ -2237,7 +2240,8 @@ fun ConversationScreen(
                         reactions = (doc.get("reactions") as? Map<*, *>)?.mapNotNull { (k, v) -> if (k is String && v is String) k to v else null }?.toMap() ?: emptyMap(),
                         editedAt = doc.getLong("editedAt") ?: 0L,
                         starredBy = doc.get("starredBy") as? List<String> ?: emptyList(),
-                        restoredFromBackup = doc.getBoolean("restoredFromBackup") == true
+                        restoredFromBackup = doc.getBoolean("restoredFromBackup") == true,
+                        isPending = doc.metadata.hasPendingWrites()
                     )
                 }.filter { currentUserId !in it.hiddenFor && (it.expiresAt == 0L || it.expiresAt > System.currentTimeMillis()) }
 
@@ -2757,21 +2761,28 @@ fun ConversationScreen(
 
                             TextButton(onClick = { replyTarget = msg }, contentPadding = PaddingValues(horizontal = 3.dp, vertical = 0.dp)) { Icon(Icons.Default.Reply, "Reply", tint = Green, modifier = Modifier.size(16.dp)) }
                             if (isMe) {
-                                val read = msg.readBy.any { it != currentUserId }
-                                val delivered =
-                                    msg.deliveredTo.any { it != currentUserId }
-
                                 Spacer(Modifier.width(4.dp))
-                                Text(
-                                    when {
-                                        read -> "✓✓"
-                                        delivered -> "✓✓"
-                                        else -> "✓"
-                                    },
-                                    color = if (read) Color(0xFF1686D9) else Muted,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                if (msg.isPending) {
+                                    Icon(
+                                        Icons.Default.Schedule,
+                                        contentDescription = "Waiting to send",
+                                        tint = Muted,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                } else {
+                                    val read = msg.readBy.any { it != currentUserId }
+                                    val delivered = msg.deliveredTo.any { it != currentUserId }
+                                    Text(
+                                        when {
+                                            read -> "✓✓"
+                                            delivered -> "✓✓"
+                                            else -> "✓"
+                                        },
+                                        color = if (read) Color(0xFF1686D9) else Muted,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
                     }
@@ -3569,6 +3580,15 @@ private fun MediaOpenRow(
     }
 }
 
+private fun isKhahishNetworkAvailable(context: Context): Boolean {
+    val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        ?: return false
+    val network = connectivity.activeNetwork ?: return false
+    val capabilities = connectivity.getNetworkCapabilities(network) ?: return false
+    return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+        capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+}
+
 private fun sendChatMessage(
     chatRef: DocumentReference,
     senderId: String,
@@ -3581,6 +3601,11 @@ private fun sendChatMessage(
     onComplete: () -> Unit
 ) {
     val now = System.currentTimeMillis()
+    val completionDelivered = java.util.concurrent.atomic.AtomicBoolean(false)
+    fun completeOnce() {
+        if (completionDelivered.compareAndSet(false, true)) onComplete()
+    }
+
     chatRef.get().addOnSuccessListener { chatSnapshot ->
         fun sendNow() {
             val duration = chatSnapshot.getLong("disappearingDurationMs") ?: 0L
@@ -3598,56 +3623,67 @@ private fun sendChatMessage(
                 data["replyToMessageId"] = replyToMessageId
                 data["replyToText"] = replyToText
             }
-            chatRef.collection("messages").add(data)
-                .addOnSuccessListener { messageDocument ->
-                    KhahishPushClient.notifyMessage(chatRef.id, messageDocument.id)
-                    val preview = when (mediaType) {
-                        "image" -> "Photo"
-                        "video" -> "Video"
-                        "audio" -> "Audio"
-                        "document" -> "Document"
-                        "location" -> "Location"
-                        "contact" -> "Contact"
-                        else -> messageText
-                    }
-                    chatRef.update(mapOf(
-                        "lastMessage" to preview,
-                        "lastMessageAt" to now,
-                        "updatedAt" to now
-                    )).addOnCompleteListener { updateTask ->
-                        if (!updateTask.isSuccessful) showToast(context, "Message sent, but chat preview could not update.")
-                        onComplete()
-                    }
+
+            // Firestore's Android SDK persists this write locally and retries it
+            // automatically when connectivity returns. The snapshot listener
+            // displays a clock while metadata.hasPendingWrites() is true.
+            val writeTask = chatRef.collection("messages").add(data)
+            completeOnce()
+
+            writeTask.addOnSuccessListener { messageDocument ->
+                KhahishPushClient.notifyMessage(chatRef.id, messageDocument.id)
+                val preview = when (mediaType) {
+                    "image" -> "Photo"
+                    "video" -> "Video"
+                    "audio" -> "Audio"
+                    "document" -> "Document"
+                    "location" -> "Location"
+                    "contact" -> "Contact"
+                    else -> messageText
                 }
-                .addOnFailureListener { error ->
-                    onComplete()
-                    showToast(context, "Message failed: ${error.message}")
+                chatRef.update(mapOf(
+                    "lastMessage" to preview,
+                    "lastMessageAt" to now,
+                    "updatedAt" to now
+                )).addOnCompleteListener { updateTask ->
+                    if (!updateTask.isSuccessful) showToast(context, "Message sent, but chat preview could not update.")
+                    completeOnce()
                 }
+            }.addOnFailureListener { error ->
+                completeOnce()
+                showToast(context, "Message could not be synced: ${error.message}")
+            }
         }
 
         val members = chatSnapshot.get("members") as? List<*> ?: emptyList<Any>()
         val otherUid = members.filterIsInstance<String>().firstOrNull { it != senderId }.orEmpty()
         if (chatSnapshot.getBoolean("isGroup") != true && members.size == 2 && otherUid.isNotBlank()) {
-            val db = FirebaseFirestore.getInstance()
-            db.collection("users").document(senderId).collection("blocked").document(otherUid).get()
-                .addOnSuccessListener { myBlock ->
-                    if (myBlock.exists()) {
-                        onComplete()
-                        showToast(context, "Message not sent. You have blocked this account.")
-                    } else sendNow()
-                }
-                .addOnFailureListener {
-                    onComplete()
-                    showToast(context, "Could not verify your blocked list. Please try again.")
-                }
+            if (!isKhahishNetworkAvailable(context)) {
+                // Queue locally while offline; Firestore Rules re-check blocks on sync.
+                sendNow()
+            } else {
+                val db = FirebaseFirestore.getInstance()
+                db.collection("users").document(senderId).collection("blocked").document(otherUid).get()
+                    .addOnSuccessListener { myBlock ->
+                        if (myBlock.exists()) {
+                            completeOnce()
+                            showToast(context, "Message not sent. You have blocked this account.")
+                        } else sendNow()
+                    }
+                    .addOnFailureListener {
+                        completeOnce()
+                        showToast(context, "Could not verify your blocked list. Please try again.")
+                    }
+            }
         } else {
             sendNow()
         }
     }.addOnFailureListener { error ->
-        onComplete()
+        completeOnce()
         showToast(context, "Could not read chat settings: ${error.message}")
     }
 }
+
 private fun openSharedUrl(context: Context, url: String) {
     if (url.isBlank()) {
         showToast(context, "Media link is not available")
