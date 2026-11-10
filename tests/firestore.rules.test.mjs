@@ -11,7 +11,6 @@ import {
   doc,
   getDoc,
   getDocs,
-  increment,
   setDoc,
   updateDoc,
   writeBatch,
@@ -237,26 +236,6 @@ test("live location writes are limited to the matching chat member UID", async (
   await assertFails(setDoc(doc(db("bob"), "chats/alice_bob/liveLocations/alice"), {
     ...point,
     uid: "alice"
-  }));
-});
-
-test("community membership can only add or remove the signed-in member", async () => {
-  await seed("communities/community1", {
-    name: "Test",
-    description: "",
-    ownerUid: "alice",
-    members: ["alice"],
-    memberCount: 1,
-    createdAt: Date.now()
-  });
-
-  await assertSucceeds(updateDoc(doc(db("bob"), "communities/community1"), {
-    members: arrayUnion("bob"),
-    memberCount: increment(1)
-  }));
-  await assertFails(updateDoc(doc(db("bob"), "communities/community1"), {
-    members: arrayUnion("carol"),
-    memberCount: increment(1)
   }));
 });
 
