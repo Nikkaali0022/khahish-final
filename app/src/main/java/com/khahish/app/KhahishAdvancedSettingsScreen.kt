@@ -406,7 +406,7 @@ fun KhahishAdvancedSettingsScreen(
                                 .update("trusted", false)
                                 .addOnSuccessListener {
                                     devices = devices.filterNot { it.first == id }
-                                    Toast.makeText(context, "Device access revoked", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Device removed. Its Khahish session will sign out when it reconnects.", Toast.LENGTH_LONG).show()
                                 }
                                 .addOnFailureListener { Toast.makeText(context, "Could not revoke device: " + it.message, Toast.LENGTH_LONG).show() }
                         }) { Text("Revoke") }
