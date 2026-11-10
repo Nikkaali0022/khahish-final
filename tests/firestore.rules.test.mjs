@@ -371,4 +371,16 @@ test("backup imports preserve historical sender labels but are explicitly unveri
     ...imported,
     timestamp: restoredAt + 60_000
   }));
+
+  await seed("chats/alice_carol", {
+    members: ["alice", "carol"],
+    lastMessage: "",
+    lastMessageAt: 0,
+    updatedAt: Date.now()
+  });
+  await assertSucceeds(setDoc(doc(db("alice"), "chats/alice_carol/messages/backup_alice_former_member"), {
+    ...imported,
+    senderId: "bob",
+    backupMemberUids: ["alice", "bob", "carol"]
+  }));
 });
