@@ -164,71 +164,14 @@ jobs:
             echo "google-services.json already in project or missing"
           fi
 
-      - name: Configure Firebase, Kotlin and Coil
+      - name: Verify project build configuration
         run: |
-          python3 - <<'PY'
-          import os
-          import re
-          from pathlib import Path
-
-          project = Path(os.environ["PROJECT_DIR"])
-          root = project / "build.gradle.kts"
-          app = project / "app" / "build.gradle.kts"
-
-          if root.exists():
-              root_text = root.read_text()
-              for plugin in ["org.jetbrains.kotlin.android", "org.jetbrains.kotlin.plugin.compose"]:
-                  pattern = (r'(id\("' + re.escape(plugin) + r'"\)\s+version\s+")[^"]+(" apply false)')
-                  root_text, count = re.subn(pattern, r'\g<1>2.4.0\g<2>', root_text)
-
-              if "com.google.gms.google-services" not in root_text:
-                  anchor = '    id("org.jetbrains.kotlin.plugin.compose") version "2.4.0" apply false'
-                  if anchor in root_text:
-                      root_text = root_text.replace(anchor, anchor + '\n    id("com.google.gms.google-services") version "4.5.0" apply false')
-              root.write_text(root_text)
-
-          if app.exists():
-              app_text = app.read_text()
-              if 'id("com.google.gms.google-services")' not in app_text:
-                  anchor = '    id("org.jetbrains.kotlin.plugin.compose")'
-                  if anchor in app_text:
-                      app_text = app_text.replace(anchor, anchor + '\n    id("com.google.gms.google-services")', 1)
-
-              if "compileOptions {" not in app_text:
-                  anchor = "    buildFeatures { compose = true }"
-                  if anchor in app_text:
-                      app_text = app_text.replace(anchor, """    compileOptions {
-                    sourceCompatibility = JavaVersion.VERSION_17
-                    targetCompatibility = JavaVersion.VERSION_17
-                }
-
-                buildFeatures { compose = true }""")
-
-              app_text = re.sub(r'jvmTarget\s*=\s*"[^"]+"', '', app_text)
-
-              if "compilerOptions {" not in app_text:
-                  app_text = app_text.replace("dependencies {", """kotlin {
-                compilerOptions {
-                    jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget("17")
-                }
-            }
-
-            dependencies {""", 1)
-
-              if "firebase-bom" not in app_text:
-                  app_text = app_text.replace("dependencies {", """dependencies {
-                implementation(platform("com.google.firebase:firebase-bom:35.1.0"))
-                implementation("com.google.firebase:firebase-auth")
-                implementation("com.google.firebase:firebase-firestore")""", 1)
-
-              if "io.coil-kt:coil-compose" not in app_text:
-                  app_text = app_text.replace("dependencies {", """dependencies {
-                implementation("io.coil-kt:coil-compose:2.7.0")""", 1)
-
-              app.write_text(app_text)
-
-          print("Build configurations applied successfully")
-          PY
+          cd "$PROJECT_DIR"
+          test -f app/google-services.json || { echo "Missing app/google-services.json"; exit 1; }
+          grep -q 'id("com.google.gms.google-services")' app/build.gradle.kts
+          grep -q 'com.google.firebase:firebase-bom' app/build.gradle.kts
+          grep -q 'io.coil-kt:coil-compose' app/build.gradle.kts
+          echo "Using the project's committed Android, Kotlin and Firebase versions without rewriting them."
 
       - name: Run Android Keystore instrumentation tests
         uses: reactivecircus/android-emulator-runner@v2
