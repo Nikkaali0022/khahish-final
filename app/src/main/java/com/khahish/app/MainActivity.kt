@@ -2159,9 +2159,9 @@ private fun sendChatMessage(
     mediaUrl: String,
     mediaType: String,
     context: Context,
-    onComplete: () -> Unit,
     replyToMessageId: String = "",
-    replyToText: String = ""
+    replyToText: String = "",
+    onComplete: () -> Unit
 ) {
     val now = System.currentTimeMillis()
     chatRef.get().addOnSuccessListener { chatSnapshot ->
