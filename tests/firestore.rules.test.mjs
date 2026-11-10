@@ -330,3 +330,35 @@ test("caller timeout and incoming-call back navigation can close ringing calls",
     updatedAt: Date.now()
   }));
 });
+
+test("backup imports preserve historical sender labels but are explicitly unverified", async () => {
+  await seed("chats/alice_bob", {
+    members: ["alice", "bob"],
+    lastMessage: "",
+    lastMessageAt: 0,
+    updatedAt: Date.now()
+  });
+
+  const restoredAt = Date.now();
+  const imported = {
+    senderId: "bob",
+    text: "Historical message from backup",
+    imageUrl: "",
+    mediaType: "text",
+    timestamp: restoredAt - 60_000,
+    deliveredTo: ["alice"],
+    readBy: ["bob", "alice"],
+    restoredFromBackup: true,
+    restoredBy: "alice",
+    restoredAt
+  };
+  await assertSucceeds(setDoc(doc(db("alice"), "chats/alice_bob/messages/backup_alice_old1"), imported));
+  await assertFails(setDoc(doc(db("alice"), "chats/alice_bob/messages/backup_alice_forged"), {
+    ...imported,
+    restoredBy: "bob"
+  }));
+  await assertFails(setDoc(doc(db("alice"), "chats/alice_bob/messages/backup_alice_future"), {
+    ...imported,
+    timestamp: restoredAt + 60_000
+  }));
+});
