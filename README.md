@@ -55,4 +55,4 @@ Story audience privacy and server-side block enforcement depend on the matching 
 
 Account deletion is intentionally excluded from Khahish.
 
-Location sharing currently sends the device's last known location; it is not continuous live-location tracking. Chat backup restores JSON message records and media URLs, not separate copies of Cloudinary media files.
+One-time location sharing sends the device's last known location. Timed live-location sharing now uses an Android foreground service and writes updates under `chats/{chatId}/liveLocations/{uid}`; the matching participant-only Firestore rules must be reviewed and published before relying on it. Chat backup restores JSON message records and media URLs, not separate copies of Cloudinary media files.
