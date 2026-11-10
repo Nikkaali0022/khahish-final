@@ -368,12 +368,12 @@ fun KhahishAdvancedSettingsScreen(
         }
     }
 
-    Column(modifier.fillMaxSize().background(Pale).verticalScroll(rememberScrollState()).padding(16.dp)) {
+    Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).verticalScroll(rememberScrollState()).padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") }
             Column {
-                Text("Advanced settings", color = Ink, fontSize = 23.sp, fontWeight = FontWeight.Bold)
-                Text("Accessibility, accounts, privacy and data", color = Muted, fontSize = 12.sp)
+                Text("Advanced settings", color = MaterialTheme.colorScheme.onSurface, fontSize = 23.sp, fontWeight = FontWeight.Bold)
+                Text("Accessibility, accounts, privacy and data", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -421,10 +421,10 @@ fun KhahishAdvancedSettingsScreen(
                 showPrivacy = !showPrivacy
             }
             if (showPrivacy) {
-                Text("Online status: " + if (privacyPrefs.getBoolean("online_status_visible", true)) "Visible" else "Hidden", color = Ink)
-                Text("Last seen: " + if (privacyPrefs.getBoolean("last_seen_visible", true)) "Visible" else "Hidden", color = Ink)
-                Text("Read receipts: " + if (privacyPrefs.getBoolean("read_receipts", true)) "On" else "Off", color = Ink)
-                Text("Profile: " + (user?.email ?: "Guest account"), color = Muted, fontSize = 12.sp)
+                Text("Online status: " + if (privacyPrefs.getBoolean("online_status_visible", true)) "Visible" else "Hidden", color = MaterialTheme.colorScheme.onSurface)
+                Text("Last seen: " + if (privacyPrefs.getBoolean("last_seen_visible", true)) "Visible" else "Hidden", color = MaterialTheme.colorScheme.onSurface)
+                Text("Read receipts: " + if (privacyPrefs.getBoolean("read_receipts", true)) "On" else "Off", color = MaterialTheme.colorScheme.onSurface)
+                Text("Profile: " + (user?.email ?: "Guest account"), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
             }
             AdvancedRow("Trusted devices", "Review devices recently used for this account") {
                 showDevices = !showDevices
@@ -434,7 +434,7 @@ fun KhahishAdvancedSettingsScreen(
             if (showDevices) {
                 devices.forEach { (id, name) ->
                     Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(name + if (id == deviceId) " (this device)" else "", color = Ink, modifier = Modifier.weight(1f), fontSize = 12.sp)
+                        Text(name + if (id == deviceId) " (this device)" else "", color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f), fontSize = 12.sp)
                         if (id != deviceId) TextButton(onClick = {
                             db.collection("users").document(uid).collection("trustedDevices").document(id)
                                 .update("trusted", false)
@@ -448,7 +448,7 @@ fun KhahishAdvancedSettingsScreen(
                 }
             }
             AdvancedRow("Login history", "Show recent app sessions recorded by Khahish") { showHistory = !showHistory }
-            if (showHistory) history.forEach { Text(it, color = Muted, fontSize = 11.sp, modifier = Modifier.padding(vertical = 3.dp)) }
+            if (showHistory) history.forEach { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, modifier = Modifier.padding(vertical = 3.dp)) }
         }
 
         Spacer(Modifier.height(12.dp))
@@ -458,7 +458,7 @@ fun KhahishAdvancedSettingsScreen(
             AdvancedRow("Restore chats", "Merge messages from a backup for this same account") {
                 backupRestoreLauncher.launch(arrayOf("application/json", "text/json", "*/*"))
             }
-            Text(storageText, color = Muted, fontSize = 12.sp)
+            Text(storageText, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
             AdvancedRow("Refresh storage usage", "Break down cache, files, databases and preferences") {
                 storageText = calculateKhahishStorageBreakdown(context)
             }
@@ -538,7 +538,7 @@ fun KhahishAdvancedSettingsScreen(
 
 @Composable
 private fun AdvancedGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(16.dp)).padding(14.dp)) {
+    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp)).padding(14.dp)) {
         Text(title, color = Green, fontWeight = FontWeight.Bold, fontSize = 12.sp)
         Spacer(Modifier.height(8.dp))
         content()
@@ -553,10 +553,10 @@ private fun AdvancedRow(title: String, subtitle: String, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
-            Text(title, color = Ink, fontWeight = FontWeight.SemiBold)
-            Text(subtitle, color = Muted, fontSize = 11.sp)
+            Text(title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
         }
-        Icon(Icons.Default.ChevronRight, null, tint = Muted)
+        Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -564,8 +564,8 @@ private fun AdvancedRow(title: String, subtitle: String, onClick: () -> Unit) {
 private fun AdvancedSwitch(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text(title, color = Ink, fontWeight = FontWeight.Medium)
-            Text(subtitle, color = Muted, fontSize = 11.sp)
+            Text(title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+            Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
         }
         Switch(
             checked = checked,
