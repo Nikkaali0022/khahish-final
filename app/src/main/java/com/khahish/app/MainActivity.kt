@@ -1076,7 +1076,7 @@ fun ChatList(
         }
     }
     Column(modifier.fillMaxSize()) {
-        OutlinedTextField,
+        OutlinedTextField(
             value = search,
             onValueChange = { search = it },
             placeholder = { Text("Search conversations") },
