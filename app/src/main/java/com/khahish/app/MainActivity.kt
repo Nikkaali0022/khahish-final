@@ -2324,25 +2324,22 @@ fun ConversationScreen(
                         chat.isGroup -> "Group · ${chat.memberUids.size} members"
                         peerTyping -> "typing..."
                         peerOnline && peerOnlineStatusVisible -> "Online"
-                        peerLastSeenVisible && peerLastSeenAt > 0L ->
-                            "Last seen " + java.text.SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault())
+                        peerLastSeenVisible && peerLastSeenAt > 0L -> {
+                            val elapsed = (System.currentTimeMillis() - peerLastSeenAt).coerceAtLeast(0L)
+                            val pattern = if (elapsed <= 7L * 24L * 60L * 60L * 1000L) "h:mm a" else "d MMM, h:mm a"
+                            "Last seen " + java.text.SimpleDateFormat(pattern, Locale.getDefault())
                                 .format(java.util.Date(peerLastSeenAt))
-                        else -> "Khahish private chat"
+                        }
+                        else -> ""
                     }
                     Text(peerStatusText, color = if (peerTyping || peerStatusText == "Online") Green else Muted, fontSize = 11.sp)
                     if (peerBio.isNotBlank()) Text(peerBio, color = Muted, fontSize = 10.sp, maxLines = 1)
-                }
-                IconButton(onClick = { showDisappearingOptions = true }) {
-                    Icon(Icons.Default.Timer, "Disappearing messages", tint = if (disappearingDurationMs > 0L) Green else Muted)
                 }
                 IconButton(onClick = {
                     chatSearchVisible = !chatSearchVisible
                     chatSearchQuery = ""
                 }) {
                     Icon(Icons.Default.Search, "Search chat history", tint = Green)
-                }
-                IconButton(onClick = { showStarredDialog = true }) {
-                    Icon(Icons.Default.Star, "Starred messages", tint = Green)
                 }
                 if (!chat.isGroup) {
                     IconButton(onClick = { onStartCall(false) }) { Icon(Icons.Default.Call, "Voice call", tint = Green) }
