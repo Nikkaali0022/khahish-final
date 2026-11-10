@@ -2755,52 +2755,52 @@ fun ConversationScreen(
 
             IconButton(
                 enabled = !isUploading && !isSending,
+                modifier = Modifier
+                    .padding(start = 5.dp)
+                    .size(48.dp)
+                    .background(Green, CircleShape),
                 onClick = {
-                    if (isRecordingVoice) {
-                        stopVoiceRecordingAndSend()
-                    } else if (ContextCompat.checkSelfPermission(
-                            context, Manifest.permission.RECORD_AUDIO
-                        ) == PackageManager.PERMISSION_GRANTED
-                    ) {
-                        startVoiceRecording()
-                    } else {
-                        voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    val message = text.trim()
+                    when {
+                        isRecordingVoice -> stopVoiceRecordingAndSend()
+                        message.isNotBlank() -> {
+                            text = ""
+                            updateTyping(false)
+                            isSending = true
+                            sendChatMessage(
+                                chatRef,
+                                currentUserId,
+                                message,
+                                "",
+                                "text",
+                                context,
+                                replyToMessageId = replyTarget?.id.orEmpty(),
+                                replyToText = replyTarget?.text?.ifBlank { replyTarget?.mediaType ?: "Media" }.orEmpty()
+                            ) {
+                                isSending = false
+                                replyTarget = null
+                            }
+                        }
+                        ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED ->
+                            startVoiceRecording()
+                        else -> voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                     }
                 }
             ) {
                 Icon(
-                    if (isRecordingVoice) Icons.Default.Stop else Icons.Default.Mic,
-                    if (isRecordingVoice) "Stop and send voice message" else "Record voice message",
-                    tint = if (isRecordingVoice) Color(0xFFE54848) else Green
+                    when {
+                        isRecordingVoice -> Icons.Default.Stop
+                        text.isNotBlank() -> Icons.Default.Send
+                        else -> Icons.Default.Mic
+                    },
+                    when {
+                        isRecordingVoice -> "Stop and send voice message"
+                        text.isNotBlank() -> "Send message"
+                        else -> "Record voice message"
+                    },
+                    tint = Color.White,
+                    modifier = Modifier.size(23.dp)
                 )
-            }
-
-            IconButton(
-                enabled = !isSending && !isUploading,
-                onClick = {
-                    val message = text.trim()
-                    if (message.isNotBlank()) {
-                        text = ""
-                        updateTyping(false)
-                        isSending = true
-
-                        sendChatMessage(
-                            chatRef,
-                            currentUserId,
-                            message,
-                            "",
-                            "text",
-                            context,
-                            replyToMessageId = replyTarget?.id.orEmpty(),
-                            replyToText = replyTarget?.text?.ifBlank { replyTarget?.mediaType ?: "Media" }.orEmpty()
-                        ) {
-                            isSending = false
-                            replyTarget = null
-                        }
-                    }
-                }
-            ) {
-                Icon(Icons.Default.Send, "Send", tint = Green)
             }
         }
     }
