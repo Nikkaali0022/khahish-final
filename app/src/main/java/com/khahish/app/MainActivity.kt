@@ -3658,9 +3658,9 @@ private fun sendChatMessage(
         if (completionDelivered.compareAndSet(false, true)) onComplete()
     }
 
-    chatRef.get().addOnSuccessListener { chatSnapshot ->
+    fun sendUsingCachedSettings(chatSnapshot: com.google.firebase.firestore.DocumentSnapshot?) {
         fun sendNow() {
-            val duration = chatSnapshot.getLong("disappearingDurationMs") ?: 0L
+            val duration = chatSnapshot?.getLong("disappearingDurationMs") ?: 0L
             val data = hashMapOf<String, Any>(
                 "senderId" to senderId,
                 "text" to messageText,
@@ -3676,9 +3676,8 @@ private fun sendChatMessage(
                 data["replyToText"] = replyToText
             }
 
-            // Firestore's Android SDK persists this write locally and retries it
-            // automatically when connectivity returns. The snapshot listener
-            // displays a clock while metadata.hasPendingWrites() is true.
+            // Firestore stores this write in its local persistent queue immediately,
+            // renders it with hasPendingWrites=true, and retries it after reconnect.
             val writeTask = chatRef.collection("messages").add(data)
             completeOnce()
 
@@ -3707,15 +3706,15 @@ private fun sendChatMessage(
             }
         }
 
-        val members = chatSnapshot.get("members") as? List<*> ?: emptyList<Any>()
+        val members = chatSnapshot?.get("members") as? List<*> ?: emptyList<Any>()
         val otherUid = members.filterIsInstance<String>().firstOrNull { it != senderId }.orEmpty()
-        if (chatSnapshot.getBoolean("isGroup") != true && members.size == 2 && otherUid.isNotBlank()) {
+        if (chatSnapshot?.getBoolean("isGroup") != true && members.size == 2 && otherUid.isNotBlank()) {
             if (!isKhahishNetworkAvailable(context)) {
-                // Queue locally while offline; Firestore Rules re-check blocks on sync.
+                // Rules re-check blocked users when this queued write reaches Firestore.
                 sendNow()
             } else {
-                val db = FirebaseFirestore.getInstance()
-                db.collection("users").document(senderId).collection("blocked").document(otherUid).get()
+                FirebaseFirestore.getInstance().collection("users").document(senderId)
+                    .collection("blocked").document(otherUid).get()
                     .addOnSuccessListener { myBlock ->
                         if (myBlock.exists()) {
                             completeOnce()
@@ -3730,9 +3729,22 @@ private fun sendChatMessage(
         } else {
             sendNow()
         }
-    }.addOnFailureListener { error ->
-        completeOnce()
-        showToast(context, "Could not read chat settings: ${error.message}")
+    }
+
+    if (isKhahishNetworkAvailable(context)) {
+        chatRef.get().addOnSuccessListener { sendUsingCachedSettings(it) }
+            .addOnFailureListener { error ->
+                completeOnce()
+                showToast(context, "Could not read chat settings: ${error.message}")
+            }
+    } else {
+        chatRef.get(com.google.firebase.firestore.Source.CACHE)
+            .addOnSuccessListener { sendUsingCachedSettings(it) }
+            .addOnFailureListener {
+                // A first-time/offline chat may have no cached document. Still
+                // enqueue the message locally; the server enforces security on sync.
+                sendUsingCachedSettings(null)
+            }
     }
 }
 
