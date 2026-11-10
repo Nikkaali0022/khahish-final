@@ -69,13 +69,13 @@ fun KhahishGroupChatScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().background(Pale)) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Row(
-            Modifier.fillMaxWidth().background(Color.White).statusBarsPadding().padding(8.dp),
+            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).statusBarsPadding().padding(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") }
-            Text("New group", modifier = Modifier.weight(1f), color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("New group", modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             if (selected.isNotEmpty()) Text("${selected.size} selected", color = Green, modifier = Modifier.padding(end = 10.dp))
         }
         OutlinedTextField(
@@ -102,17 +102,17 @@ fun KhahishGroupChatScreen(
                 selected.values.take(5).forEach { user ->
                     AssistChip(onClick = { selected = selected - user.uid }, label = { Text(user.name.take(12)) })
                 }
-                if (selected.size > 5) Text("+${selected.size - 5}", color = Muted, modifier = Modifier.align(Alignment.CenterVertically))
+                if (selected.size > 5) Text("+${selected.size - 5}", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.CenterVertically))
             }
         }
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Green)
         if (normalizeKhahishUsername(search).length < 3) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text("Enter a complete unique username to add someone", color = Muted)
+                Text("Enter a complete unique username to add someone", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else if (!loading && users.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text("No users found", color = Muted)
+                Text("No users found", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
             LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
@@ -128,8 +128,8 @@ fun KhahishGroupChatScreen(
                             Text(user.name.firstOrNull()?.uppercase() ?: "K", color = Green, fontWeight = FontWeight.Bold)
                         }
                         Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                            Text(user.name.ifBlank { "Khahish User" }, color = Ink, fontWeight = FontWeight.SemiBold)
-                            if (user.username.isNotBlank()) Text("@${user.username}", color = Muted, fontSize = 12.sp)
+                            Text(user.name.ifBlank { "Khahish User" }, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                            if (user.username.isNotBlank()) Text("@${user.username}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                         }
                         Checkbox(checked = isSelected, onCheckedChange = { checked ->
                             selected = if (checked) selected + (user.uid to user) else selected - user.uid
