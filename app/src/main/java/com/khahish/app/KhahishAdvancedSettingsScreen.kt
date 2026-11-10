@@ -29,6 +29,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
+import java.io.File
 
 @Composable
 fun KhahishAdvancedSettingsScreen(
@@ -95,10 +96,7 @@ fun KhahishAdvancedSettingsScreen(
                     }
                 }
         }
-        val cacheBytes = context.cacheDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
-        val filesBytes = context.filesDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
-        storageText = "Cache: " + android.text.format.Formatter.formatShortFileSize(context, cacheBytes) +
-            " • App files: " + android.text.format.Formatter.formatShortFileSize(context, filesBytes)
+        storageText = calculateKhahishStorageBreakdown(context)
     }
 
     fun sendAccountRequest(type: String) {
@@ -203,9 +201,9 @@ fun KhahishAdvancedSettingsScreen(
             }
             AdvancedSwitch("Reduced motion", "Turn off app animations and slide transitions", reducedMotion) {
                 reducedMotion = it
-                uiPrefs.edit().putBoolean("animations_enabled", !it).putBoolean("slide_transitions_enabled", false).apply()
+                uiPrefs.edit().putBoolean("animations_enabled", !it).putBoolean("slide_transitions_enabled", !it).apply()
                 onAnimationsChanged(!it)
-                onSlideTransitionsChanged(false)
+                onSlideTransitionsChanged(!it)
             }
             AdvancedRow("Screen reader support", "Khahish uses labelled Compose controls; enable TalkBack in Android Accessibility settings") {
                 try { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
@@ -279,15 +277,12 @@ fun KhahishAdvancedSettingsScreen(
         AdvancedGroup("YOUR DATA & STORAGE") {
             AdvancedRow("Export my data", "Share a JSON copy of your profile, chats and messages") { exportData() }
             Text(storageText, color = Muted, fontSize = 12.sp)
-            AdvancedRow("Refresh storage usage", "Calculate local cache and app-file size") {
-                val cacheBytes = context.cacheDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
-                val filesBytes = context.filesDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
-                storageText = "Cache: " + android.text.format.Formatter.formatShortFileSize(context, cacheBytes) +
-                    " • App files: " + android.text.format.Formatter.formatShortFileSize(context, filesBytes)
+            AdvancedRow("Refresh storage usage", "Break down cache, files, databases and preferences") {
+                storageText = calculateKhahishStorageBreakdown(context)
             }
             AdvancedRow("Clear temporary cache", "Remove cached files only; account and chats remain") {
                 val cleared = context.cacheDir.deleteRecursively()
-                storageText = "Temporary cache cleared"
+                storageText = calculateKhahishStorageBreakdown(context)
                 Toast.makeText(context, if (cleared) "Cache cleared" else "Some cache files could not be removed", Toast.LENGTH_SHORT).show()
             }
             AdvancedRow("Manage app data", "Open Android settings to review permissions, storage and clear app data") {
@@ -401,4 +396,20 @@ private fun AdvancedSwitch(title: String, subtitle: String, checked: Boolean, on
             modifier = Modifier.semantics { contentDescription = title + ". " + subtitle }
         )
     }
+}
+
+private fun calculateKhahishStorageBreakdown(context: Context): String {
+    val cacheBytes = directoryBytes(context.cacheDir)
+    val filesBytes = directoryBytes(context.filesDir)
+    val databaseBytes = context.databaseList().sumOf { context.getDatabasePath(it).length() }
+    val preferencesBytes = directoryBytes(File(context.applicationInfo.dataDir, "shared_prefs"))
+    val totalBytes = cacheBytes + filesBytes + databaseBytes + preferencesBytes
+    fun size(value: Long) = android.text.format.Formatter.formatShortFileSize(context, value)
+    return "Cache: ${size(cacheBytes)}\\nApp files: ${size(filesBytes)}\\nDatabases: ${size(databaseBytes)}\\nPreferences: ${size(preferencesBytes)}\\nTotal measured: ${size(totalBytes)}"
+}
+
+private fun directoryBytes(file: File): Long {
+    if (!file.exists()) return 0L
+    if (file.isFile) return file.length()
+    return file.listFiles()?.sumOf { directoryBytes(it) } ?: 0L
 }
