@@ -60,7 +60,6 @@ fun KhahishAdvancedSettingsScreen(
     var busy by remember { mutableStateOf(false) }
     var storageText by remember { mutableStateOf("Calculating…") }
     var requestStatus by remember { mutableStateOf("") }
-    var rememberedEmails by remember { mutableStateOf(emptyList<String>()) }
 
     val deviceId = remember {
         Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
@@ -70,12 +69,6 @@ fun KhahishAdvancedSettingsScreen(
 
     LaunchedEffect(uid) {
         if (uid.isNotBlank()) {
-            user?.email?.let { email ->
-                val saved = prefs.getStringSet("account_emails", emptySet()).orEmpty().toMutableSet()
-                saved.add(email)
-                prefs.edit().putStringSet("account_emails", saved).apply()
-                rememberedEmails = saved.toList().sorted()
-            }
             val deviceRef = db.collection("users").document(uid)
                 .collection("trustedDevices").document(deviceId)
             deviceRef.set(mapOf(
@@ -84,12 +77,6 @@ fun KhahishAdvancedSettingsScreen(
                 "trusted" to true,
                 "platform" to "Android"
             ), com.google.firebase.firestore.SetOptions.merge())
-            db.collection("users").document(uid).collection("loginHistory").add(mapOf(
-                "deviceName" to deviceName,
-                "deviceId" to deviceId,
-                "time" to System.currentTimeMillis(),
-                "event" to "settings_opened"
-            ))
             db.collection("accountRequests").document(uid).get()
                 .addOnSuccessListener { requestStatus = it.getString("status").orEmpty() }
             db.collection("users").document(uid).collection("trustedDevices").get()
@@ -207,7 +194,7 @@ fun KhahishAdvancedSettingsScreen(
         Spacer(Modifier.height(12.dp))
 
         AdvancedGroup("ACCESSIBILITY & EXPERIENCE") {
-            AdvancedSwitch("One-handed mode preference", "Saves your choice; full screen layout adaptation is still being completed", oneHanded) {
+            AdvancedSwitch("One-handed mode", "Keep important controls easier to reach on smaller screens", oneHanded) {
                 oneHanded = it
                 prefs.edit().putBoolean("one_handed", it).apply()
             }
@@ -228,20 +215,6 @@ fun KhahishAdvancedSettingsScreen(
 
         Spacer(Modifier.height(12.dp))
         AdvancedGroup("ACCOUNT MANAGEMENT") {
-            AdvancedRow("Multiple accounts", "Saved sign-in emails: " + rememberedEmails.size) {
-                Toast.makeText(context, rememberedEmails.joinToString("\n").ifBlank { "No saved account emails yet" } + "\n\nSwitching signs out; sign in again with the other account.", Toast.LENGTH_LONG).show()
-            }
-            AdvancedRow("Switch account", "Sign out, then sign in with another saved account") {
-                onLogout()
-            }
-            AdvancedRow("Guest mode", "Use Khahish without registering an email") {
-                busy = true
-                auth.signInAnonymously().addOnCompleteListener { task ->
-                    busy = false
-                    if (task.isSuccessful) Toast.makeText(context, "Guest session started", Toast.LENGTH_SHORT).show()
-                    else Toast.makeText(context, "Guest mode unavailable. Enable Anonymous sign-in in Firebase Authentication. " + (task.exception?.message ?: ""), Toast.LENGTH_LONG).show()
-                }
-            }
             AdvancedRow("Deactivate account", "Submit an account deactivation request") {
                 accountRequest = "deactivate"
             }
@@ -310,7 +283,16 @@ fun KhahishAdvancedSettingsScreen(
                 storageText = "Temporary cache cleared"
                 Toast.makeText(context, if (cleared) "Cache cleared" else "Some cache files could not be removed", Toast.LENGTH_SHORT).show()
             }
-            AdvancedRow("Reset app preferences", "Reset local appearance and accessibility preferences") {
+            AdvancedRow("Manage app data", "Open Android settings to review permissions, storage and clear app data") {
+                try {
+                    context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = android.net.Uri.fromParts("package", context.packageName, null)
+                    })
+                } catch (_: Exception) {
+                    Toast.makeText(context, "Open Android Settings → Apps → Khahish", Toast.LENGTH_LONG).show()
+                }
+            }
+            AdvancedRow("Reset app preferences", "Reset local appearance, privacy and accessibility preferences") {
                 prefs.edit().clear().apply()
                 uiPrefs.edit().clear().apply()
                 privacyPrefs.edit().clear().apply()
