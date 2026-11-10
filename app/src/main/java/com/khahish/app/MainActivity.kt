@@ -125,7 +125,9 @@ data class MessageItem(
     val expiresAt: Long = 0L,
     val replyToMessageId: String = "",
     val replyToText: String = "",
-    val reactions: Map<String, String> = emptyMap()
+    val reactions: Map<String, String> = emptyMap(),
+    val editedAt: Long = 0L,
+    val starredBy: List<String> = emptyList()
 )
 
 private fun privateChatId(uid1: String, uid2: String): String =
@@ -1298,6 +1300,11 @@ fun ConversationScreen(
     var voiceRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
     var voiceRecordingFile by remember { mutableStateOf<File?>(null) }
     var selectedMessageIds by remember { mutableStateOf(setOf<String>()) }
+    var editTarget by remember { mutableStateOf<MessageItem?>(null) }
+    var editText by remember { mutableStateOf("") }
+    var pinnedMessageId by remember { mutableStateOf("") }
+    var pinnedMessageText by remember { mutableStateOf("") }
+    var pinnedBy by remember { mutableStateOf("") }
     var peerMenuExpanded by remember { mutableStateOf(false) }
     var showPeerPicture by remember { mutableStateOf(false) }
     var videoToPlay by remember { mutableStateOf("") }
@@ -1488,6 +1495,9 @@ fun ConversationScreen(
     DisposableEffect(chat.id) {
         val chatSettingsRegistration = chatRef.addSnapshotListener { snapshot, _ ->
             disappearingDurationMs = snapshot?.getLong("disappearingDurationMs") ?: 0L
+            pinnedMessageId = snapshot?.getString("pinnedMessageId").orEmpty()
+            pinnedMessageText = snapshot?.getString("pinnedMessageText").orEmpty()
+            pinnedBy = snapshot?.getString("pinnedBy").orEmpty()
         }
         onDispose { chatSettingsRegistration.remove() }
     }
@@ -1535,7 +1545,9 @@ fun ConversationScreen(
                         expiresAt = doc.getLong("expiresAt") ?: 0L,
                         replyToMessageId = doc.getString("replyToMessageId") ?: "",
                         replyToText = doc.getString("replyToText") ?: "",
-                        reactions = (doc.get("reactions") as? Map<*, *>)?.mapNotNull { (k, v) -> if (k is String && v is String) k to v else null }?.toMap() ?: emptyMap()
+                        reactions = (doc.get("reactions") as? Map<*, *>)?.mapNotNull { (k, v) -> if (k is String && v is String) k to v else null }?.toMap() ?: emptyMap(),
+                        editedAt = doc.getLong("editedAt") ?: 0L,
+                        starredBy = doc.get("starredBy") as? List<String> ?: emptyList()
                     )
                 }.filter { currentUserId !in it.hiddenFor && (it.expiresAt == 0L || it.expiresAt > System.currentTimeMillis()) }
 
@@ -1624,6 +1636,47 @@ fun ConversationScreen(
             if (selectedMessageIds.isNotEmpty()) {
                 Text("${selectedMessageIds.size} selected", modifier = Modifier.weight(1f),
                     color = Ink, fontWeight = FontWeight.SemiBold)
+                TextButton(onClick = {
+                    selectedMessageIds.forEach { id ->
+                        val item = messages.firstOrNull { it.id == id } ?: return@forEach
+                        val ref = chatRef.collection("messages").document(id)
+                        if (currentUserId in item.starredBy) ref.update("starredBy", FieldValue.arrayRemove(currentUserId))
+                        else ref.update("starredBy", FieldValue.arrayUnion(currentUserId))
+                    }
+                    selectedMessageIds = emptySet()
+                }) { Icon(Icons.Default.Star, null); Text("Star") }
+                TextButton(
+                    enabled = selectedMessageIds.size == 1,
+                    onClick = {
+                        val item = messages.firstOrNull { it.id == selectedMessageIds.firstOrNull() }
+                        if (item != null) {
+                            if (item.senderId != currentUserId || item.mediaType != "text" ||
+                                System.currentTimeMillis() - item.timestamp > 15 * 60 * 1000L) {
+                                showToast(context, "Only your text messages from the last 15 minutes can be edited.")
+                            } else {
+                                editTarget = item
+                                editText = item.text
+                            }
+                        }
+                    }
+                ) { Icon(Icons.Default.Edit, null); Text("Edit") }
+                TextButton(
+                    enabled = selectedMessageIds.size == 1,
+                    onClick = {
+                        val item = messages.firstOrNull { it.id == selectedMessageIds.firstOrNull() }
+                        if (item != null) {
+                            chatRef.update(mapOf(
+                                "pinnedMessageId" to item.id,
+                                "pinnedMessageText" to item.text.ifBlank { item.mediaType.replaceFirstChar { ch -> ch.uppercase() } },
+                                "pinnedBy" to currentUserId,
+                                "pinnedAt" to System.currentTimeMillis()
+                            )).addOnSuccessListener {
+                                showToast(context, "Message pinned")
+                                selectedMessageIds = emptySet()
+                            }.addOnFailureListener { showToast(context, "Could not pin message: ${it.message}") }
+                        }
+                    }
+                ) { Icon(Icons.Default.PushPin, null); Text("Pin") }
                 TextButton(onClick = { showForwardDialog = true }) { Icon(Icons.Default.Forward, null); Text("Forward") }
                 TextButton(onClick = { showDeleteOptions = true }) {
                     Icon(Icons.Default.DeleteOutline, null)
@@ -1664,6 +1717,35 @@ fun ConversationScreen(
                 }
                 IconButton(onClick = { onStartCall(false) }) { Icon(Icons.Default.Call, "Voice call", tint = Green) }
                 IconButton(onClick = { onStartCall(true) }) { Icon(Icons.Default.Videocam, "Video call", tint = Green) }
+            }
+        }
+
+        if (pinnedMessageId.isNotBlank()) {
+            Row(
+                Modifier.fillMaxWidth().background(Color(0xFFE8F5F0))
+                    .clickable {
+                        val index = messages.indexOfFirst { it.id == pinnedMessageId }
+                        if (index >= 0) messageScrollScope.launch { messageListState.animateScrollToItem(index) }
+                    }
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.PushPin, contentDescription = "Pinned message", tint = Green)
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Pinned message", color = Green, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text(pinnedMessageText, color = Ink, fontSize = 12.sp, maxLines = 1)
+                }
+                if (pinnedBy == currentUserId) {
+                    IconButton(onClick = {
+                        chatRef.update(mapOf(
+                            "pinnedMessageId" to FieldValue.delete(),
+                            "pinnedMessageText" to FieldValue.delete(),
+                            "pinnedBy" to FieldValue.delete(),
+                            "pinnedAt" to FieldValue.delete()
+                        )).addOnFailureListener { showToast(context, "Could not unpin: ${it.message}") }
+                    }) { Icon(Icons.Default.Close, contentDescription = "Unpin message", tint = Muted) }
+                }
             }
         }
 
@@ -1781,6 +1863,9 @@ fun ConversationScreen(
                                 fontSize = 10.sp,
                                 color = Muted
                             )
+                            if (msg.editedAt > 0L) {
+                                Text(" · edited", fontSize = 9.sp, color = Muted)
+                            }
 
                             TextButton(onClick = { replyTarget = msg }, contentPadding = PaddingValues(horizontal = 3.dp, vertical = 0.dp)) { Icon(Icons.Default.Reply, "Reply", tint = Green, modifier = Modifier.size(16.dp)) }
                             TextButton(onClick = { reactionTarget = msg }, contentPadding = PaddingValues(horizontal = 3.dp, vertical = 0.dp)) { Text("😊", fontSize = 14.sp) }
@@ -2007,6 +2092,44 @@ fun ConversationScreen(
             }
         }, confirmButton = { TextButton(onClick = { showForwardDialog = false }, enabled = !forwarding) { Text("Close") } })
     }
+    if (editTarget != null) {
+        AlertDialog(
+            onDismissRequest = { editTarget = null },
+            title = { Text("Edit message") },
+            text = {
+                OutlinedTextField(
+                    value = editText,
+                    onValueChange = { editText = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Message") },
+                    minLines = 2,
+                    maxLines = 5
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val target = editTarget ?: return@TextButton
+                    val updated = editText.trim()
+                    if (updated.isBlank()) {
+                        showToast(context, "Message cannot be empty.")
+                    } else if (System.currentTimeMillis() - target.timestamp > 15 * 60 * 1000L) {
+                        showToast(context, "The 15-minute edit window has expired.")
+                    } else {
+                        chatRef.collection("messages").document(target.id).update(
+                            mapOf("text" to updated, "editedAt" to System.currentTimeMillis())
+                        ).addOnSuccessListener {
+                            chatRef.update(mapOf("lastMessage" to updated, "updatedAt" to System.currentTimeMillis()))
+                            selectedMessageIds = emptySet()
+                            editTarget = null
+                            showToast(context, "Message updated")
+                        }.addOnFailureListener { showToast(context, "Edit failed: ${it.message}") }
+                    }
+                }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { editTarget = null }) { Text("Cancel") } }
+        )
+    }
+
     if (reactionTarget != null) {
         AlertDialog(onDismissRequest = { reactionTarget = null }, title = { Text("React to message") }, text = {
             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
