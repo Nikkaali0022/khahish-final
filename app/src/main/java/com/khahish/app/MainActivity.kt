@@ -2760,7 +2760,7 @@ fun ConversationScreen(
                                 Text(" · edited", fontSize = 9.sp, color = Muted)
                             }
 
-                            TextButton(onClick = { replyTarget = msg }, contentPadding = PaddingValues(horizontal = 3.dp, vertical = 0.dp)) { Icon(Icons.Default.Reply, "Reply", tint = Green, modifier = Modifier.size(16.dp)) }
+
                             if (isMe) {
                                 Spacer(Modifier.width(4.dp))
                                 if (msg.isPending) {
