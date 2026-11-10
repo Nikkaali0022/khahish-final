@@ -45,6 +45,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -252,6 +254,7 @@ fun KhahishApp() {
     var currentUser by remember { mutableStateOf(auth.currentUser) }
     var tab by remember { mutableStateOf("Chats") }
     var selectedChat by remember { mutableStateOf<Chat?>(null) }
+    var profileTargetUid by remember { mutableStateOf("") }
     var showNewChat by remember { mutableStateOf(false) }
     var activeCall by remember { mutableStateOf<KhahishCall?>(null) }
     var incomingCall by remember { mutableStateOf(false) }
@@ -282,9 +285,10 @@ fun KhahishApp() {
 
     BackHandler(
         enabled = currentUser != null &&
-            (selectedChat != null || showNewChat || tab != "Chats")
+            (selectedChat != null || showNewChat || profileTargetUid.isNotBlank() || tab != "Chats")
     ) {
         when {
+            profileTargetUid.isNotBlank() -> profileTargetUid = ""
             activeCall != null -> {
                 activeCall = null
                 incomingCall = false
@@ -324,10 +328,13 @@ fun KhahishApp() {
                             incomingCall = false
                         }
                     )
+                } else if (profileTargetUid.isNotBlank()) {
+                    KhahishUserProfileScreen(uid = profileTargetUid, onBack = { profileTargetUid = "" })
                 } else if (selectedChat != null) {
                     ConversationScreen(
                         chat = selectedChat!!,
                         onBack = { selectedChat = null },
+                        onViewProfile = { profileTargetUid = it },
                         onStartCall = { isVideo ->
                             KhahishCallRepository().createOutgoingCall(
                                 callerUid = user.uid,
@@ -465,7 +472,8 @@ fun KhahishApp() {
                                 "Chats" -> ChatList(
                                     modifier = Modifier.padding(padding),
                                     currentUid = user.uid,
-                                    onOpen = { selectedChat = it }
+                                    onOpen = { selectedChat = it },
+                                    onViewProfile = { profileTargetUid = it }
                                 )
 
                                 "Updates" -> KhahishUpdatesScreen(
@@ -2769,6 +2777,54 @@ fun PlaceholderPage(
                 color = Muted,
                 textAlign = TextAlign.Center
             )
+        }
+    }
+}
+
+
+@Composable
+private fun KhahishUserProfileScreen(uid: String, onBack: () -> Unit) {
+    val db = remember { FirebaseFirestore.getInstance() }
+    var name by remember(uid) { mutableStateOf("Loading profile…") }
+    var photo by remember(uid) { mutableStateOf("") }
+    var username by remember(uid) { mutableStateOf("") }
+    var bio by remember(uid) { mutableStateOf("") }
+    var online by remember(uid) { mutableStateOf(false) }
+    var loading by remember(uid) { mutableStateOf(true) }
+    var showPicture by remember { mutableStateOf(false) }
+    DisposableEffect(uid) {
+        val listener = db.collection("publicProfiles").document(uid).addSnapshotListener { snap, _ ->
+            if (snap != null && snap.exists()) {
+                name = snap.getString("name") ?: "Khahish User"
+                photo = snap.getString("photoUrl").orEmpty()
+                username = snap.getString("username").orEmpty()
+                bio = snap.getString("bio").orEmpty()
+                online = snap.getBoolean("isOnline") == true && snap.getBoolean("onlineStatusVisible") != false
+            }
+            loading = false
+        }
+        onDispose { listener.remove() }
+    }
+    Column(Modifier.fillMaxSize().background(Pale)) {
+        Row(Modifier.fillMaxWidth().background(Color.White).statusBarsPadding().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") }
+            Text("Profile", color = Ink, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+        }
+        if (loading) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Green) }
+        else Column(Modifier.fillMaxWidth().padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            if (photo.isNotBlank()) AsyncImage(model = photo, contentDescription = "Profile picture", modifier = Modifier.size(116.dp).clip(CircleShape).clickable { showPicture = true }, contentScale = ContentScale.Crop)
+            else Box(Modifier.size(116.dp).background(Color(0xFFDCEFE9), CircleShape), contentAlignment = Alignment.Center) { Text(name.take(1).uppercase(Locale.getDefault()), color = Green, fontSize = 42.sp, fontWeight = FontWeight.Bold) }
+            Spacer(Modifier.height(16.dp))
+            Text(name, color = Ink, fontSize = 23.sp, fontWeight = FontWeight.Bold)
+            if (username.isNotBlank()) Text("@$username", color = Green)
+            Text(if (online) "Online" else "Khahish member", color = Muted, fontSize = 12.sp)
+            if (bio.isNotBlank()) { Spacer(Modifier.height(18.dp)); Card(colors = CardDefaults.cardColors(containerColor = Color.White)) { Text(bio, Modifier.fillMaxWidth().padding(16.dp), color = Ink) } }
+        }
+    }
+    if (showPicture && photo.isNotBlank()) Dialog(onDismissRequest = { showPicture = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(Modifier.fillMaxWidth().fillMaxHeight(.85f).background(Color.Black), contentAlignment = Alignment.Center) {
+            AsyncImage(model = photo, contentDescription = "Profile picture", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+            IconButton(onClick = { showPicture = false }, modifier = Modifier.align(Alignment.TopEnd)) { Icon(Icons.Default.Close, "Close", tint = Color.White) }
         }
     }
 }
