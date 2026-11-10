@@ -216,16 +216,7 @@ jobs:
           disable-animations: true
           script: |
             cd "$PROJECT_DIR"
-            set +e
-            gradle :app:connectedDebugAndroidTest --stacktrace
-            TEST_EXIT=$?
-            adb logcat -d -v threadtime > "$PROJECT_DIR/keystore-instrumentation-logcat.txt" || true
-            echo "Instrumentation test exit code: $TEST_EXIT"
-            if [ "$TEST_EXIT" -ne 0 ]; then
-              echo "Recent Android crash diagnostics:"
-              grep -E -i "FATAL EXCEPTION|AndroidRuntime|Process:|Instrumentation|AndroidJUnitRunner|keystore|avc: denied|SecurityException" "$PROJECT_DIR/keystore-instrumentation-logcat.txt" | tail -n 160 || true
-            fi
-            exit "$TEST_EXIT"
+            gradle :app:connectedDebugAndroidTest --stacktrace; TEST_EXIT=$?; adb logcat -d -v threadtime > "$PROJECT_DIR/keystore-instrumentation-logcat.txt" || true; exit $TEST_EXIT
 
       - name: Upload Keystore test diagnostics
         if: always()
