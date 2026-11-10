@@ -1183,6 +1183,7 @@ fun ChatList(
 fun ConversationScreen(
     chat: Chat,
     onBack: () -> Unit,
+    onViewProfile: (String) -> Unit,
     onStartCall: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
@@ -1214,6 +1215,9 @@ fun ConversationScreen(
     var voiceRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
     var voiceRecordingFile by remember { mutableStateOf<File?>(null) }
     var selectedMessageIds by remember { mutableStateOf(setOf<String>()) }
+    var peerMenuExpanded by remember { mutableStateOf(false) }
+    var showPeerPicture by remember { mutableStateOf(false) }
+    var videoToPlay by remember { mutableStateOf("") }
     var showDeleteOptions by remember { mutableStateOf(false) }
     var showDisappearingOptions by remember { mutableStateOf(false) }
     var disappearingDurationMs by remember { mutableStateOf(0L) }
@@ -1527,12 +1531,18 @@ fun ConversationScreen(
                     Text("Delete")
                 }
             } else {
-                if (peerPhotoUrl.isNotBlank()) {
-                    AsyncImage(model = peerPhotoUrl, contentDescription = "Profile picture",
-                        modifier = Modifier.size(40.dp).clip(CircleShape), contentScale = ContentScale.Crop)
-                } else {
-                    Box(Modifier.size(40.dp).background(Color(0xFFDCEFE9), CircleShape), contentAlignment = Alignment.Center) {
-                        Text(chat.initials, color = Green, fontWeight = FontWeight.Bold)
+                Box {
+                    if (peerPhotoUrl.isNotBlank()) {
+                        AsyncImage(model = peerPhotoUrl, contentDescription = "Profile picture",
+                            modifier = Modifier.size(40.dp).clip(CircleShape).clickable { peerMenuExpanded = true }, contentScale = ContentScale.Crop)
+                    } else {
+                        Box(Modifier.size(40.dp).background(Color(0xFFDCEFE9), CircleShape).clickable { peerMenuExpanded = true }, contentAlignment = Alignment.Center) {
+                            Text(chat.initials, color = Green, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    DropdownMenu(expanded = peerMenuExpanded, onDismissRequest = { peerMenuExpanded = false }) {
+                        DropdownMenuItem(text = { Text("View profile picture") }, leadingIcon = { Icon(Icons.Default.AccountCircle, null) }, enabled = peerPhotoUrl.isNotBlank(), onClick = { peerMenuExpanded = false; showPeerPicture = true })
+                        DropdownMenuItem(text = { Text("View profile") }, leadingIcon = { Icon(Icons.Default.Person, null) }, onClick = { peerMenuExpanded = false; onViewProfile(chat.peerUid) })
                     }
                 }
                 Spacer(Modifier.width(10.dp))
@@ -1592,8 +1602,9 @@ fun ConversationScreen(
                                     selectedMessageIds = if (isSelected) selectedMessageIds - msg.id else selectedMessageIds + msg.id
                                 }
                             )
+                            .border(2.dp, if (isSelected) Green else Color.Transparent, RoundedCornerShape(16.dp))
                             .background(
-                                if (isSelected) Color(0xFFBCEBDD) else if (isMe) Color(0xFFD9F7EC) else Color.White,
+                                if (isSelected) Color.White else if (isMe) Color(0xFFD9F7EC) else Color.White,
                                 RoundedCornerShape(
                                     topStart = 16.dp,
                                     topEnd = 16.dp,
@@ -1613,12 +1624,15 @@ fun ConversationScreen(
                                 contentScale = ContentScale.Crop
                             )
 
-                            "video" -> MediaOpenRow(
-                                "Video — tap to play",
-                                Icons.Default.PlayCircle,
-                                msg.imageUrl,
-                                context
-                            )
+                            "video" -> Row(
+                                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color(0xFFEAF4F0))
+                                    .clickable { videoToPlay = msg.imageUrl }.padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.PlayCircle, null, tint = Green, modifier = Modifier.size(30.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("Play video", color = Ink, fontWeight = FontWeight.SemiBold)
+                            }
 
                             "audio" -> AudioMessagePlayer(msg.imageUrl)
 
@@ -1796,6 +1810,19 @@ fun ConversationScreen(
             ) {
                 Icon(Icons.Default.Send, "Send", tint = Green)
             }
+        }
+    }
+
+    if (showPeerPicture && peerPhotoUrl.isNotBlank()) Dialog(onDismissRequest = { showPeerPicture = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(Modifier.fillMaxWidth().fillMaxHeight(.82f).background(Color.Black, RoundedCornerShape(18.dp)), contentAlignment = Alignment.Center) {
+            AsyncImage(model = peerPhotoUrl, contentDescription = "Profile picture", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+            IconButton(onClick = { showPeerPicture = false }, modifier = Modifier.align(Alignment.TopEnd)) { Icon(Icons.Default.Close, "Close", tint = Color.White) }
+        }
+    }
+    if (videoToPlay.isNotBlank()) Dialog(onDismissRequest = { videoToPlay = "" }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(Modifier.fillMaxWidth().background(Color.Black, RoundedCornerShape(16.dp)).padding(10.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { IconButton(onClick = { videoToPlay = "" }) { Icon(Icons.Default.Close, "Close video", tint = Color.White) } }
+            KhahishVideoPlayer(url = videoToPlay, modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f))
         }
     }
 
