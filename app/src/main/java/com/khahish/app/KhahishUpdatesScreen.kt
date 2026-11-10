@@ -258,7 +258,7 @@ fun KhahishUpdatesScreen(
         if (uploading) {
             Spacer(Modifier.height(8.dp))
             LinearProgressIndicator(Modifier.fillMaxWidth(), color = Green)
-            Text("Uploading story…", color = Muted, fontSize = 12.sp)
+            Text("Uploading story…", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         }
         Spacer(Modifier.height(14.dp))
         val ownStories = stories.filter { it.ownerUid == currentUid }
@@ -305,12 +305,12 @@ fun KhahishUpdatesScreen(
             }
             recentStories.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Box(Modifier.size(64.dp).background(Color(0xFFDCEFE9), CircleShape), contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(64.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape), contentAlignment = Alignment.Center) {
                         Icon(Icons.Default.Add, null, tint = Green, modifier = Modifier.size(32.dp))
                     }
                     Spacer(Modifier.height(12.dp))
                     Text("No updates yet", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
-                    Text("Share a photo, video or text story.", color = Muted, fontSize = 12.sp)
+                    Text("Share a photo, video or text story.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 }
             }
             else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -341,7 +341,7 @@ fun KhahishUpdatesScreen(
                                             .set(mapOf("uid" to currentUid, "name" to currentName, "viewedAt" to System.currentTimeMillis()))
                                     }
                                 }) {
-                                    Text(if (story.ownerUid == currentUid) "Your story" else story.ownerName, color = Ink, fontWeight = FontWeight.SemiBold)
+                                    Text(if (story.ownerUid == currentUid) "Your story" else story.ownerName, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
                                     Text(
                                         if (story.ownerUid == currentUid) "Audience: ${if (story.audience == "everyone") "Everyone" else "Only me"}" else "Tap name to mark viewed",
                                         color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp
@@ -382,7 +382,7 @@ fun KhahishUpdatesScreen(
                                     ) {
                                         Icon(Icons.Default.PlayCircle, null, tint = Green, modifier = Modifier.size(32.dp))
                                         Spacer(Modifier.width(10.dp))
-                                        Text("Play video story", color = Ink, fontWeight = FontWeight.SemiBold)
+                                        Text("Play video story", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
                                     }
                                 }
                             }
