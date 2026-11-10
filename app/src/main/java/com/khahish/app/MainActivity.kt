@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -370,29 +371,17 @@ fun KhahishApp() {
                                         )
                                     )
                                     .statusBarsPadding()
-                                    .padding(horizontal = 18.dp, vertical = 12.dp)
+                                    .padding(horizontal = 18.dp, vertical = 7.dp)
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Box(
-                                        Modifier
-                                            .size(44.dp)
-                                            .background(
-                                                Brush.linearGradient(
-                                                    listOf(Color(0xFF00E6A0), Color(0xFF00A98B))
-                                                ),
-                                                RoundedCornerShape(15.dp)
-                                            ),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            "K",
-                                            color = Color.White,
-                                            fontSize = 27.sp,
-                                            fontWeight = FontWeight.Black
-                                        )
-                                    }
+                                    Image(
+                                        painter = painterResource(R.drawable.khahish_logo),
+                                        contentDescription = "Khahish logo",
+                                        modifier = Modifier.size(38.dp),
+                                        contentScale = ContentScale.Fit
+                                    )
 
                                     Spacer(Modifier.width(12.dp))
 
@@ -408,7 +397,7 @@ fun KhahishApp() {
                                             letterSpacing = 0.4.sp
                                         )
                                         Spacer(Modifier.width(7.dp))
-                                        Text("🦎", fontSize = 27.sp)
+                                        Text("🦎", fontSize = 23.sp)
                                     }
 
                                     IconButton(onClick = { tab = "Settings" }) {
@@ -420,16 +409,7 @@ fun KhahishApp() {
                                     }
                                 }
 
-                                Spacer(Modifier.height(7.dp))
-
-                                Text(
-                                    "Connect. Share. Stay Close.",
-                                    fontSize = 11.sp,
-                                    color = Color(0xFFB7F7E5),
-                                    letterSpacing = 0.5.sp
-                                )
-
-                                Spacer(Modifier.height(12.dp))
+                                Spacer(Modifier.height(5.dp))
 
                                 Text(
                                     if (tab == "Chats") "Messages" else tab,
@@ -541,19 +521,12 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(
-            Modifier
-                .size(68.dp)
-                .background(Green, RoundedCornerShape(20.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                Icons.Default.Forum,
-                null,
-                tint = Color.White,
-                modifier = Modifier.size(36.dp)
-            )
-        }
+        Image(
+            painter = painterResource(R.drawable.khahish_logo),
+            contentDescription = "Khahish logo",
+            modifier = Modifier.size(88.dp),
+            contentScale = ContentScale.Fit
+        )
 
         Spacer(Modifier.height(16.dp))
 
