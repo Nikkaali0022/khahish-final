@@ -33,6 +33,8 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.rememberTransformableState
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -54,6 +56,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -3253,10 +3257,23 @@ fun ConversationScreen(
             Modifier.fillMaxSize().background(Color.Black),
             contentAlignment = Alignment.Center
         ) {
+            var photoScale by remember(photoToView) { mutableFloatStateOf(1f) }
+            var photoOffset by remember(photoToView) { mutableStateOf(Offset.Zero) }
+            val zoomState = rememberTransformableState { zoomChange, panChange, _ ->
+                photoScale = (photoScale * zoomChange).coerceIn(1f, 5f)
+                photoOffset = if (photoScale > 1f) photoOffset + panChange else Offset.Zero
+            }
             AsyncImage(
                 model = photoToView,
-                contentDescription = "Full-screen photo",
-                modifier = Modifier.fillMaxSize().clickable { },
+                contentDescription = "Full-screen photo — pinch to zoom",
+                modifier = Modifier.fillMaxSize()
+                    .graphicsLayer(
+                        scaleX = photoScale,
+                        scaleY = photoScale,
+                        translationX = photoOffset.x,
+                        translationY = photoOffset.y
+                    )
+                    .transformable(zoomState),
                 contentScale = ContentScale.Fit
             )
             IconButton(
