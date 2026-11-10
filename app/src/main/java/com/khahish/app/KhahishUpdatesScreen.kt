@@ -22,6 +22,9 @@ import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -69,6 +72,9 @@ fun KhahishUpdatesScreen(
     var audienceMenu by remember { mutableStateOf(false) }
     var viewerStoryId by remember { mutableStateOf("") }
     var storyViewers by remember { mutableStateOf(emptyList<String>()) }
+    var showSearch by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    var updatesMenu by remember { mutableStateOf(false) }
 
     fun publishStory(text: String, mediaUrl: String = "", mediaType: String = "text") {
         val now = System.currentTimeMillis()
@@ -183,11 +189,36 @@ fun KhahishUpdatesScreen(
                 Text("Updates", color = MaterialTheme.colorScheme.onBackground, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                 Text("Stories disappear after 24 hours", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
             }
-            FilledTonalButton(onClick = { showTextDialog = true }) {
-                Icon(Icons.Default.TextFields, null)
-                Spacer(Modifier.width(6.dp))
-                Text("Text")
+            IconButton(onClick = { showSearch = !showSearch; if (!showSearch) searchQuery = "" }) {
+                Icon(Icons.Default.Search, "Search updates", tint = MaterialTheme.colorScheme.onSurface)
             }
+            Box {
+                IconButton(onClick = { updatesMenu = true }) {
+                    Icon(Icons.Default.MoreVert, "Update options", tint = MaterialTheme.colorScheme.onSurface)
+                }
+                DropdownMenu(expanded = updatesMenu, onDismissRequest = { updatesMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Audience: Everyone") },
+                        leadingIcon = { Icon(Icons.Default.Lock, null) },
+                        onClick = { storyAudience = "everyone"; updatesMenu = false }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Audience: Only me") },
+                        leadingIcon = { Icon(Icons.Default.Lock, null) },
+                        onClick = { storyAudience = "only_me"; updatesMenu = false }
+                    )
+                }
+            }
+        }
+        if (showSearch) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                placeholder = { Text("Search people or updates") },
+                leadingIcon = { Icon(Icons.Default.Search, null) }
+            )
         }
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -215,11 +246,49 @@ fun KhahishUpdatesScreen(
             Text("Uploading story…", color = Muted, fontSize = 12.sp)
         }
         Spacer(Modifier.height(14.dp))
+        val ownStories = stories.filter { it.ownerUid == currentUid }
+        val recentStories = stories.filter { it.ownerUid != currentUid }.filter { story ->
+            searchQuery.isBlank() || story.ownerName.contains(searchQuery, true) || story.text.contains(searchQuery, true)
+        }
+        Card(
+            Modifier.fillMaxWidth().clickable { showTextDialog = true },
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    Modifier.size(54.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(currentName.take(1).uppercase(Locale.getDefault()), color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold, fontSize = 21.sp)
+                    Box(
+                        Modifier.align(Alignment.BottomEnd).size(21.dp).background(Green, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) { Icon(Icons.Default.Add, null, tint = Color.White, modifier = Modifier.size(15.dp)) }
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("My status", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (ownStories.isEmpty()) "Tap to add a status" else "${ownStories.size} active update(s) • Audience: ${if (storyAudience == "everyone") "Everyone" else "Only me"}",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.sp
+                    )
+                }
+                Icon(Icons.Default.Add, "Add status", tint = Green)
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Text("Recent updates", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        Spacer(Modifier.height(8.dp))
         when {
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = Green)
             }
-            stories.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            recentStories.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(Modifier.size(64.dp).background(Color(0xFFDCEFE9), CircleShape), contentAlignment = Alignment.Center) {
                         Icon(Icons.Default.Add, null, tint = Green, modifier = Modifier.size(32.dp))
@@ -230,7 +299,7 @@ fun KhahishUpdatesScreen(
                 }
             }
             else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(stories, key = { it.id }) { story ->
+                items(recentStories, key = { it.id }) { story ->
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         shape = RoundedCornerShape(18.dp)
