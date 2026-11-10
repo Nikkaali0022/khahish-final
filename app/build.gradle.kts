@@ -57,6 +57,10 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
 
+    // Native in-app video playback
+    implementation("androidx.media3:media3-exoplayer:1.5.1")
+    implementation("androidx.media3:media3-ui:1.5.1")
+
     // Agora Voice & Video Calling SDK
     implementation("io.agora.rtc:full-sdk:4.7.0")
 }
