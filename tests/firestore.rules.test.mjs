@@ -17,7 +17,6 @@ import {
   writeBatch,
   arrayUnion,
   query,
-  whereEqualTo,
   where
 } from "firebase/firestore";
 
@@ -286,7 +285,7 @@ test("call records are visible only to participants and support incoming-call qu
   await assertFails(getDoc(doc(db("carol"), "calls/call1")));
   await assertSucceeds(getDocs(query(
     collection(db("bob"), "calls"),
-    whereEqualTo("calleeUid", "bob")
+    where("calleeUid", "==", "bob")
   )));
   await assertSucceeds(getDocs(query(
     collection(db("alice"), "calls"),
