@@ -176,12 +176,12 @@ fun KhahishUpdatesScreen(
     }
 
     Column(
-        modifier.fillMaxSize().background(Pale).padding(16.dp)
+        modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(16.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Updates", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                Text("Stories disappear after 24 hours", color = Muted, fontSize = 12.sp)
+                Text("Updates", color = MaterialTheme.colorScheme.onBackground, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                Text("Stories disappear after 24 hours", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
             }
             FilledTonalButton(onClick = { showTextDialog = true }) {
                 Icon(Icons.Default.TextFields, null)
@@ -225,14 +225,14 @@ fun KhahishUpdatesScreen(
                         Icon(Icons.Default.Add, null, tint = Green, modifier = Modifier.size(32.dp))
                     }
                     Spacer(Modifier.height(12.dp))
-                    Text("No updates yet", color = Ink, fontWeight = FontWeight.SemiBold)
+                    Text("No updates yet", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
                     Text("Share a photo, video or text story.", color = Muted, fontSize = 12.sp)
                 }
             }
             else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(stories, key = { it.id }) { story ->
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         shape = RoundedCornerShape(18.dp)
                     ) {
                         Column(Modifier.fillMaxWidth().padding(14.dp)) {
@@ -250,7 +250,7 @@ fun KhahishUpdatesScreen(
                                     Text(if (story.ownerUid == currentUid) "Your story" else story.ownerName, color = Ink, fontWeight = FontWeight.SemiBold)
                                     Text(
                                         if (story.ownerUid == currentUid) "Audience: ${if (story.audience == "everyone") "Everyone" else "Only me"}" else "Tap name to mark viewed",
-                                        color = Muted, fontSize = 11.sp
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp
                                     )
                                 }
                                 if (story.ownerUid == currentUid) {
@@ -282,7 +282,7 @@ fun KhahishUpdatesScreen(
                                 } else {
                                     Row(
                                         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                                            .background(Pale).clickable { videoPlayerUrl = story.mediaUrl }
+                                            .background(MaterialTheme.colorScheme.surfaceVariant).clickable { videoPlayerUrl = story.mediaUrl }
                                             .padding(16.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
@@ -294,7 +294,7 @@ fun KhahishUpdatesScreen(
                             }
                             if (story.text.isNotBlank()) {
                                 Spacer(Modifier.height(10.dp))
-                                Text(story.text, color = Ink, fontSize = 16.sp)
+                                Text(story.text, color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp)
                             }
                         }
                     }
@@ -308,9 +308,9 @@ fun KhahishUpdatesScreen(
             onDismissRequest = { viewerStoryId = "" },
             title = { Text("Story viewers") },
             text = {
-                if (storyViewers.isEmpty()) Text("No views recorded yet.", color = Muted)
+                if (storyViewers.isEmpty()) Text("No views recorded yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 else Column {
-                    storyViewers.forEach { viewer -> Text(viewer, color = Ink, modifier = Modifier.padding(vertical = 4.dp)) }
+                    storyViewers.forEach { viewer -> Text(viewer, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(vertical = 4.dp)) }
                 }
             },
             confirmButton = { TextButton(onClick = { viewerStoryId = "" }) { Text("Close") } }
