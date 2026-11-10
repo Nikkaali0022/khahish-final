@@ -157,10 +157,10 @@ fun KhahishSettingsScreen(
             if (showBlocked) {
                 when {
                     loadingBlocked -> CircularProgressIndicator(color = Green)
-                    blockedUsers.isEmpty() -> Text("No blocked accounts", color = Muted, modifier = Modifier.padding(10.dp))
+                    blockedUsers.isEmpty() -> Text("No blocked accounts", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(10.dp))
                     else -> blockedUsers.forEach { blockedUid ->
                         Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(blockedUid.take(16) + "…", color = Ink, modifier = Modifier.weight(1f))
+                            Text(blockedUid.take(16) + "…", color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
                             TextButton(onClick = {
                                 db.collection("users").document(uid).collection("blocked").document(blockedUid).delete()
                                     .addOnSuccessListener {
@@ -230,7 +230,7 @@ fun KhahishSettingsScreen(
                         SetOptions.merge()
                     )
                 }
-                Text("Your online status, last seen and read-receipt preferences are now connected to your profile and chat behavior.", color = Muted, fontSize = 11.sp)
+                Text("Your online status, last seen and read-receipt preferences are now connected to your profile and chat behavior.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
             }
         }
 
@@ -321,7 +321,7 @@ fun KhahishSettingsScreen(
         Text(
             "Developed by Nikka Ali",
             modifier = Modifier.fillMaxWidth().padding(bottom = 18.dp),
-            color = Muted,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 12.sp,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             fontWeight = FontWeight.Medium
@@ -357,12 +357,12 @@ fun KhahishSettingsScreen(
                         onValueChange = { editUsername = it.lowercase(Locale.ROOT).filter { ch -> ch in 'a'..'z' || ch in '0'..'9' || ch == '_' }.take(20) },
                         label = { Text("Unique username") }, placeholder = { Text("your_username") },
                         leadingIcon = { Text("@", color = Green) },
-                        supportingText = { Text("3–20 characters. Letters, numbers and underscore only.", color = Muted) },
+                        supportingText = { Text("3–20 characters. Letters, numbers and underscore only.", color = MaterialTheme.colorScheme.onSurfaceVariant) },
                         singleLine = true, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(value = editBio, onValueChange = { if (it.length <= 160) editBio = it },
                         label = { Text("Bio") }, placeholder = { Text("Write something about yourself…") },
                         minLines = 3, maxLines = 4, modifier = Modifier.fillMaxWidth())
-                    Text("${editBio.length}/160", color = Muted, fontSize = 11.sp)
+                    Text("${editBio.length}/160", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
                 }
             },
             confirmButton = {
@@ -433,10 +433,10 @@ private fun KhahishSettingsItem(
         Icon(icon, null, tint = Green, modifier = Modifier.size(23.dp))
         Spacer(Modifier.width(13.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, color = Ink, fontWeight = FontWeight.SemiBold)
-            Text(subtitle, color = Muted, fontSize = 11.sp)
+            Text(title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
         }
-        Icon(Icons.Default.ChevronRight, null, tint = Muted)
+        Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -451,7 +451,7 @@ private fun KhahishSettingsSwitch(
     Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
-            Text(subtitle, color = Muted, fontSize = 11.sp)
+            Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
         }
         Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
     }
