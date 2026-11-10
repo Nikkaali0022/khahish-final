@@ -15,7 +15,10 @@ import {
   setDoc,
   updateDoc,
   writeBatch,
-  arrayUnion
+  arrayUnion,
+  query,
+  whereEqualTo,
+  whereArrayContains
 } from "firebase/firestore";
 
 const projectId = "demo-khahish-rules";
@@ -262,5 +265,39 @@ test("deactivation requests are allowed but deletion requests are denied", async
     type: "delete",
     status: "pending",
     createdAt: Date.now()
+  }));
+});
+
+test("call records are visible only to participants and support incoming-call queries", async () => {
+  await seed("calls/call1", {
+    callerUid: "alice",
+    calleeUid: "bob",
+    callerName: "Alice",
+    calleeName: "Bob",
+    participants: ["alice", "bob"],
+    channelName: "khahish_test",
+    callType: "voice",
+    status: "ringing",
+    createdAt: Date.now(),
+    updatedAt: Date.now()
+  });
+
+  await assertSucceeds(getDoc(doc(db("bob"), "calls/call1")));
+  await assertFails(getDoc(doc(db("carol"), "calls/call1")));
+  await assertSucceeds(getDocs(query(
+    collection(db("bob"), "calls"),
+    whereEqualTo("calleeUid", "bob")
+  )));
+  await assertSucceeds(getDocs(query(
+    collection(db("alice"), "calls"),
+    whereArrayContains("participants", "alice")
+  )));
+  await assertSucceeds(updateDoc(doc(db("bob"), "calls/call1"), {
+    status: "accepted",
+    updatedAt: Date.now()
+  }));
+  await assertFails(updateDoc(doc(db("carol"), "calls/call1"), {
+    status: "ended",
+    updatedAt: Date.now()
   }));
 });
