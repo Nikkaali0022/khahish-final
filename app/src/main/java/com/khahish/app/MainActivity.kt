@@ -288,7 +288,7 @@ fun KhahishApp() {
 
     var currentUser by remember { mutableStateOf(auth.currentUser) }
     var tab by remember { mutableStateOf("Chats") }
-    val tabOrder = listOf("Chats", "Updates", "Calls", "Settings")
+    val tabOrder = listOf("Chats", "Updates", "Communities", "Calls", "Settings")
     var selectedChat by remember { mutableStateOf<Chat?>(null) }
     var profileTargetUid by remember { mutableStateOf("") }
     var showNewChat by remember { mutableStateOf(false) }
@@ -480,6 +480,7 @@ fun KhahishApp() {
                                 listOf(
                                     "Chats" to Icons.Default.Chat,
                                     "Updates" to Icons.Default.DonutLarge,
+                                    "Communities" to Icons.Default.Groups,
                                     "Calls" to Icons.Default.Call,
                                     "Settings" to Icons.Default.Settings
                                 ).forEach { (label, icon) ->
@@ -545,6 +546,11 @@ fun KhahishApp() {
                                 "Updates" -> KhahishUpdatesScreen(
                                     currentUid = user.uid,
                                     currentName = user.displayName ?: "Khahish User",
+                                    modifier = Modifier.padding(padding)
+                                )
+
+                                "Communities" -> KhahishCommunitiesScreen(
+                                    currentUid = user.uid,
                                     modifier = Modifier.padding(padding)
                                 )
 
