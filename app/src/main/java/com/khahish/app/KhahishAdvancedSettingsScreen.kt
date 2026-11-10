@@ -106,37 +106,27 @@ fun KhahishAdvancedSettingsScreen(
                         val members = (0 until memberArray.length()).mapNotNull { memberArray.optString(it).takeIf(String::isNotBlank) }
                         if (chatId.isBlank() || uid !in members) continue
                         val chatRef = db.collection("chats").document(chatId)
+                        // Restore only into an existing chat. Membership, group admins,
+                        // and ownership remain server-authoritative and are never imported.
                         val chatData = hashMapOf<String, Any>(
-                            "members" to members,
                             "lastMessage" to chatJson.optString("lastMessage"),
                             "lastMessageAt" to chatJson.optLong("lastMessageAt"),
                             "updatedAt" to System.currentTimeMillis()
                         )
-                        if (chatJson.has("isGroup")) chatData["isGroup"] = chatJson.optBoolean("isGroup")
-                        if (chatJson.has("groupName")) chatData["groupName"] = chatJson.optString("groupName")
-                        val memberNamesJson = chatJson.optJSONObject("memberNames")
-                        if (memberNamesJson != null) {
-                            val memberNames = mutableMapOf<String, String>()
-                            memberNamesJson.keys().forEach { key -> memberNames[key] = memberNamesJson.optString(key) }
-                            chatData["memberNames"] = memberNames
+                        val backupDuration = chatJson.optLong("disappearingDurationMs", 0L)
+                        if (backupDuration in listOf(0L, 86400000L, 604800000L, 7776000000L)) {
+                            chatData["disappearingDurationMs"] = backupDuration
                         }
-                        val adminsJson = chatJson.optJSONArray("groupAdmins") ?: JSONArray()
-                        chatData["groupAdmins"] = (0 until adminsJson.length()).map { adminsJson.optString(it) }
-                        if (chatJson.has("createdBy")) chatData["createdBy"] = chatJson.optString("createdBy")
-                        if (chatJson.has("createdAt")) chatData["createdAt"] = chatJson.optLong("createdAt")
-                        if (chatJson.has("disappearingDurationMs")) chatData["disappearingDurationMs"] = chatJson.optLong("disappearingDurationMs")
-                        listOf("pinnedMessageId", "pinnedMessageText", "pinnedBy").forEach { key ->
-                            if (chatJson.has(key)) chatData[key] = chatJson.optString(key)
-                        }
-                        if (chatJson.has("pinnedAt")) chatData["pinnedAt"] = chatJson.optLong("pinnedAt")
-                        writeTasks.add(chatRef.set(chatData, com.google.firebase.firestore.SetOptions.merge()))
+                        writeTasks.add(chatRef.update(chatData))
                         val messageArray = chatJson.optJSONArray("messages") ?: JSONArray()
+                        val restoredAt = System.currentTimeMillis()
                         var batch = db.batch()
                         var batchCount = 0
                         for (messageIndex in 0 until messageArray.length()) {
                             val message = messageArray.optJSONObject(messageIndex) ?: continue
                             val sender = message.optString("senderId")
-                            if (sender !in members) continue
+                            val originalTimestamp = message.optLong("timestamp")
+                            if (sender !in members || originalTimestamp <= 0L || originalTimestamp > restoredAt) continue
                             val messageData = hashMapOf<String, Any>(
                                 "senderId" to sender,
                                 "text" to message.optString("text"),
@@ -150,7 +140,10 @@ fun KhahishAdvancedSettingsScreen(
                                 "replyToMessageId" to message.optString("replyToMessageId"),
                                 "replyToText" to message.optString("replyToText"),
                                 "editedAt" to message.optLong("editedAt"),
-                                "starredBy" to (message.optJSONArray("starredBy")?.let { array -> (0 until array.length()).map { array.optString(it) } } ?: emptyList<String>())
+                                "starredBy" to (message.optJSONArray("starredBy")?.let { array -> (0 until array.length()).map { array.optString(it) } } ?: emptyList<String>()),
+                                "restoredFromBackup" to true,
+                                "restoredBy" to uid,
+                                "restoredAt" to restoredAt
                             )
                             val reactionsJson = message.optJSONObject("reactions")
                             if (reactionsJson != null) {
@@ -158,8 +151,13 @@ fun KhahishAdvancedSettingsScreen(
                                 reactionsJson.keys().forEach { key -> reactions[key] = reactionsJson.optString(key) }
                                 if (reactions.isNotEmpty()) messageData["reactions"] = reactions
                             }
-                            val messageId = message.optString("id")
-                            val messageRef = if (messageId.isBlank()) chatRef.collection("messages").document() else chatRef.collection("messages").document(messageId)
+                            val originalMessageId = message.optString("id")
+                            val safeOriginalId = originalMessageId
+                                .replace(Regex("[^A-Za-z0-9_-]"), "_")
+                                .take(100)
+                                .ifBlank { "message_$messageIndex" }
+                            val messageRef = chatRef.collection("messages")
+                                .document("backup_${uid}_$safeOriginalId")
                             batch.set(messageRef, messageData, com.google.firebase.firestore.SetOptions.merge())
                             batchCount++
                             if (batchCount >= 400) {
