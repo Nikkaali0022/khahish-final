@@ -14,6 +14,20 @@ Constraints: Firebase Spark Free; Android-first; preserve existing chat history 
 - Existing trustedDevices documents contain deviceName, platform, lastActiveAt, and trusted. They are revocation/recognition records, not cryptographic linked-device pairing or key distribution.
 - Current Android project targets Java 17. Signal's current libsignal README states its officially supported Android JDK is 21 and says use outside Signal is unsupported; its APIs and bridge layers may change without notice. Therefore no libsignal dependency is being added until an isolated proof-of-compatibility build and API review succeeds.
 
+## 1A. Protocol candidate review (2026-11)
+
+- Signal libsignal implements the Signal Protocol / Double Ratchet and provides Android native artifacts, but its own README says use outside Signal is unsupported, APIs may change without notice, and Android builds officially use JDK 21. The published Android artifact is AGPLv3. These are material maintenance and licensing gates for Khahish; do not add it to production until those are resolved.
+- mls-kmp is a Kotlin Multiplatform MLS implementation with Android support and RFC 9420 interoperability tests. Its current 1.x publication is very recent, so it needs independent code/security review, API maturity review, persistence/recovery review, and Android minSdk/CI proof before production use.
+- RFC 9420 MLS is designed for asynchronous group key establishment and forward secrecy/post-compromise security, but MLS is not a complete chat application: Khahish still needs an authentication service, delivery service, identity/credential validation, device lifecycle, and durable client-side group state.
+- Decision: no protocol dependency has been added to the production app yet. Do not invent a custom X3DH/Double Ratchet or group protocol to fill the gap.
+
+## 1B. Local key-storage groundwork
+
+- Added KhahishKeyVault.kt, a small Android Keystore AES-256-GCM wrapper for future local protocol-state storage.
+- The AES key is non-exportable and device-local; every encryption uses a fresh randomized IV and caller-supplied authenticated associated data.
+- This class does NOT encrypt Firestore messages, media, chat previews, or backups and is not evidence that E2EE is active.
+- Protocol-specific identity/session keys must only be stored using the selected library's documented key lifecycle. This generic vault must not be used to roll a home-grown messaging protocol.
+
 ## 2. Security goals
 
 1. Message and media content must be encrypted on sender devices before upload/write.
