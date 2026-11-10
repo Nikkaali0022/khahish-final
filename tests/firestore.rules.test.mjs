@@ -18,7 +18,7 @@ import {
   arrayUnion,
   query,
   whereEqualTo,
-  whereArrayContains
+  where
 } from "firebase/firestore";
 
 const projectId = "demo-khahish-rules";
@@ -290,7 +290,7 @@ test("call records are visible only to participants and support incoming-call qu
   )));
   await assertSucceeds(getDocs(query(
     collection(db("alice"), "calls"),
-    whereArrayContains("participants", "alice")
+    where("participants", "array-contains", "alice")
   )));
   await assertSucceeds(updateDoc(doc(db("bob"), "calls/call1"), {
     status: "accepted",
