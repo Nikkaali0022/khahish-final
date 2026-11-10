@@ -117,7 +117,10 @@ data class MessageItem(
     val deliveredTo: List<String> = emptyList(),
     val readBy: List<String> = emptyList(),
     val hiddenFor: List<String> = emptyList(),
-    val expiresAt: Long = 0L
+    val expiresAt: Long = 0L,
+    val replyToMessageId: String = "",
+    val replyToText: String = "",
+    val reactions: Map<String, String> = emptyMap()
 )
 
 private fun privateChatId(uid1: String, uid2: String): String =
@@ -1247,6 +1250,12 @@ fun ConversationScreen(
     var showDeleteOptions by remember { mutableStateOf(false) }
     var showDisappearingOptions by remember { mutableStateOf(false) }
     var disappearingDurationMs by remember { mutableStateOf(0L) }
+    var replyTarget by remember { mutableStateOf<MessageItem?>(null) }
+    var reactionTarget by remember { mutableStateOf<MessageItem?>(null) }
+    var showForwardDialog by remember { mutableStateOf(false) }
+    var forwardUsers by remember { mutableStateOf(emptyList<AppUser>()) }
+    var loadingForwardUsers by remember { mutableStateOf(false) }
+    var forwarding by remember { mutableStateOf(false) }
 
     val imagePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
@@ -1462,7 +1471,10 @@ fun ConversationScreen(
                             ?: emptyList(),
                         hiddenFor = doc.get("hiddenFor") as? List<String>
                             ?: emptyList(),
-                        expiresAt = doc.getLong("expiresAt") ?: 0L
+                        expiresAt = doc.getLong("expiresAt") ?: 0L,
+                        replyToMessageId = doc.getString("replyToMessageId") ?: "",
+                        replyToText = doc.getString("replyToText") ?: "",
+                        reactions = (doc.get("reactions") as? Map<*, *>)?.mapNotNull { (k, v) -> if (k is String && v is String) k to v else null }?.toMap() ?: emptyMap()
                     )
                 }.filter { currentUserId !in it.hiddenFor && (it.expiresAt == 0L || it.expiresAt > System.currentTimeMillis()) }
 
@@ -1551,6 +1563,7 @@ fun ConversationScreen(
             if (selectedMessageIds.isNotEmpty()) {
                 Text("${selectedMessageIds.size} selected", modifier = Modifier.weight(1f),
                     color = Ink, fontWeight = FontWeight.SemiBold)
+                TextButton(onClick = { showForwardDialog = true }) { Icon(Icons.Default.Forward, null); Text("Forward") }
                 TextButton(onClick = { showDeleteOptions = true }) {
                     Icon(Icons.Default.DeleteOutline, null)
                     Spacer(Modifier.width(4.dp))
@@ -1672,8 +1685,22 @@ fun ConversationScreen(
                             "location" -> Text(msg.text, color = if (isSelected) Color.Black else Ink)
                         }
 
+                        if (msg.replyToMessageId.isNotBlank()) {
+                            Column(Modifier.fillMaxWidth().background(Color(0xFFEAF4F0), RoundedCornerShape(8.dp)).padding(7.dp)) {
+                                Text("Reply", color = Green, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text(msg.replyToText, color = Ink, fontSize = 12.sp, maxLines = 2)
+                            }
+                            Spacer(Modifier.height(5.dp))
+                        }
                         if (msg.text.isNotBlank() && msg.mediaType != "location") {
                             Text(msg.text, color = if (isSelected) Color.Black else Ink, fontSize = 15.sp)
+                        }
+                        if (msg.reactions.isNotEmpty()) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                msg.reactions.values.groupingBy { it }.eachCount().forEach { (emoji, count) ->
+                                    TextButton(onClick = { reactionTarget = msg }, contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)) { Text("$emoji $count", fontSize = 12.sp) }
+                                }
+                            }
                         }
 
                         Row(
@@ -1689,6 +1716,8 @@ fun ConversationScreen(
                                 color = Muted
                             )
 
+                            TextButton(onClick = { replyTarget = msg }, contentPadding = PaddingValues(horizontal = 3.dp, vertical = 0.dp)) { Icon(Icons.Default.Reply, "Reply", tint = Green, modifier = Modifier.size(16.dp)) }
+                            TextButton(onClick = { reactionTarget = msg }, contentPadding = PaddingValues(horizontal = 3.dp, vertical = 0.dp)) { Text("😊", fontSize = 14.sp) }
                             if (isMe) {
                                 val read = msg.readBy.any { it != currentUserId }
                                 val delivered =
@@ -1712,6 +1741,15 @@ fun ConversationScreen(
             }
         }
 
+        if (replyTarget != null) {
+            Row(Modifier.fillMaxWidth().background(Color(0xFFE8F5F0)).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Replying to message", color = Green, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text(replyTarget!!.text.ifBlank { replyTarget!!.mediaType }, color = Ink, maxLines = 1, fontSize = 12.sp)
+                }
+                IconButton(onClick = { replyTarget = null }) { Icon(Icons.Default.Close, "Cancel reply") }
+            }
+        }
         Row(
             Modifier
                 .fillMaxWidth()
@@ -1827,9 +1865,12 @@ fun ConversationScreen(
                             message,
                             "",
                             "text",
-                            context
+                            context,
+                            replyToMessageId = replyTarget?.id.orEmpty(),
+                            replyToText = replyTarget?.text?.ifBlank { replyTarget?.mediaType ?: "Media" }.orEmpty()
                         ) {
                             isSending = false
+                            replyTarget = null
                         }
                     }
                 }
@@ -1839,6 +1880,57 @@ fun ConversationScreen(
         }
     }
 
+    if (showForwardDialog) {
+        LaunchedEffect(showForwardDialog) {
+            if (showForwardDialog && forwardUsers.isEmpty()) {
+                loadingForwardUsers = true
+                db.collection("publicProfiles").limit(50).get()
+                    .addOnSuccessListener { snap ->
+                        forwardUsers = snap.documents.filter { it.id != currentUserId }.map { doc -> AppUser(uid = doc.id, name = doc.getString("name") ?: "Khahish User") }
+                        loadingForwardUsers = false
+                    }
+                    .addOnFailureListener { loadingForwardUsers = false; showToast(context, "Could not load contacts: ${it.message}") }
+            }
+        }
+        AlertDialog(onDismissRequest = { if (!forwarding) showForwardDialog = false }, title = { Text("Forward selected messages") }, text = {
+            Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                if (loadingForwardUsers) CircularProgressIndicator(color = Green)
+                else forwardUsers.forEach { target ->
+                    TextButton(enabled = !forwarding, onClick = {
+                        forwarding = true
+                        val targetRef = db.collection("chats").document(privateChatId(currentUserId, target.uid))
+                        targetRef.set(mapOf("members" to listOf(currentUserId, target.uid), "updatedAt" to System.currentTimeMillis()), SetOptions.merge())
+                            .addOnSuccessListener {
+                                val batch = db.batch()
+                                messages.filter { it.id in selectedMessageIds }.forEach { original ->
+                                    val ref = targetRef.collection("messages").document()
+                                    batch.set(ref, mapOf("senderId" to currentUserId, "text" to original.text, "imageUrl" to original.imageUrl, "mediaType" to original.mediaType, "timestamp" to System.currentTimeMillis(), "deliveredTo" to emptyList<String>(), "readBy" to listOf(currentUserId), "forwarded" to true))
+                                }
+                                batch.commit().addOnSuccessListener {
+                                    targetRef.update(mapOf("lastMessage" to "Forwarded message", "lastMessageAt" to System.currentTimeMillis(), "updatedAt" to System.currentTimeMillis()))
+                                    forwarding = false; showForwardDialog = false; selectedMessageIds = emptySet()
+                                    showToast(context, "Messages forwarded to ${target.name}")
+                                }.addOnFailureListener { forwarding = false; showToast(context, "Forward failed: ${it.message}") }
+                            }.addOnFailureListener { forwarding = false; showToast(context, "Could not open chat: ${it.message}") }
+                    }) { Text(target.name, color = Ink) }
+                }
+                if (!loadingForwardUsers && forwardUsers.isEmpty()) Text("No contacts available", color = Muted)
+            }
+        }, confirmButton = { TextButton(onClick = { showForwardDialog = false }, enabled = !forwarding) { Text("Close") } })
+    }
+    if (reactionTarget != null) {
+        AlertDialog(onDismissRequest = { reactionTarget = null }, title = { Text("React to message") }, text = {
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                listOf("❤️", "😂", "😮", "😢", "👍", "🙏").forEach { emoji ->
+                    TextButton(onClick = {
+                        chatRef.collection("messages").document(reactionTarget!!.id).update("reactions.$currentUserId", emoji)
+                            .addOnSuccessListener { reactionTarget = null }
+                            .addOnFailureListener { showToast(context, "Reaction failed: ${it.message}"); reactionTarget = null }
+                    }) { Text(emoji, fontSize = 21.sp) }
+                }
+            }
+        }, confirmButton = { TextButton(onClick = { reactionTarget = null }) { Text("Close") } })
+    }
     if (showPeerPicture && peerPhotoUrl.isNotBlank()) Dialog(onDismissRequest = { showPeerPicture = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(Modifier.fillMaxWidth().fillMaxHeight(.82f).background(Color.Black, RoundedCornerShape(18.dp)), contentAlignment = Alignment.Center) {
             AsyncImage(model = peerPhotoUrl, contentDescription = "Profile picture", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
@@ -2067,7 +2159,9 @@ private fun sendChatMessage(
     mediaUrl: String,
     mediaType: String,
     context: Context,
-    onComplete: () -> Unit
+    onComplete: () -> Unit,
+    replyToMessageId: String = "",
+    replyToText: String = ""
 ) {
     val now = System.currentTimeMillis()
     chatRef.get().addOnSuccessListener { chatSnapshot ->
@@ -2082,6 +2176,10 @@ private fun sendChatMessage(
             "readBy" to listOf(senderId)
         )
         if (duration > 0L) data["expiresAt"] = now + duration
+        if (replyToMessageId.isNotBlank()) {
+            data["replyToMessageId"] = replyToMessageId
+            data["replyToText"] = replyToText
+        }
         chatRef.collection("messages").add(data)
             .addOnSuccessListener {
                 val preview = when (mediaType) {
