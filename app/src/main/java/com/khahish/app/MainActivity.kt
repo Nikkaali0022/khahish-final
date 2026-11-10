@@ -112,6 +112,14 @@ data class ChatMessageSearchResult(
     val timestamp: Long
 )
 
+data class LiveLocationPoint(
+    val latitude: Double,
+    val longitude: Double,
+    val isActive: Boolean,
+    val updatedAt: Long,
+    val expiresAt: Long
+)
+
 data class MessageRequestItem(val id: String, val senderUid: String, val senderName: String, val senderUsername: String, val createdAt: Long)
 
 internal fun normalizeKhahishUsername(value: String): String = value.trim().removePrefix("@").lowercase(Locale.ROOT)
@@ -1515,6 +1523,9 @@ fun ConversationScreen(
 
     var text by remember { mutableStateOf("") }
     var messages by remember { mutableStateOf(listOf<MessageItem>()) }
+    var liveLocations by remember(chat.id) { mutableStateOf(emptyMap<String, LiveLocationPoint>()) }
+    var showLiveLocationOptions by remember { mutableStateOf(false) }
+    var pendingLiveLocationDuration by remember { mutableStateOf(0L) }
     val messageListState = androidx.compose.foundation.lazy.rememberLazyListState()
     val messageScrollScope = rememberCoroutineScope()
     var initialMessagesPositioned by remember(chat.id) { mutableStateOf(false) }
@@ -1683,6 +1694,38 @@ fun ConversationScreen(
         else showToast(context, "Location permission was not granted.")
     }
 
+    fun startLiveLocationService(durationMs: Long) {
+        if (durationMs <= 0L) return
+        val serviceIntent = Intent(context, KhahishLiveLocationService::class.java).apply {
+            action = KhahishLiveLocationService.ACTION_START
+            putExtra(KhahishLiveLocationService.EXTRA_CHAT_ID, chat.id)
+            putExtra(KhahishLiveLocationService.EXTRA_UID, currentUserId)
+            putExtra(KhahishLiveLocationService.EXTRA_DURATION_MS, durationMs)
+        }
+        try {
+            androidx.core.content.ContextCompat.startForegroundService(context, serviceIntent)
+            val label = when (durationMs) {
+                15L * 60L * 1000L -> "15 minutes"
+                60L * 60L * 1000L -> "1 hour"
+                else -> "8 hours"
+            }
+            sendChatMessage(chatRef, currentUserId, "Live location shared for $label", "", "live_location", context) { }
+            showToast(context, "Live location sharing started. Stop it from the notification at any time.")
+        } catch (error: Exception) {
+            showToast(context, "Could not start live location: ${error.message}")
+        }
+    }
+
+    val liveLocationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        val granted = grants.values.any { it }
+        val duration = pendingLiveLocationDuration
+        pendingLiveLocationDuration = 0L
+        if (granted && duration > 0L) startLiveLocationService(duration)
+        else showToast(context, "Location permission was not granted.")
+    }
+
     val documentPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
@@ -1848,6 +1891,22 @@ fun ConversationScreen(
             messageListState.scrollToItem(if (targetIndex >= 0) targetIndex else messages.lastIndex)
             initialMessagesPositioned = true
         }
+    }
+
+    DisposableEffect(chat.id) {
+        val registration = chatRef.collection("liveLocations").addSnapshotListener { snapshot, error ->
+            if (error != null || snapshot == null) return@addSnapshotListener
+            liveLocations = snapshot.documents.associate { doc ->
+                doc.id to LiveLocationPoint(
+                    latitude = doc.getDouble("latitude") ?: 0.0,
+                    longitude = doc.getDouble("longitude") ?: 0.0,
+                    isActive = doc.getBoolean("isActive") == true,
+                    updatedAt = doc.getLong("updatedAt") ?: 0L,
+                    expiresAt = doc.getLong("expiresAt") ?: 0L
+                )
+            }
+        }
+        onDispose { registration.remove() }
     }
 
     DisposableEffect(chat.id, currentUserId) {
@@ -2185,6 +2244,32 @@ fun ConversationScreen(
                                 context
                             )
 
+                            "live_location" -> {
+                                val point = liveLocations[msg.senderId]
+                                val active = point?.isActive == true && point.expiresAt > System.currentTimeMillis()
+                                Row(
+                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                                        .background(Color(0xFFEAF4F0))
+                                        .clickable {
+                                            if (point != null && active) {
+                                                openSharedUrl(context, "https://maps.google.com/?q=${point.latitude},${point.longitude}")
+                                            } else {
+                                                showToast(context, "Live location sharing has ended.")
+                                            }
+                                        }
+                                        .padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.MyLocation, null, tint = Green)
+                                    Spacer(Modifier.width(8.dp))
+                                    Column {
+                                        Text("Live location", color = Ink, fontWeight = FontWeight.SemiBold)
+                                        Text(if (active) "Tap to view latest location" else "Sharing ended", color = Green, fontSize = 11.sp)
+                                        Text(msg.text, color = Muted, fontSize = 10.sp)
+                                    }
+                                }
+                            }
+
                             "location" -> Row(
                                 Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
                                     .background(Color(0xFFEAF4F0))
@@ -2367,6 +2452,15 @@ fun ConversationScreen(
                             ))
                         }
                     )
+                    DropdownMenuItem(
+                        text = { Text("Share live location") },
+                        leadingIcon = { Icon(Icons.Default.MyLocation, null) },
+                        onClick = {
+                            attachmentMenu = false
+                            showLiveLocationOptions = true
+                        }
+                    )
+
                     DropdownMenuItem(
                         text = { Text("Share contact") },
                         leadingIcon = { Icon(Icons.Default.ContactPage, null) },
@@ -2681,6 +2775,41 @@ fun ConversationScreen(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { IconButton(onClick = { videoToPlay = "" }) { Icon(Icons.Default.Close, "Close video", tint = Color.White) } }
             KhahishVideoPlayer(url = videoToPlay, modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f))
         }
+    }
+
+    if (showLiveLocationOptions) {
+        AlertDialog(
+            onDismissRequest = { showLiveLocationOptions = false },
+            title = { Text("Share live location") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Your location will update while sharing is active. A persistent Android notification lets you stop sharing at any time.", color = Muted, fontSize = 13.sp)
+                    listOf(
+                        15L * 60L * 1000L to "15 minutes",
+                        60L * 60L * 1000L to "1 hour",
+                        8L * 60L * 60L * 1000L to "8 hours"
+                    ).forEach { (duration, label) ->
+                        TextButton(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = {
+                                showLiveLocationOptions = false
+                                val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                                val coarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                                if (fine || coarse) startLiveLocationService(duration)
+                                else {
+                                    pendingLiveLocationDuration = duration
+                                    liveLocationPermissionLauncher.launch(arrayOf(
+                                        Manifest.permission.ACCESS_FINE_LOCATION,
+                                        Manifest.permission.ACCESS_COARSE_LOCATION
+                                    ))
+                                }
+                            }
+                        ) { Text(label, color = Green) }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showLiveLocationOptions = false }) { Text("Cancel") } }
+        )
     }
 
     if (showDisappearingOptions) {
