@@ -410,6 +410,7 @@ service cloud.firestore {
             // Only the original sender can edit message text.
             (
               resource.data.senderId == request.auth.uid
+              && resource.data.get('restoredFromBackup', false) != true
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
                 'text', 'editedAt'
               ])
