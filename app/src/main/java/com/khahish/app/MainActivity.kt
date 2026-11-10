@@ -3080,10 +3080,20 @@ fun ConversationScreen(
             ) { Icon(Icons.Default.Close, "Close photo", tint = Color.White) }
         }
     }
-    if (videoToPlay.isNotBlank()) Dialog(onDismissRequest = { videoToPlay = "" }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(Modifier.fillMaxWidth().background(Color.Black, RoundedCornerShape(16.dp)).padding(10.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { IconButton(onClick = { videoToPlay = "" }) { Icon(Icons.Default.Close, "Close video", tint = Color.White) } }
-            KhahishVideoPlayer(url = videoToPlay, modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f))
+    if (videoToPlay.isNotBlank()) Dialog(
+        onDismissRequest = { videoToPlay = "" },
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+    ) {
+        Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+            KhahishVideoPlayer(
+                url = videoToPlay,
+                modifier = Modifier.fillMaxWidth().fillMaxHeight()
+            )
+            IconButton(
+                onClick = { videoToPlay = "" },
+                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp)
+                    .background(Color.Black.copy(alpha = .5f), CircleShape)
+            ) { Icon(Icons.Default.Close, "Close video", tint = Color.White) }
         }
     }
 
