@@ -10,6 +10,15 @@ service cloud.firestore {
         && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.members;
     }
 
+    function isPrivateChatUnblocked(chatId) {
+      let chatData = get(/databases/$(database)/documents/chats/$(chatId)).data;
+      let members = chatData.members;
+      let otherUid = members[0] == request.auth.uid ? members[1] : members[0];
+      return chatData.get('isGroup', false) == true
+        || members.size() != 2
+        || !exists(/databases/$(database)/documents/users/$(otherUid)/blocked/$(request.auth.uid));
+    }
+
     function canReadStory(storyData) {
       return signedIn()
         && (
@@ -68,7 +77,8 @@ service cloud.firestore {
       match /messages/{messageId} {
         allow read: if isChatMember(chatId);
         allow create: if isChatMember(chatId)
-          && request.resource.data.senderId == request.auth.uid;
+          && request.resource.data.senderId == request.auth.uid
+          && isPrivateChatUnblocked(chatId);
         allow update: if isChatMember(chatId)
           && (
             (
