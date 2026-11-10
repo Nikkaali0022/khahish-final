@@ -204,6 +204,16 @@ test("story audience and expiry are enforced", async () => {
   await assertFails(getDoc(doc(db("bob"), "stories/expired-public")));
   await assertFails(getDoc(doc(db("bob"), "stories/private")));
   await assertSucceeds(getDoc(doc(db("alice"), "stories/private")));
+  await assertSucceeds(getDocs(query(
+    collection(db("bob"), "stories"),
+    where("audience", "==", "everyone"),
+    where("expiresAt", ">", Date.now())
+  )));
+  await assertSucceeds(getDocs(query(
+    collection(db("alice"), "stories"),
+    where("ownerUid", "==", "alice"),
+    where("expiresAt", ">", Date.now())
+  )));
 });
 
 test("live location writes are limited to the matching chat member UID", async () => {
