@@ -76,6 +76,8 @@ fun KhahishUpdatesScreen(
     var searchQuery by remember { mutableStateOf("") }
     var updatesMenu by remember { mutableStateOf(false) }
     var viewedStoryIds by remember { mutableStateOf(setOf<String>()) }
+    var currentPhotoUrl by remember(currentUid) { mutableStateOf("") }
+    var ownerPhotos by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
 
     fun publishStory(text: String, mediaUrl: String = "", mediaType: String = "text") {
         val now = System.currentTimeMillis()
@@ -116,6 +118,27 @@ fun KhahishUpdatesScreen(
     }
     val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) uploadStory(uri, "video")
+    }
+
+    DisposableEffect(currentUid) {
+        val registration = db.collection("publicProfiles").document(currentUid)
+            .addSnapshotListener { snapshot, _ ->
+                currentPhotoUrl = snapshot?.getString("photoUrl").orEmpty()
+            }
+        onDispose { registration.remove() }
+    }
+
+    DisposableEffect(currentUid, stories) {
+        val owners = stories.map { it.ownerUid }.filter { it.isNotBlank() && it != currentUid }.distinct()
+        val photoRegistrations = owners.map { ownerUid ->
+            db.collection("publicProfiles").document(ownerUid).addSnapshotListener { snapshot, _ ->
+                val url = snapshot?.getString("photoUrl").orEmpty()
+                ownerPhotos = ownerPhotos.toMutableMap().apply {
+                    if (url.isBlank()) remove(ownerUid) else put(ownerUid, url)
+                }
+            }
+        }
+        onDispose { photoRegistrations.forEach { it.remove() } }
     }
 
     DisposableEffect(currentUid, stories) {
@@ -275,10 +298,22 @@ fun KhahishUpdatesScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
-                    Modifier.size(54.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                    Modifier.size(58.dp)
+                        .border(2.dp, if (ownStories.isEmpty()) MaterialTheme.colorScheme.outline else Green, CircleShape)
+                        .padding(3.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primaryContainer),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(currentName.take(1).uppercase(Locale.getDefault()), color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold, fontSize = 21.sp)
+                    if (currentPhotoUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = currentPhotoUrl,
+                            contentDescription = "My profile picture",
+                            modifier = Modifier.fillMaxSize().clip(CircleShape)
+                        )
+                    } else {
+                        Text(currentName.take(1).uppercase(Locale.getDefault()), color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold, fontSize = 21.sp)
+                    }
                     Box(
                         Modifier.align(Alignment.BottomEnd).size(21.dp).background(Green, CircleShape),
                         contentAlignment = Alignment.Center
@@ -288,7 +323,7 @@ fun KhahishUpdatesScreen(
                 Column(Modifier.weight(1f)) {
                     Text("My status", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
                     Text(
-                        if (ownStories.isEmpty()) "Tap to add a status" else "${ownStories.size} active update(s) • Audience: ${if (storyAudience == "everyone") "Everyone" else "Only me"}",
+                        if (ownStories.isEmpty()) "Tap to add a status" else "Updated ${relativeStoryTime(ownStories.maxByOrNull { it.createdAt }?.createdAt ?: 0L)}",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp
                     )
@@ -329,10 +364,20 @@ fun KhahishUpdatesScreen(
                                             CircleShape
                                         )
                                         .padding(3.dp)
-                                        .background(Green, CircleShape),
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.primaryContainer),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text(story.ownerName.take(1).uppercase(Locale.getDefault()), color = Color.White, fontWeight = FontWeight.Bold)
+                                    val ownerPhoto = ownerPhotos[story.ownerUid].orEmpty()
+                                    if (ownerPhoto.isNotBlank()) {
+                                        AsyncImage(
+                                            model = ownerPhoto,
+                                            contentDescription = "${story.ownerName} profile picture",
+                                            modifier = Modifier.fillMaxSize().clip(CircleShape)
+                                        )
+                                    } else {
+                                        Text(story.ownerName.take(1).uppercase(Locale.getDefault()), color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold)
+                                    }
                                 }
                                 Spacer(Modifier.width(10.dp))
                                 Column(Modifier.weight(1f).clickable {
@@ -343,7 +388,7 @@ fun KhahishUpdatesScreen(
                                 }) {
                                     Text(if (story.ownerUid == currentUid) "Your story" else story.ownerName, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
                                     Text(
-                                        if (story.ownerUid == currentUid) "Audience: ${if (story.audience == "everyone") "Everyone" else "Only me"}" else "Tap name to mark viewed",
+                                        if (story.ownerUid == currentUid) "Audience: ${if (story.audience == "everyone") "Everyone" else "Only me"}" else relativeStoryTime(story.createdAt),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp
                                     )
                                 }
@@ -452,3 +497,15 @@ fun KhahishUpdatesScreen(
 }
 
 
+
+private fun relativeStoryTime(timestamp: Long): String {
+    if (timestamp <= 0L) return "just now"
+    val elapsed = (System.currentTimeMillis() - timestamp).coerceAtLeast(0L)
+    val minutes = elapsed / 60_000L
+    return when {
+        minutes < 1L -> "just now"
+        minutes < 60L -> "${minutes}m ago"
+        minutes < 24L * 60L -> "${minutes / 60L}h ago"
+        else -> "${minutes / (24L * 60L)}d ago"
+    }
+}
