@@ -14,6 +14,8 @@ import com.google.firebase.firestore.SetOptions
 import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+import com.google.android.gms.tasks.Tasks
+import java.util.concurrent.TimeUnit
 import java.security.MessageDigest
 
 /**
@@ -32,6 +34,29 @@ class KhahishMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         super.onMessageReceived(message)
         val payload = message.data
+        val chatId = payload["chatId"].orEmpty()
+        val notificationType = payload["type"].orEmpty()
+
+        // Per-chat mute applies to message alerts only; incoming calls remain audible.
+        if (chatId.isNotBlank() && notificationType != "call") {
+            val uid = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
+            if (uid.isNotBlank()) {
+                val muted = try {
+                    Tasks.await(
+                        FirebaseFirestore.getInstance()
+                            .collection("users").document(uid)
+                            .collection("appSettings").document("chat_$chatId")
+                            .get(),
+                        3,
+                        TimeUnit.SECONDS
+                    ).getBoolean("notificationsMuted") == true
+                } catch (_: Exception) {
+                    false
+                }
+                if (muted) return
+            }
+        }
+
         val title = payload["title"] ?: message.notification?.title ?: "Khahish"
         val body = payload["body"] ?: message.notification?.body ?: "You have a new notification."
         ensureNotificationChannel()
