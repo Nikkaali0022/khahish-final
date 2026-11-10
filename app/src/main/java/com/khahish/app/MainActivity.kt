@@ -1,6 +1,9 @@
 package com.khahish.app
 
 import android.Manifest
+import android.app.Activity
+import android.location.LocationManager
+import android.provider.ContactsContract
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.MediaRecorder
@@ -1409,6 +1412,57 @@ fun ConversationScreen(
         }
     }
 
+    val contactPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val uri = result.data?.data
+            if (uri != null) {
+                val columns = arrayOf(
+                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                    ContactsContract.CommonDataKinds.Phone.NUMBER
+                )
+                context.contentResolver.query(uri, columns, null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val name = cursor.getString(0).orEmpty()
+                        val number = cursor.getString(1).orEmpty()
+                        val contactText = "Name: $name\nPhone: $number"
+                        sendChatMessage(chatRef, currentUserId, contactText, "", "contact", context) { }
+                    }
+                }
+            }
+        }
+    }
+
+    fun sendLastKnownLocation() {
+        try {
+            val manager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            val location = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+                .mapNotNull { provider -> manager.getLastKnownLocation(provider) }
+                .maxByOrNull { it.time }
+            if (location == null) {
+                showToast(context, "No recent location is available. Turn on location and try again.")
+            } else {
+                val latitude = location.latitude
+                val longitude = location.longitude
+                val mapUrl = "https://maps.google.com/?q=$latitude,$longitude"
+                val label = String.format(Locale.US, "Location shared: %.5f, %.5f", latitude, longitude)
+                sendChatMessage(chatRef, currentUserId, label, mapUrl, "location", context) { }
+            }
+        } catch (error: SecurityException) {
+            showToast(context, "Location permission is required.")
+        } catch (error: Exception) {
+            showToast(context, "Could not read location: ${error.message}")
+        }
+    }
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        if (grants.values.any { it }) sendLastKnownLocation()
+        else showToast(context, "Location permission was not granted.")
+    }
+
     val documentPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
@@ -1864,7 +1918,29 @@ fun ConversationScreen(
                                 context
                             )
 
-                            "location" -> Text(msg.text, color = if (isSelected) Color.Black else Ink)
+                            "location" -> Row(
+                                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFFEAF4F0))
+                                    .clickable { openSharedUrl(context, msg.imageUrl) }
+                                    .padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.LocationOn, null, tint = Green)
+                                Spacer(Modifier.width(8.dp))
+                                Column {
+                                    Text("Shared location", color = Ink, fontWeight = FontWeight.SemiBold)
+                                    Text("Tap to open in Maps", color = Green, fontSize = 11.sp)
+                                    Text(msg.text, color = Muted, fontSize = 10.sp)
+                                }
+                            }
+                            "contact" -> Column(Modifier.fillMaxWidth().background(Color(0xFFEAF4F0), RoundedCornerShape(10.dp)).padding(10.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.ContactPage, null, tint = Green)
+                                    Spacer(Modifier.width(7.dp))
+                                    Text("Shared contact", color = Ink, fontWeight = FontWeight.SemiBold)
+                                }
+                                Text(msg.text, color = Ink, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+                            }
                         }
 
                         if (msg.replyToMessageId.isNotBlank()) {
@@ -1874,7 +1950,7 @@ fun ConversationScreen(
                             }
                             Spacer(Modifier.height(5.dp))
                         }
-                        if (msg.text.isNotBlank() && msg.mediaType != "location") {
+                        if (msg.text.isNotBlank() && msg.mediaType != "location" && msg.mediaType != "contact") {
                             Text(msg.text, color = if (isSelected) Color.Black else Ink, fontSize = 15.sp)
                         }
                         if (msg.reactions.isNotEmpty()) {
@@ -2015,10 +2091,21 @@ fun ConversationScreen(
                         leadingIcon = { Icon(Icons.Default.LocationOn, null) },
                         onClick = {
                             attachmentMenu = false
-                            showToast(
-                                context,
-                                "Location sharing is not available in this build."
-                            )
+                            val fineGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                            val coarseGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                            if (fineGranted || coarseGranted) sendLastKnownLocation()
+                            else locationPermissionLauncher.launch(arrayOf(
+                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                Manifest.permission.ACCESS_COARSE_LOCATION
+                            ))
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Share contact") },
+                        leadingIcon = { Icon(Icons.Default.ContactPage, null) },
+                        onClick = {
+                            attachmentMenu = false
+                            contactPicker.launch(Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI))
                         }
                     )
                 }
