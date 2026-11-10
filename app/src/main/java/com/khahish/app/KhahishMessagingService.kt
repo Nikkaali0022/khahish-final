@@ -31,23 +31,23 @@ class KhahishMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
         super.onMessageReceived(message)
-        val data = message.data
-        val title = data["title"] ?: message.notification?.title ?: "Khahish"
-        val body = data["body"] ?: message.notification?.body ?: "You have a new notification."
+        val payload = message.data
+        val title = payload["title"] ?: message.notification?.title ?: "Khahish"
+        val body = payload["body"] ?: message.notification?.body ?: "You have a new notification."
         ensureNotificationChannel()
 
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            data["chatId"]?.let { putExtra("khahish_chat_id", it) }
-            data["type"]?.let { putExtra("khahish_notification_type", it) }
+            payload["chatId"]?.let { putExtra("khahish_chat_id", it) }
+            payload["type"]?.let { putExtra("khahish_notification_type", it) }
         }
         val pendingIntent = PendingIntent.getActivity(
             this,
-            (data["chatId"] ?: title).hashCode(),
+            (payload["chatId"] ?: title).hashCode(),
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val notificationId = (data["notificationId"] ?: System.currentTimeMillis().toString()).hashCode()
+        val notificationId = (payload["notificationId"] ?: System.currentTimeMillis().toString()).hashCode()
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.sym_action_chat)
             .setContentTitle(title)
