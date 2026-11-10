@@ -3206,6 +3206,7 @@ private fun AudioMessagePlayer(url: String) {
     var durationMs by remember(url) { mutableStateOf(0) }
     var progress by remember(url) { mutableStateOf(0f) }
     var seeking by remember(url) { mutableStateOf(false) }
+    var playbackSpeed by remember(url) { mutableStateOf(1f) }
 
     DisposableEffect(url) {
         onDispose { try { player?.release() } catch (_: Exception) { }; player = null }
@@ -3220,6 +3221,12 @@ private fun AudioMessagePlayer(url: String) {
                 }
             }
             kotlinx.coroutines.delay(100)
+        }
+    }
+    LaunchedEffect(player, playbackSpeed) {
+        player?.let { active ->
+            try { active.playbackParams = active.playbackParams.setSpeed(playbackSpeed) }
+            catch (_: Exception) { }
         }
     }
     fun timeText(ms: Int): String {
@@ -3314,6 +3321,14 @@ private fun AudioMessagePlayer(url: String) {
                 )
                 Spacer(Modifier.width(4.dp))
                 Text(timeText(durationMs), color = Color.White, fontSize = 10.sp)
+                Text(
+                    when (playbackSpeed) { 1.5f -> "1.5×"; 2f -> "2×"; else -> "1×" },
+                    color = Color(0xFFB8D9D0),
+                    fontSize = 10.sp,
+                    modifier = Modifier.padding(start = 6.dp).clickable {
+                        playbackSpeed = when (playbackSpeed) { 1f -> 1.5f; 1.5f -> 2f; else -> 1f }
+                    }
+                )
             }
             Text(timeText((durationMs * progress).toInt()), color = Color(0xFFB8D9D0), fontSize = 9.sp)
         }
