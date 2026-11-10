@@ -139,6 +139,7 @@ fun KhahishUpdatesScreen(
             loading = false
         }
         val publicListener = db.collection("stories").whereEqualTo("audience", "everyone")
+            .whereGreaterThan("expiresAt", System.currentTimeMillis())
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     loading = false
@@ -150,6 +151,7 @@ fun KhahishUpdatesScreen(
                 }
             }
         val ownerListener = db.collection("stories").whereEqualTo("ownerUid", currentUid)
+            .whereGreaterThan("expiresAt", System.currentTimeMillis())
             .addSnapshotListener { snapshot, error ->
                 if (error == null) {
                     ownerDocs.clear()
@@ -158,6 +160,7 @@ fun KhahishUpdatesScreen(
                 }
             }
         val allowedListener = db.collection("stories").whereArrayContains("allowedUids", currentUid)
+            .whereGreaterThan("expiresAt", System.currentTimeMillis())
             .addSnapshotListener { snapshot, error ->
                 if (error == null) {
                     allowedDocs.clear()
