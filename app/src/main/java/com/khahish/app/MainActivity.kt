@@ -2751,44 +2751,73 @@ private fun sendChatMessage(
 ) {
     val now = System.currentTimeMillis()
     chatRef.get().addOnSuccessListener { chatSnapshot ->
-        val duration = chatSnapshot.getLong("disappearingDurationMs") ?: 0L
-        val data = hashMapOf<String, Any>(
-            "senderId" to senderId,
-            "text" to messageText,
-            "imageUrl" to mediaUrl,
-            "mediaType" to mediaType,
-            "timestamp" to now,
-            "deliveredTo" to emptyList<String>(),
-            "readBy" to listOf(senderId)
-        )
-        if (duration > 0L) data["expiresAt"] = now + duration
-        if (replyToMessageId.isNotBlank()) {
-            data["replyToMessageId"] = replyToMessageId
-            data["replyToText"] = replyToText
-        }
-        chatRef.collection("messages").add(data)
-            .addOnSuccessListener {
-                val preview = when (mediaType) {
-                    "image" -> "Photo"
-                    "video" -> "Video"
-                    "audio" -> "Audio"
-                    "document" -> "Document"
-                    "location" -> "Location"
-                    else -> messageText
+        fun sendNow() {
+            val duration = chatSnapshot.getLong("disappearingDurationMs") ?: 0L
+            val data = hashMapOf<String, Any>(
+                "senderId" to senderId,
+                "text" to messageText,
+                "imageUrl" to mediaUrl,
+                "mediaType" to mediaType,
+                "timestamp" to now,
+                "deliveredTo" to emptyList<String>(),
+                "readBy" to listOf(senderId)
+            )
+            if (duration > 0L) data["expiresAt"] = now + duration
+            if (replyToMessageId.isNotBlank()) {
+                data["replyToMessageId"] = replyToMessageId
+                data["replyToText"] = replyToText
+            }
+            chatRef.collection("messages").add(data)
+                .addOnSuccessListener {
+                    val preview = when (mediaType) {
+                        "image" -> "Photo"
+                        "video" -> "Video"
+                        "audio" -> "Audio"
+                        "document" -> "Document"
+                        "location" -> "Location"
+                        "contact" -> "Contact"
+                        else -> messageText
+                    }
+                    chatRef.update(mapOf(
+                        "lastMessage" to preview,
+                        "lastMessageAt" to now,
+                        "updatedAt" to now
+                    )).addOnCompleteListener { updateTask ->
+                        if (!updateTask.isSuccessful) showToast(context, "Message sent, but chat preview could not update.")
+                        onComplete()
+                    }
                 }
-                chatRef.update(mapOf(
-                    "lastMessage" to preview,
-                    "lastMessageAt" to now,
-                    "updatedAt" to now
-                )).addOnCompleteListener { updateTask ->
-                    if (!updateTask.isSuccessful) showToast(context, "Message sent, but chat preview could not update.")
+                .addOnFailureListener { error ->
                     onComplete()
+                    showToast(context, "Message failed: ${error.message}")
                 }
-            }
-            .addOnFailureListener { error ->
-                onComplete()
-                showToast(context, "Message failed: ${error.message}")
-            }
+        }
+
+        val members = chatSnapshot.get("members") as? List<*> ?: emptyList<Any>()
+        val otherUid = members.filterIsInstance<String>().firstOrNull { it != senderId }.orEmpty()
+        if (members.size == 2 && otherUid.isNotBlank()) {
+            val db = FirebaseFirestore.getInstance()
+            db.collection("users").document(senderId).collection("blocked").document(otherUid).get()
+                .addOnSuccessListener { myBlock ->
+                    db.collection("users").document(otherUid).collection("blocked").document(senderId).get()
+                        .addOnSuccessListener { theirBlock ->
+                            if (myBlock.exists() || theirBlock.exists()) {
+                                onComplete()
+                                showToast(context, "Message not sent. One of the accounts has blocked this conversation.")
+                            } else sendNow()
+                        }
+                        .addOnFailureListener {
+                            onComplete()
+                            showToast(context, "Could not verify chat permissions. Please try again.")
+                        }
+                }
+                .addOnFailureListener {
+                    onComplete()
+                    showToast(context, "Could not verify chat permissions. Please try again.")
+                }
+        } else {
+            sendNow()
+        }
     }.addOnFailureListener { error ->
         onComplete()
         showToast(context, "Could not read chat settings: ${error.message}")
