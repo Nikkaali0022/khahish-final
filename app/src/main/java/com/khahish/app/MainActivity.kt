@@ -1381,6 +1381,12 @@ fun ConversationScreen(
     var pinnedMessageId by remember { mutableStateOf("") }
     var pinnedMessageText by remember { mutableStateOf("") }
     var pinnedBy by remember { mutableStateOf("") }
+    var showGroupInfo by remember { mutableStateOf(false) }
+    var groupAdmins by remember(chat.id) { mutableStateOf(emptyList<String>()) }
+    var groupMemberUids by remember(chat.id) { mutableStateOf(chat.memberUids) }
+    var groupMemberNames by remember(chat.id) { mutableStateOf(emptyMap<String, String>()) }
+    var displayGroupName by remember(chat.id) { mutableStateOf(chat.name) }
+    var groupNameDraft by remember(chat.id) { mutableStateOf(chat.name) }
     var peerMenuExpanded by remember { mutableStateOf(false) }
     var showPeerPicture by remember { mutableStateOf(false) }
     var videoToPlay by remember { mutableStateOf("") }
@@ -1625,6 +1631,16 @@ fun ConversationScreen(
             pinnedMessageId = snapshot?.getString("pinnedMessageId").orEmpty()
             pinnedMessageText = snapshot?.getString("pinnedMessageText").orEmpty()
             pinnedBy = snapshot?.getString("pinnedBy").orEmpty()
+            if (chat.isGroup && snapshot != null) {
+                groupMemberUids = snapshot.get("members") as? List<String> ?: chat.memberUids
+                groupAdmins = snapshot.get("groupAdmins") as? List<String> ?: listOf(snapshot.getString("createdBy").orEmpty()).filter { it.isNotBlank() }
+                groupMemberNames = (snapshot.get("memberNames") as? Map<*, *>)?.mapNotNull { (key, value) ->
+                    if (key is String && value is String) key to value else null
+                }?.toMap() ?: emptyMap()
+                displayGroupName = snapshot.getString("groupName") ?: chat.name
+                groupNameDraft = displayGroupName
+                if (currentUserId !in groupMemberUids) onBack()
+            }
         }
         onDispose { chatSettingsRegistration.remove() }
     }
@@ -1817,23 +1833,30 @@ fun ConversationScreen(
                     Text("Delete")
                 }
             } else {
-                Box {
-                    if (peerPhotoUrl.isNotBlank()) {
-                        AsyncImage(model = peerPhotoUrl, contentDescription = "Profile picture",
-                            modifier = Modifier.size(40.dp).clip(CircleShape).clickable { peerMenuExpanded = true }, contentScale = ContentScale.Crop)
-                    } else {
-                        Box(Modifier.size(40.dp).background(Color(0xFFDCEFE9), CircleShape).clickable { peerMenuExpanded = true }, contentAlignment = Alignment.Center) {
-                            Text(chat.initials, color = Green, fontWeight = FontWeight.Bold)
+                if (chat.isGroup) {
+                    Box(
+                        Modifier.size(40.dp).background(Color(0xFFDCEFE9), CircleShape).clickable { showGroupInfo = true },
+                        contentAlignment = Alignment.Center
+                    ) { Icon(Icons.Default.Groups, "Group info", tint = Green) }
+                } else {
+                    Box {
+                        if (peerPhotoUrl.isNotBlank()) {
+                            AsyncImage(model = peerPhotoUrl, contentDescription = "Profile picture",
+                                modifier = Modifier.size(40.dp).clip(CircleShape).clickable { peerMenuExpanded = true }, contentScale = ContentScale.Crop)
+                        } else {
+                            Box(Modifier.size(40.dp).background(Color(0xFFDCEFE9), CircleShape).clickable { peerMenuExpanded = true }, contentAlignment = Alignment.Center) {
+                                Text(chat.initials, color = Green, fontWeight = FontWeight.Bold)
+                            }
                         }
-                    }
-                    DropdownMenu(expanded = peerMenuExpanded, onDismissRequest = { peerMenuExpanded = false }) {
-                        DropdownMenuItem(text = { Text("View profile picture") }, leadingIcon = { Icon(Icons.Default.AccountCircle, null) }, enabled = peerPhotoUrl.isNotBlank(), onClick = { peerMenuExpanded = false; showPeerPicture = true })
-                        DropdownMenuItem(text = { Text("View profile") }, leadingIcon = { Icon(Icons.Default.Person, null) }, onClick = { peerMenuExpanded = false; onViewProfile(chat.peerUid) })
+                        DropdownMenu(expanded = peerMenuExpanded, onDismissRequest = { peerMenuExpanded = false }) {
+                            DropdownMenuItem(text = { Text("View profile picture") }, leadingIcon = { Icon(Icons.Default.AccountCircle, null) }, enabled = peerPhotoUrl.isNotBlank(), onClick = { peerMenuExpanded = false; showPeerPicture = true })
+                            DropdownMenuItem(text = { Text("View profile") }, leadingIcon = { Icon(Icons.Default.Person, null) }, onClick = { peerMenuExpanded = false; onViewProfile(chat.peerUid) })
+                        }
                     }
                 }
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(chat.name, fontWeight = FontWeight.SemiBold, color = Ink)
+                    Text(if (chat.isGroup) displayGroupName else chat.name, fontWeight = FontWeight.SemiBold, color = Ink)
                     val peerStatusText = when {
                         chat.isGroup -> "Group · ${chat.memberUids.size} members"
                         peerTyping -> "typing..."
@@ -2261,6 +2284,71 @@ fun ConversationScreen(
             }
         }, confirmButton = { TextButton(onClick = { showForwardDialog = false }, enabled = !forwarding) { Text("Close") } })
     }
+    if (showGroupInfo && chat.isGroup) {
+        val isGroupAdmin = currentUserId in groupAdmins
+        AlertDialog(
+            onDismissRequest = { showGroupInfo = false },
+            title = { Text("Group info") },
+            text = {
+                Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                    if (isGroupAdmin) {
+                        OutlinedTextField(
+                            value = groupNameDraft,
+                            onValueChange = { groupNameDraft = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Group name") },
+                            singleLine = true
+                        )
+                        TextButton(onClick = {
+                            val clean = groupNameDraft.trim()
+                            if (clean.isNotBlank()) chatRef.update("groupName", clean)
+                                .addOnSuccessListener { displayGroupName = clean; showToast(context, "Group name updated") }
+                                .addOnFailureListener { showToast(context, "Could not rename group: ${it.message}") }
+                        }) { Text("Save group name") }
+                    }
+                    Text("${groupMemberUids.size} participants", color = Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    groupMemberUids.forEach { memberUid ->
+                        val memberName = groupMemberNames[memberUid] ?: if (memberUid == currentUserId) "You" else memberUid.take(10)
+                        val memberIsAdmin = memberUid in groupAdmins
+                        Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(memberName, color = Ink, fontSize = 13.sp)
+                                if (memberIsAdmin) Text("Group admin", color = Green, fontSize = 10.sp)
+                            }
+                            if (isGroupAdmin && memberUid != currentUserId) {
+                                TextButton(onClick = {
+                                    val update = if (memberIsAdmin) FieldValue.arrayRemove(memberUid) else FieldValue.arrayUnion(memberUid)
+                                    chatRef.update("groupAdmins", update)
+                                        .addOnSuccessListener { showToast(context, if (memberIsAdmin) "Admin role removed" else "Promoted to admin") }
+                                        .addOnFailureListener { showToast(context, "Role update failed: ${it.message}") }
+                                }) { Text(if (memberIsAdmin) "Remove admin" else "Make admin", fontSize = 10.sp) }
+                                TextButton(onClick = {
+                                    chatRef.update(
+                                        "members", FieldValue.arrayRemove(memberUid),
+                                        "groupAdmins", FieldValue.arrayRemove(memberUid),
+                                        "memberNames.$memberUid", FieldValue.delete()
+                                    ).addOnSuccessListener { showToast(context, "Participant removed") }
+                                        .addOnFailureListener { showToast(context, "Could not remove participant: ${it.message}") }
+                                }) { Text("Remove", color = MaterialTheme.colorScheme.error, fontSize = 10.sp) }
+                            }
+                        }
+                    }
+                    val canLeave = currentUserId !in groupAdmins || groupAdmins.size > 1
+                    TextButton(enabled = canLeave, onClick = {
+                        chatRef.update(
+                            "members", FieldValue.arrayRemove(currentUserId),
+                            "groupAdmins", FieldValue.arrayRemove(currentUserId),
+                            "memberNames.$currentUserId", FieldValue.delete()
+                        ).addOnSuccessListener { showGroupInfo = false; onBack() }
+                            .addOnFailureListener { showToast(context, "Could not leave group: ${it.message}") }
+                    }) { Text("Leave group", color = MaterialTheme.colorScheme.error) }
+                    if (!canLeave) Text("Promote another admin before leaving this group.", color = Muted, fontSize = 11.sp)
+                }
+            },
+            confirmButton = { TextButton(onClick = { showGroupInfo = false }) { Text("Done") } }
+        )
+    }
+
     if (editTarget != null) {
         AlertDialog(
             onDismissRequest = { editTarget = null },
