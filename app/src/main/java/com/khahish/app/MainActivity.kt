@@ -101,7 +101,15 @@ data class Chat(
     val time: String,
     val initials: String,
     val isGroup: Boolean = false,
-    val memberUids: List<String> = emptyList()
+    val memberUids: List<String> = emptyList(),
+    val initialMessageId: String = ""
+)
+
+data class ChatMessageSearchResult(
+    val chat: Chat,
+    val messageId: String,
+    val text: String,
+    val timestamp: Long
 )
 
 data class AppUser(
@@ -1103,6 +1111,8 @@ fun ChatList(
     var profilePhotos by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var expandedProfileMenu by remember { mutableStateOf("") }
     var selectedPictureUrl by remember { mutableStateOf("") }
+    var messageSearchResults by remember { mutableStateOf(emptyList<ChatMessageSearchResult>()) }
+    var isSearchingMessages by remember { mutableStateOf(false) }
 
     DisposableEffect(currentUid) {
         val registration = db.collection("chats")
@@ -1182,6 +1192,51 @@ fun ChatList(
         onDispose { registrations.forEach { it.remove() } }
     }
 
+    LaunchedEffect(search, chats.map { it.id }.joinToString("|")) {
+        val queryText = search.trim()
+        if (queryText.length < 2) {
+            messageSearchResults = emptyList()
+            isSearchingMessages = false
+        } else {
+            kotlinx.coroutines.delay(350)
+            val currentChats = chats
+            if (currentChats.isEmpty()) {
+                messageSearchResults = emptyList()
+                isSearchingMessages = false
+            } else {
+                isSearchingMessages = true
+                val tasks = currentChats.map { chat ->
+                    db.collection("chats").document(chat.id).collection("messages")
+                        .orderBy("timestamp", Query.Direction.DESCENDING)
+                        .limit(100)
+                        .get()
+                }
+                com.google.android.gms.tasks.Tasks.whenAllSuccess<com.google.firebase.firestore.QuerySnapshot>(tasks)
+                    .addOnSuccessListener { snapshots ->
+                        if (search.trim() == queryText) {
+                            messageSearchResults = currentChats.flatMapIndexed { index, chat ->
+                                snapshots.getOrNull(index)?.documents.orEmpty()
+                                    .filter { it.getString("text").orEmpty().contains(queryText, ignoreCase = true) }
+                                    .map { doc ->
+                                        ChatMessageSearchResult(
+                                            chat = chat.copy(initialMessageId = doc.id),
+                                            messageId = doc.id,
+                                            text = doc.getString("text").orEmpty(),
+                                            timestamp = doc.getLong("timestamp") ?: 0L
+                                        )
+                                    }
+                            }.sortedByDescending { it.timestamp }
+                        }
+                        isSearchingMessages = false
+                    }
+                    .addOnFailureListener {
+                        if (search.trim() == queryText) messageSearchResults = emptyList()
+                        isSearchingMessages = false
+                    }
+            }
+        }
+    }
+
     val filtered = chats.filter {
         it.name.contains(search, true) || it.message.contains(search, true)
     }
@@ -1213,7 +1268,7 @@ fun ChatList(
                 CircularProgressIndicator(color = Green)
             }
 
-            filtered.isEmpty() -> Box(
+            filtered.isEmpty() && messageSearchResults.isEmpty() && !isSearchingMessages -> Box(
                 Modifier
                     .fillMaxSize()
                     .padding(24.dp),
@@ -1326,6 +1381,30 @@ fun ChatList(
                         color = Color(0xFFEAF0ED),
                         modifier = Modifier.padding(start = 82.dp)
                     )
+                }
+                if (search.trim().length >= 2) {
+                    item {
+                        Text(
+                            if (isSearchingMessages) "Searching recent messages…" else "Matching recent messages",
+                            color = Green,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp)
+                        )
+                    }
+                    items(messageSearchResults, key = { "message-${it.chat.id}-${it.messageId}" }) { result ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable { onOpen(result.chat) }
+                                .padding(horizontal = 18.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Search, null, tint = Muted)
+                            Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                                Text(result.chat.name, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                Text(result.text, color = Muted, fontSize = 12.sp, maxLines = 2)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1661,7 +1740,10 @@ fun ConversationScreen(
 
     LaunchedEffect(messages.size, chat.id) {
         if (!initialMessagesPositioned && messages.isNotEmpty()) {
-            messageListState.scrollToItem(messages.lastIndex)
+            val targetIndex = if (chat.initialMessageId.isNotBlank()) {
+                messages.indexOfFirst { it.id == chat.initialMessageId }
+            } else -1
+            messageListState.scrollToItem(if (targetIndex >= 0) targetIndex else messages.lastIndex)
             initialMessagesPositioned = true
         }
     }
