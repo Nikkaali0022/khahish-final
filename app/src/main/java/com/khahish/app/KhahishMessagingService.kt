@@ -89,6 +89,24 @@ class KhahishMessagingService : FirebaseMessagingService() {
             }
         }
 
+        fun removeCurrentToken(uid: String, onComplete: () -> Unit = {}) {
+            FirebaseMessaging.getInstance().token.addOnCompleteListener { tokenTask ->
+                val token = if (tokenTask.isSuccessful) tokenTask.result.orEmpty() else ""
+                if (token.isBlank()) {
+                    onComplete()
+                } else {
+                    val tokenId = MessageDigest.getInstance("SHA-256")
+                        .digest(token.toByteArray(Charsets.UTF_8))
+                        .joinToString("") { "%02x".format(it) }
+                    FirebaseFirestore.getInstance()
+                        .collection("users").document(uid)
+                        .collection("fcmTokens").document(tokenId)
+                        .delete()
+                        .addOnCompleteListener { onComplete() }
+                }
+            }
+        }
+
         private fun saveTokenForCurrentUser(context: Context, token: String) {
             val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return
             val tokenId = MessageDigest.getInstance("SHA-256")

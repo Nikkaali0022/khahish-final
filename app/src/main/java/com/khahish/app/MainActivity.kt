@@ -205,7 +205,6 @@ class MainActivity : ComponentActivity() {
         val newUid = firebaseAuth.currentUser?.uid
         if (presenceUid != null && presenceUid != newUid) updateKhahishPresence(presenceUid, false)
         if (newUid != null && presenceUid != newUid) {
-            recordKhahishSession(newUid)
             KhahishMessagingService.syncCurrentToken(this@MainActivity)
         }
         presenceUid = newUid
@@ -256,20 +255,6 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         FirebaseAuth.getInstance().removeAuthStateListener(presenceAuthListener)
         super.onDestroy()
-    }
-
-    private fun recordKhahishSession(uid: String) {
-        val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: "android-device"
-        val deviceName = Build.MANUFACTURER + " " + Build.MODEL
-        val now = System.currentTimeMillis()
-        val userRef = FirebaseFirestore.getInstance().collection("users").document(uid)
-        userRef.collection("trustedDevices").document(deviceId).set(
-            mapOf("deviceName" to deviceName, "lastActiveAt" to now, "trusted" to true, "platform" to "Android"),
-            SetOptions.merge()
-        )
-        userRef.collection("loginHistory").add(
-            mapOf("deviceName" to deviceName, "deviceId" to deviceId, "time" to now, "event" to "session_started")
-        )
     }
 
     private fun updateKhahishPresence(uid: String?, foreground: Boolean) {
@@ -345,6 +330,7 @@ fun KhahishApp() {
                 .collection("trustedDevices").document(deviceId)
             val deviceName = Build.MANUFACTURER + " " + Build.MODEL
             var active = true
+            var revocationStarted = false
             var deviceRegistration: com.google.firebase.firestore.ListenerRegistration? = null
             deviceRef.set(mapOf(
                 "deviceName" to deviceName,
@@ -354,10 +340,13 @@ fun KhahishApp() {
             ), SetOptions.merge()).addOnSuccessListener {
                 if (active) {
                     deviceRegistration = deviceRef.addSnapshotListener { snapshot, _ ->
-                        if (snapshot != null && (!snapshot.exists() || snapshot.getBoolean("trusted") == false)) {
-                            auth.signOut()
-                            currentUser = null
-                            Toast.makeText(appContext, "This device was removed from trusted devices. Please sign in again.", Toast.LENGTH_LONG).show()
+                        if (snapshot != null && (!snapshot.exists() || snapshot.getBoolean("trusted") == false) && !revocationStarted) {
+                            revocationStarted = true
+                            KhahishMessagingService.removeCurrentToken(uid) {
+                                auth.signOut()
+                                currentUser = null
+                                Toast.makeText(appContext, "This device was removed from trusted devices. Please sign in again.", Toast.LENGTH_LONG).show()
+                            }
                         }
                     }
                     FirebaseFirestore.getInstance().collection("users").document(uid)
@@ -632,11 +621,13 @@ fun KhahishApp() {
                                 "Settings" -> KhahishSettingsScreen(
                                     modifier = Modifier.padding(padding),
                                     onLogout = {
-                                        auth.signOut()
-                                        currentUser = null
-                                        selectedChat = null
-                                        showNewChat = false
-                                        tab = "Chats"
+                                        KhahishMessagingService.removeCurrentToken(user.uid) {
+                                            auth.signOut()
+                                            currentUser = null
+                                            selectedChat = null
+                                            showNewChat = false
+                                            tab = "Chats"
+                                        }
                                     },
                                     onAnimationsChanged = { animationsEnabled = it },
                                     onSlideTransitionsChanged = { slideTransitionsEnabled = it },
