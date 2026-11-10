@@ -239,6 +239,34 @@ test("live location writes are limited to the matching chat member UID", async (
   }));
 });
 
+test("user reports use the app's targetUid schema and are reporter-authenticated", async () => {
+  await assertSucceeds(setDoc(doc(db("alice"), "reports/report1"), {
+    type: "user",
+    targetUid: "bob",
+    targetName: "Bob",
+    reporterUid: "alice",
+    reason: "Abusive messages",
+    status: "pending",
+    createdAt: Date.now()
+  }));
+  await assertFails(setDoc(doc(db("alice"), "reports/report2"), {
+    type: "user",
+    targetUid: "carol",
+    targetName: "Carol",
+    reporterUid: "bob",
+    reason: "Impersonation",
+    status: "pending",
+    createdAt: Date.now()
+  }));
+  await assertFails(setDoc(doc(db("alice"), "reports/report3"), {
+    type: "user",
+    targetId: "bob",
+    reporterUid: "alice",
+    status: "pending",
+    createdAt: Date.now()
+  }));
+});
+
 test("deactivation requests are allowed but deletion requests are denied", async () => {
   await assertSucceeds(setDoc(doc(db("alice"), "accountRequests/alice"), {
     uid: "alice",
