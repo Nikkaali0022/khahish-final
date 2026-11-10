@@ -126,6 +126,11 @@ fun KhahishAdvancedSettingsScreen(
                         chatData["groupAdmins"] = (0 until adminsJson.length()).map { adminsJson.optString(it) }
                         if (chatJson.has("createdBy")) chatData["createdBy"] = chatJson.optString("createdBy")
                         if (chatJson.has("createdAt")) chatData["createdAt"] = chatJson.optLong("createdAt")
+                        if (chatJson.has("disappearingDurationMs")) chatData["disappearingDurationMs"] = chatJson.optLong("disappearingDurationMs")
+                        listOf("pinnedMessageId", "pinnedMessageText", "pinnedBy").forEach { key ->
+                            if (chatJson.has(key)) chatData[key] = chatJson.optString(key)
+                        }
+                        if (chatJson.has("pinnedAt")) chatData["pinnedAt"] = chatJson.optLong("pinnedAt")
                         writeTasks.add(chatRef.set(chatData, com.google.firebase.firestore.SetOptions.merge()))
                         val messageArray = chatJson.optJSONArray("messages") ?: JSONArray()
                         var batch = db.batch()
@@ -261,6 +266,11 @@ fun KhahishAdvancedSettingsScreen(
                                 .put("groupAdmins", JSONArray(chatDoc.get("groupAdmins") as? List<*> ?: emptyList<Any>()))
                                 .put("createdBy", chatDoc.getString("createdBy") ?: "")
                                 .put("createdAt", chatDoc.getLong("createdAt") ?: 0L)
+                                .put("disappearingDurationMs", chatDoc.getLong("disappearingDurationMs") ?: 0L)
+                                .put("pinnedMessageId", chatDoc.getString("pinnedMessageId") ?: "")
+                                .put("pinnedMessageText", chatDoc.getString("pinnedMessageText") ?: "")
+                                .put("pinnedBy", chatDoc.getString("pinnedBy") ?: "")
+                                .put("pinnedAt", chatDoc.getLong("pinnedAt") ?: 0L)
                             val messageArray = JSONArray()
                             snapshots.getOrNull(index)?.documents?.forEach { msg ->
                                 messageArray.put(JSONObject()
