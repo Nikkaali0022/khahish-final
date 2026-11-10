@@ -1467,6 +1467,9 @@ fun ConversationScreen(
     var groupMemberNames by remember(chat.id) { mutableStateOf(emptyMap<String, String>()) }
     var displayGroupName by remember(chat.id) { mutableStateOf(chat.name) }
     var groupNameDraft by remember(chat.id) { mutableStateOf(chat.name) }
+    var showAddGroupMembers by remember { mutableStateOf(false) }
+    var groupMemberSearch by remember { mutableStateOf("") }
+    var groupSearchResults by remember { mutableStateOf(emptyList<AppUser>()) }
     var peerMenuExpanded by remember { mutableStateOf(false) }
     var showPeerPicture by remember { mutableStateOf(false) }
     var videoToPlay by remember { mutableStateOf("") }
@@ -1723,6 +1726,25 @@ fun ConversationScreen(
             }
         }
         onDispose { chatSettingsRegistration.remove() }
+    }
+
+    LaunchedEffect(showAddGroupMembers, groupMemberSearch, groupMemberUids.joinToString("|")) {
+        if (!showAddGroupMembers) {
+            groupSearchResults = emptyList()
+        } else {
+            val term = groupMemberSearch.trim().lowercase(Locale.ROOT)
+            if (term.length < 2) {
+                groupSearchResults = emptyList()
+            } else {
+                db.collection("publicProfiles").orderBy("nameLowercase")
+                    .startAt(term).endAt(term + "\uf8ff").limit(20).get()
+                    .addOnSuccessListener { snapshot ->
+                        groupSearchResults = snapshot.documents.mapNotNull { doc ->
+                            doc.toObject(AppUser::class.java)?.takeIf { it.uid.isNotBlank() && it.uid != currentUserId && it.uid !in groupMemberUids }
+                        }
+                    }
+            }
+        }
     }
 
     DisposableEffect(chat.peerUid) {
@@ -2378,6 +2400,46 @@ fun ConversationScreen(
             }
         }, confirmButton = { TextButton(onClick = { showForwardDialog = false }, enabled = !forwarding) { Text("Close") } })
     }
+    if (showAddGroupMembers && chat.isGroup) {
+        AlertDialog(
+            onDismissRequest = { showAddGroupMembers = false },
+            title = { Text("Add participants") },
+            text = {
+                Column(Modifier.heightIn(max = 380.dp)) {
+                    OutlinedTextField(
+                        value = groupMemberSearch,
+                        onValueChange = { groupMemberSearch = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Search users") },
+                        singleLine = true
+                    )
+                    if (groupMemberSearch.trim().length < 2) {
+                        Text("Enter at least 2 letters to search.", color = Muted, modifier = Modifier.padding(top = 10.dp))
+                    } else if (groupSearchResults.isEmpty()) {
+                        Text("No new users found.", color = Muted, modifier = Modifier.padding(top = 10.dp))
+                    } else {
+                        Column(Modifier.verticalScroll(rememberScrollState())) {
+                            groupSearchResults.forEach { candidate ->
+                                TextButton(onClick = {
+                                    chatRef.update(
+                                        "members", FieldValue.arrayUnion(candidate.uid),
+                                        "memberNames.${candidate.uid}", candidate.name.ifBlank { "Khahish User" }
+                                    ).addOnSuccessListener {
+                                        groupMemberSearch = ""
+                                        showToast(context, "${candidate.name} added to group")
+                                    }.addOnFailureListener { showToast(context, "Could not add participant: ${it.message}") }
+                                }, modifier = Modifier.fillMaxWidth()) {
+                                    Text(candidate.name, color = Ink)
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showAddGroupMembers = false }) { Text("Done") } }
+        )
+    }
+
     if (showStarredDialog) {
         val starred = messages.filter { currentUserId in it.starredBy }
         AlertDialog(
@@ -2424,6 +2486,13 @@ fun ConversationScreen(
                         }) { Text("Save group name") }
                     }
                     Text("${groupMemberUids.size} participants", color = Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    if (isGroupAdmin) {
+                        TextButton(onClick = { showAddGroupMembers = true }) {
+                            Icon(Icons.Default.PersonAdd, null)
+                            Spacer(Modifier.width(5.dp))
+                            Text("Add participants")
+                        }
+                    }
                     groupMemberUids.forEach { memberUid ->
                         val memberName = groupMemberNames[memberUid] ?: if (memberUid == currentUserId) "You" else memberUid.take(10)
                         val memberIsAdmin = memberUid in groupAdmins
