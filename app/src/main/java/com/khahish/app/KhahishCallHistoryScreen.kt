@@ -37,6 +37,11 @@ fun KhahishCallHistoryScreen(
     var loading by remember(uid) { mutableStateOf(true) }
     var searchQuery by remember(uid) { mutableStateOf("") }
     var profilePhotos by remember(uid) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var showNewCallDialog by remember { mutableStateOf(false) }
+    var usernameInput by remember { mutableStateOf("") }
+    var searchingUser by remember { mutableStateOf(false) }
+    var userLookupError by remember { mutableStateOf("") }
+    var callTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     val filteredCalls = remember(calls, searchQuery) {
         if (searchQuery.isBlank()) calls else calls.filter { call ->
@@ -52,6 +57,41 @@ fun KhahishCallHistoryScreen(
         }
         onDispose { registration.remove() }
     }
+    fun findCallUser() {
+        val username = normalizeKhahishUsername(usernameInput)
+        if (!isValidKhahishUsername(username)) {
+            userLookupError = "Enter a valid username (3–20 letters, numbers or underscores)."
+            callTarget = null
+            return
+        }
+        searchingUser = true
+        userLookupError = ""
+        callTarget = null
+        FirebaseFirestore.getInstance().collection("usernames").document(username).get()
+            .addOnSuccessListener { claim ->
+                val targetUid = claim.getString("uid").orEmpty()
+                if (targetUid.isBlank() || targetUid == uid) {
+                    searchingUser = false
+                    userLookupError = if (targetUid == uid) "You cannot call yourself." else "No account found with this username."
+                } else {
+                    FirebaseFirestore.getInstance().collection("publicProfiles").document(targetUid).get()
+                        .addOnSuccessListener { profile ->
+                            searchingUser = false
+                            if (!profile.exists()) userLookupError = "This profile is not available."
+                            else callTarget = targetUid to (profile.getString("name") ?: "Khahish User")
+                        }
+                        .addOnFailureListener {
+                            searchingUser = false
+                            userLookupError = it.message ?: "Could not load this profile."
+                        }
+                }
+            }
+            .addOnFailureListener {
+                searchingUser = false
+                userLookupError = it.message ?: "Username search failed."
+            }
+    }
+
 
     DisposableEffect(uid, calls) {
         val db = FirebaseFirestore.getInstance()
@@ -69,10 +109,9 @@ fun KhahishCallHistoryScreen(
         onDispose { registrations.forEach { it.remove() } }
     }
 
+    Box(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
     Column(
-        modifier.fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(16.dp)
+        Modifier.fillMaxSize().padding(16.dp)
     ) {
         Text(
             "Calls",
@@ -198,6 +237,74 @@ fun KhahishCallHistoryScreen(
                 }
             }
         }
+    }
+
+    FloatingActionButton(
+        onClick = { showNewCallDialog = true },
+        modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
+        containerColor = Green,
+        contentColor = Color.White
+    ) {
+        Icon(Icons.Default.Call, contentDescription = "New call")
+    }
+
+    if (showNewCallDialog) {
+        AlertDialog(
+            onDismissRequest = { showNewCallDialog = false },
+            title = { Text("New call") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = usernameInput,
+                        onValueChange = { usernameInput = it; callTarget = null; userLookupError = "" },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("Khahish username") },
+                        placeholder = { Text("@username") }
+                    )
+                    Button(
+                        onClick = { findCallUser() },
+                        enabled = !searchingUser && usernameInput.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (searchingUser) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        else Text("Find user")
+                    }
+                    if (userLookupError.isNotBlank()) {
+                        Text(userLookupError, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+                    }
+                    callTarget?.let { target ->
+                        Text("Call ${target.second} (@${normalizeKhahishUsername(usernameInput)})", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = {
+                                    showNewCallDialog = false
+                                    onStartCall(target.first, target.second, false)
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Call, null)
+                                Spacer(Modifier.width(4.dp))
+                                Text("Voice")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    showNewCallDialog = false
+                                    onStartCall(target.first, target.second, true)
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Videocam, null)
+                                Spacer(Modifier.width(4.dp))
+                                Text("Video")
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showNewCallDialog = false }) { Text("Close") } }
+        )
+    }
     }
 }
 
