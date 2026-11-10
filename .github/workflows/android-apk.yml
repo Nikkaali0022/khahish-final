@@ -211,12 +211,31 @@ jobs:
       - name: Run Android Keystore instrumentation tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: 34
           arch: x86_64
           disable-animations: true
           script: |
             cd "$PROJECT_DIR"
-            gradle :app:connectedDebugAndroidTest
+            set +e
+            gradle :app:connectedDebugAndroidTest --stacktrace
+            TEST_EXIT=$?
+            adb logcat -d -v threadtime > "$PROJECT_DIR/keystore-instrumentation-logcat.txt" || true
+            echo "Instrumentation test exit code: $TEST_EXIT"
+            if [ "$TEST_EXIT" -ne 0 ]; then
+              echo "Recent Android crash diagnostics:"
+              grep -E -i "FATAL EXCEPTION|AndroidRuntime|Process:|Instrumentation|AndroidJUnitRunner|keystore|avc: denied|SecurityException" "$PROJECT_DIR/keystore-instrumentation-logcat.txt" | tail -n 160 || true
+            fi
+            exit "$TEST_EXIT"
+
+      - name: Upload Keystore test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Khahish-Keystore-Test-Diagnostics
+          path: |
+            ${{ env.PROJECT_DIR }}/keystore-instrumentation-logcat.txt
+            ${{ env.PROJECT_DIR }}/app/build/reports/androidTests/connected/debug/
+          if-no-files-found: ignore
 
       - name: Build Khahish APK
         run: |
