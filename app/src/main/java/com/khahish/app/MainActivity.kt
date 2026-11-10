@@ -836,7 +836,7 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
     Column(
         Modifier
             .fillMaxSize()
-            .background(Pale)
+            .background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState())
             .padding(24.dp),
         verticalArrangement = Arrangement.Center,
@@ -856,7 +856,7 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
             fontSize = 28.sp,
             fontWeight = FontWeight.ExtraBold,
             letterSpacing = 0.4.sp,
-            color = Ink
+            color = MaterialTheme.colorScheme.onSurface
         )
 
         Spacer(Modifier.height(3.dp))
@@ -874,14 +874,14 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
             fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
             letterSpacing = 0.3.sp,
-            color = Muted
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
         Spacer(Modifier.height(8.dp))
 
         Text(
             if (isSignUp) "Create your account" else "Welcome back",
-            color = Muted
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
         Spacer(Modifier.height(24.dp))
@@ -909,7 +909,7 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                 label = { Text("Unique username") },
                 placeholder = { Text("your_username") },
                 leadingIcon = { Text("@", color = Green) },
-                supportingText = { Text("3–20 characters; letters, numbers and _ only.", color = Muted) },
+                supportingText = { Text("3–20 characters; letters, numbers and _ only.", color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
@@ -1151,12 +1151,12 @@ fun NewChatScreen(
     Column(
         modifier
             .fillMaxSize()
-            .background(Pale)
+            .background(MaterialTheme.colorScheme.background)
     ) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .background(Color.White)
+                .background(MaterialTheme.colorScheme.surface)
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1181,7 +1181,7 @@ fun NewChatScreen(
         Text(
             "Find one person by their unique username",
             modifier = Modifier.padding(18.dp),
-            color = Muted,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 13.sp
         )
 
@@ -1194,11 +1194,11 @@ fun NewChatScreen(
 
         if (normalizeKhahishUsername(search).length < 3) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Enter a complete username (3–20 letters, numbers or _)", color = Muted)
+                Text("Enter a complete username (3–20 letters, numbers or _)", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else if (!loading && users.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No users found", color = Muted)
+                Text("No users found", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
             LazyColumn {
@@ -1288,7 +1288,7 @@ fun NewChatScreen(
                         Column(Modifier.weight(1f)) {
                             Text(
                                 user.name.ifBlank { "Khahish User" },
-                                color = Ink,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 fontWeight = FontWeight.SemiBold
                             )
                             val statusText = when {
@@ -1300,7 +1300,7 @@ fun NewChatScreen(
                             }
                             Text(statusText, color = if (statusText == "Online") Green else Muted, fontSize = 12.sp)
                             if (user.bio.isNotBlank()) {
-                                Text(user.bio, color = Muted, fontSize = 11.sp, maxLines = 2)
+                                Text(user.bio, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, maxLines = 2)
                             }
                         }
 
@@ -1597,12 +1597,12 @@ fun ChatList(
                     Text(
                         if (search.isBlank()) "No private chats yet"
                         else "No matching conversations",
-                        color = Ink,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
                         "Tap the edit button to find a user",
-                        color = Muted,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp
                     )
                 }
@@ -1616,14 +1616,14 @@ fun ChatList(
                     items(incomingRequests, key = { "request-${it.id}" }) { request ->
                         Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
                             Column(Modifier.fillMaxWidth().padding(14.dp)) {
-                                Text(request.senderName, color = Ink, fontWeight = FontWeight.SemiBold)
-                                Text("wants to start a conversation", color = Muted, fontSize = 12.sp)
+                                Text(request.senderName, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                                Text("wants to start a conversation", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                                     TextButton(onClick = {
                                         db.collection("messageRequests").document(request.id).update(mapOf("status" to "rejected", "handledBy" to currentUid, "rejectedAt" to System.currentTimeMillis()))
                                             .addOnSuccessListener { showToast(context, "Message request rejected.") }
                                             .addOnFailureListener { showToast(context, "Could not reject request: ${it.message}") }
-                                    }) { Text("Reject", color = Muted) }
+                                    }) { Text("Reject", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                                     Spacer(Modifier.width(8.dp))
                                     Button(onClick = {
                                         val reqRef = db.collection("messageRequests").document(request.id)
@@ -1684,12 +1684,12 @@ fun ChatList(
                             Text(
                                 chat.name,
                                 fontWeight = FontWeight.SemiBold,
-                                color = Ink
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                             Spacer(Modifier.height(5.dp))
                             Text(
                                 chat.message.ifBlank { "Start your conversation" },
-                                color = Muted,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 12.sp,
                                 maxLines = 1
                             )
@@ -1717,7 +1717,7 @@ fun ChatList(
                         Icon(
                             Icons.Default.ChevronRight,
                             null,
-                            tint = Muted
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
 
@@ -1742,10 +1742,10 @@ fun ChatList(
                                 .padding(horizontal = 18.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.Search, null, tint = Muted)
+                            Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                                Text(result.chat.name, color = Ink, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                                Text(result.text, color = Muted, fontSize = 12.sp, maxLines = 2)
+                                Text(result.chat.name, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                Text(result.text, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, maxLines = 2)
                             }
                         }
                     }
@@ -2412,7 +2412,7 @@ fun ConversationScreen(
                 }
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(if (chat.isGroup) displayGroupName else chat.name, modifier = Modifier.clickable { if (!chat.isGroup) onViewProfile(chat.peerUid) else showGroupInfo = true }, fontWeight = FontWeight.SemiBold, color = Ink)
+                    Text(if (chat.isGroup) displayGroupName else chat.name, modifier = Modifier.clickable { if (!chat.isGroup) onViewProfile(chat.peerUid) else showGroupInfo = true }, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                     val peerStatusText = when {
                         chat.isGroup -> "Group · ${chat.memberUids.size} members"
                         peerTyping -> "typing..."
@@ -2500,7 +2500,7 @@ fun ConversationScreen(
 
         if (chatSearchVisible) {
             Row(
-                Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 12.dp, vertical = 6.dp),
+                Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 12.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 OutlinedTextField(
@@ -2512,7 +2512,7 @@ fun ConversationScreen(
                     singleLine = true
                 )
                 Spacer(Modifier.width(8.dp))
-                Text(displayedMessages.size.toString(), color = Muted, fontSize = 12.sp)
+                Text(displayedMessages.size.toString(), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 IconButton(onClick = { chatSearchVisible = false; chatSearchQuery = "" }) {
                     Icon(Icons.Default.Close, "Close search")
                 }
@@ -2533,7 +2533,7 @@ fun ConversationScreen(
                 Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f)) {
                     Text("Pinned message", color = Green, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Text(pinnedMessageText, color = Ink, fontSize = 12.sp, maxLines = 1)
+                    Text(pinnedMessageText, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, maxLines = 1)
                 }
                 if (pinnedBy == currentUserId) {
                     IconButton(onClick = {
@@ -2543,7 +2543,7 @@ fun ConversationScreen(
                             "pinnedBy" to FieldValue.delete(),
                             "pinnedAt" to FieldValue.delete()
                         )).addOnFailureListener { showToast(context, "Could not unpin: ${it.message}") }
-                    }) { Icon(Icons.Default.Close, contentDescription = "Unpin message", tint = Muted) }
+                    }) { Icon(Icons.Default.Close, contentDescription = "Unpin message", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
                 }
             }
         }
@@ -2569,7 +2569,7 @@ fun ConversationScreen(
                 contentPadding = PaddingValues(vertical = 12.dp)
             ) {
                 if (chatSearchVisible && displayedMessages.isEmpty()) {
-                    item { Text("No matching messages", color = Muted, modifier = Modifier.fillMaxWidth().padding(24.dp), textAlign = TextAlign.Center) }
+                    item { Text("No matching messages", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(24.dp), textAlign = TextAlign.Center) }
                 }
                 items(displayedMessages, key = { it.id }) { msg ->
                 val isMe = msg.senderId == currentUserId
@@ -2674,7 +2674,7 @@ fun ConversationScreen(
                                 val active = point?.isActive == true && point.expiresAt > System.currentTimeMillis()
                                 Row(
                                     Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
-                                        .background(Color(0xFFEAF4F0))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant)
                                         .clickable {
                                             if (point != null && active) {
                                                 openSharedUrl(context, "https://maps.google.com/?q=${point.latitude},${point.longitude}")
@@ -2688,16 +2688,16 @@ fun ConversationScreen(
                                     Icon(Icons.Default.MyLocation, null, tint = Green)
                                     Spacer(Modifier.width(8.dp))
                                     Column {
-                                        Text("Live location", color = Ink, fontWeight = FontWeight.SemiBold)
+                                        Text("Live location", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
                                         Text(if (active) "Tap to view latest location" else "Sharing ended", color = Green, fontSize = 11.sp)
-                                        Text(msg.text, color = Muted, fontSize = 10.sp)
+                                        Text(msg.text, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
                                     }
                                 }
                             }
 
                             "location" -> Row(
                                 Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
-                                    .background(Color(0xFFEAF4F0))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
                                     .clickable { openSharedUrl(context, msg.imageUrl) }
                                     .padding(10.dp),
                                 verticalAlignment = Alignment.CenterVertically
@@ -2705,25 +2705,25 @@ fun ConversationScreen(
                                 Icon(Icons.Default.LocationOn, null, tint = Green)
                                 Spacer(Modifier.width(8.dp))
                                 Column {
-                                    Text("Shared location", color = Ink, fontWeight = FontWeight.SemiBold)
+                                    Text("Shared location", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
                                     Text("Tap to open in Maps", color = Green, fontSize = 11.sp)
-                                    Text(msg.text, color = Muted, fontSize = 10.sp)
+                                    Text(msg.text, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
                                 }
                             }
                             "contact" -> Column(Modifier.fillMaxWidth().background(Color(0xFFEAF4F0), RoundedCornerShape(10.dp)).padding(10.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.ContactPage, null, tint = Green)
                                     Spacer(Modifier.width(7.dp))
-                                    Text("Shared contact", color = Ink, fontWeight = FontWeight.SemiBold)
+                                    Text("Shared contact", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
                                 }
-                                Text(msg.text, color = Ink, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+                                Text(msg.text, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
                             }
                         }
 
                         if (msg.replyToMessageId.isNotBlank()) {
                             Column(Modifier.fillMaxWidth().background(Color(0xFFEAF4F0), RoundedCornerShape(8.dp)).padding(7.dp)) {
                                 Text("Reply", color = Green, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                Text(msg.replyToText, color = Ink, fontSize = 12.sp, maxLines = 2)
+                                Text(msg.replyToText, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, maxLines = 2)
                             }
                             Spacer(Modifier.height(5.dp))
                         }
@@ -2731,7 +2731,7 @@ fun ConversationScreen(
                             Text(msg.text, color = if (isSelected) Color.Black else MaterialTheme.colorScheme.onSurface, fontSize = 15.sp)
                         }
                         if (msg.restoredFromBackup) {
-                            Text("Imported backup • sender not verified", color = Muted, fontSize = 9.sp)
+                            Text("Imported backup • sender not verified", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp)
                         }
                         if (msg.reactions.isNotEmpty()) {
                             Row(
@@ -2758,10 +2758,10 @@ fun ConversationScreen(
                                     Locale.getDefault()
                                 ).format(java.util.Date(msg.timestamp)),
                                 fontSize = 10.sp,
-                                color = Muted
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             if (msg.editedAt > 0L) {
-                                Text(" · edited", fontSize = 9.sp, color = Muted)
+                                Text(" · edited", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
 
 
@@ -2771,7 +2771,7 @@ fun ConversationScreen(
                                     Icon(
                                         Icons.Default.Schedule,
                                         contentDescription = "Waiting to send",
-                                        tint = Muted,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.size(13.dp)
                                     )
                                 } else {
@@ -2822,7 +2822,7 @@ fun ConversationScreen(
             Row(Modifier.fillMaxWidth().background(Color(0xFFE8F5F0)).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Replying to message", color = Green, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Text(replyTarget!!.text.ifBlank { replyTarget!!.mediaType }, color = Ink, maxLines = 1, fontSize = 12.sp)
+                    Text(replyTarget!!.text.ifBlank { replyTarget!!.mediaType }, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, fontSize = 12.sp)
                 }
                 IconButton(onClick = { replyTarget = null }) { Icon(Icons.Default.Close, "Cancel reply") }
             }
@@ -3030,9 +3030,9 @@ fun ConversationScreen(
                                 showToast(context, "Messages forwarded to ${target.name}")
                             }.addOnFailureListener { forwarding = false; showToast(context, "Forward failed: ${it.message}") }
                         }.addOnFailureListener { forwarding = false; showToast(context, "Could not open chat: ${it.message}") }
-                    }) { Text(target.name, color = Ink) }
+                    }) { Text(target.name, color = MaterialTheme.colorScheme.onSurface) }
                 }
-                if (!loadingForwardUsers && forwardUsers.isEmpty()) Text("Enter an existing user's exact username.", color = Muted)
+                if (!loadingForwardUsers && forwardUsers.isEmpty()) Text("Enter an existing user's exact username.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }, confirmButton = { TextButton(onClick = { showForwardDialog = false }, enabled = !forwarding) { Text("Close") } })
     }
@@ -3050,9 +3050,9 @@ fun ConversationScreen(
                         singleLine = true
                     )
                     if (normalizeKhahishUsername(groupMemberSearch).length < 3) {
-                        Text("Enter at least 2 letters to search.", color = Muted, modifier = Modifier.padding(top = 10.dp))
+                        Text("Enter at least 2 letters to search.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp))
                     } else if (groupSearchResults.isEmpty()) {
-                        Text("No new users found.", color = Muted, modifier = Modifier.padding(top = 10.dp))
+                        Text("No new users found.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp))
                     } else {
                         Column(Modifier.verticalScroll(rememberScrollState())) {
                             groupSearchResults.forEach { candidate ->
@@ -3065,7 +3065,7 @@ fun ConversationScreen(
                                         showToast(context, "${candidate.name} added to group")
                                     }.addOnFailureListener { showToast(context, "Could not add participant: ${it.message}") }
                                 }, modifier = Modifier.fillMaxWidth()) {
-                                    Text(candidate.name, color = Ink)
+                                    Text(candidate.name, color = MaterialTheme.colorScheme.onSurface)
                                 }
                             }
                         }
@@ -3082,7 +3082,7 @@ fun ConversationScreen(
             onDismissRequest = { showStarredDialog = false },
             title = { Text("Starred messages") },
             text = {
-                if (starred.isEmpty()) Text("You have not starred any messages in this chat.", color = Muted)
+                if (starred.isEmpty()) Text("You have not starred any messages in this chat.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 else Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
                     starred.forEach { item ->
                         TextButton(onClick = {
@@ -3090,7 +3090,7 @@ fun ConversationScreen(
                             if (index >= 0) messageScrollScope.launch { messageListState.animateScrollToItem(index) }
                             showStarredDialog = false
                         }, modifier = Modifier.fillMaxWidth()) {
-                            Text(item.text.ifBlank { item.mediaType.replaceFirstChar { ch -> ch.uppercase() } }, color = Ink, maxLines = 2)
+                            Text(item.text.ifBlank { item.mediaType.replaceFirstChar { ch -> ch.uppercase() } }, color = MaterialTheme.colorScheme.onSurface, maxLines = 2)
                         }
                     }
                 }
@@ -3121,7 +3121,7 @@ fun ConversationScreen(
                                 .addOnFailureListener { showToast(context, "Could not rename group: ${it.message}") }
                         }) { Text("Save group name") }
                     }
-                    Text("${groupMemberUids.size} participants", color = Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Text("${groupMemberUids.size} participants", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     if (isGroupAdmin) {
                         TextButton(onClick = { showAddGroupMembers = true }) {
                             Icon(Icons.Default.PersonAdd, null)
@@ -3134,7 +3134,7 @@ fun ConversationScreen(
                         val memberIsAdmin = memberUid in groupAdmins
                         Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text(memberName, color = Ink, fontSize = 13.sp)
+                                Text(memberName, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
                                 if (memberIsAdmin) Text("Group admin", color = Green, fontSize = 10.sp)
                             }
                             if (isGroupAdmin && memberUid != currentUserId) {
@@ -3164,7 +3164,7 @@ fun ConversationScreen(
                         ).addOnSuccessListener { showGroupInfo = false; onBack() }
                             .addOnFailureListener { showToast(context, "Could not leave group: ${it.message}") }
                     }) { Text("Leave group", color = MaterialTheme.colorScheme.error) }
-                    if (!canLeave) Text("Promote another admin before leaving this group.", color = Muted, fontSize = 11.sp)
+                    if (!canLeave) Text("Promote another admin before leaving this group.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
                 }
             },
             confirmButton = { TextButton(onClick = { showGroupInfo = false }) { Text("Done") } }
@@ -3306,7 +3306,7 @@ fun ConversationScreen(
             title = { Text("Share live location") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Your location will update while sharing is active. A persistent Android notification lets you stop sharing at any time.", color = Muted, fontSize = 13.sp)
+                    Text("Your location will update while sharing is active. A persistent Android notification lets you stop sharing at any time.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
                     listOf(
                         15L * 60L * 1000L to "15 minutes",
                         60L * 60L * 1000L to "1 hour",
@@ -3415,7 +3415,7 @@ fun ConversationScreen(
             title = { Text("Disappearing messages") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Choose how long new messages stay in this chat. This applies to both participants.", color = Muted, fontSize = 13.sp)
+                    Text("Choose how long new messages stay in this chat. This applies to both participants.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
                     listOf(0L to "Off", 86_400_000L to "24 Hours", 604_800_000L to "7 Days", 7_776_000_000L to "90 Days").forEach { (duration, label) ->
                         Row(Modifier.fillMaxWidth().clickable {
                             chatRef.update("disappearingDurationMs", duration)
@@ -3430,7 +3430,7 @@ fun ConversationScreen(
                                 showDisappearingOptions = false
                             })
                             Spacer(Modifier.width(8.dp))
-                            Text(label, color = Ink)
+                            Text(label, color = MaterialTheme.colorScheme.onSurface)
                         }
                     }
                 }
@@ -3628,7 +3628,7 @@ private fun MediaOpenRow(
     ) {
         Icon(icon, null, tint = Green)
         Spacer(Modifier.width(8.dp))
-        Text(label, color = Ink)
+        Text(label, color = MaterialTheme.colorScheme.onSurface)
     }
 }
 
@@ -3808,7 +3808,7 @@ fun SettingsPage(
     Column(
         modifier
             .fillMaxSize()
-            .background(Pale)
+            .background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
@@ -3816,7 +3816,7 @@ fun SettingsPage(
             "Settings",
             fontSize = 25.sp,
             fontWeight = FontWeight.Bold,
-            color = Ink
+            color = MaterialTheme.colorScheme.onSurface
         )
 
         Spacer(Modifier.height(18.dp))
@@ -3863,7 +3863,7 @@ fun SettingsPage(
                 } else if (blockedUsers.isEmpty()) {
                     Text(
                         "No blocked accounts",
-                        color = Muted,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(12.dp)
                     )
                 } else {
@@ -3877,7 +3877,7 @@ fun SettingsPage(
                             Text(
                                 blockedUid.take(12) + "...",
                                 Modifier.weight(1f),
-                                color = Ink
+                                color = MaterialTheme.colorScheme.onSurface
                             )
 
                             TextButton(
@@ -4040,7 +4040,7 @@ internal fun StorageMediaPage(
     Column(
         modifier
             .fillMaxSize()
-            .background(Pale)
+            .background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
@@ -4055,7 +4055,7 @@ internal fun StorageMediaPage(
                 "Storage and media",
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Bold,
-                color = Ink
+                color = MaterialTheme.colorScheme.onSurface
             )
         }
 
@@ -4064,7 +4064,7 @@ internal fun StorageMediaPage(
         SettingsGroup("STORAGE USAGE") {
             Text(
                 "Khahish app storage",
-                color = Ink,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.SemiBold
             )
 
@@ -4084,7 +4084,7 @@ internal fun StorageMediaPage(
                 )
                 Text(
                     "App files and cache on this device",
-                    color = Muted,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp
                 )
             }
@@ -4123,7 +4123,7 @@ internal fun StorageMediaPage(
         SettingsGroup("MEDIA AUTO-DOWNLOAD") {
             Text(
                 "Choose which media types may be automatically downloaded when auto-download is supported.",
-                color = Muted,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp
             )
 
@@ -4186,7 +4186,7 @@ internal fun StorageMediaPage(
 
         Text(
             "Note: These preferences are saved on this device. Automatic downloading and gallery saving will take effect when those features are connected to the media system. Storage usage currently reports Khahish app files and cache, not your Cloudinary online files.",
-            color = Muted,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 12.sp
         )
 
@@ -4208,8 +4208,8 @@ private fun MediaPreferenceRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
-            Text(title, color = Ink, fontWeight = FontWeight.SemiBold)
-            Text(subtitle, color = Muted, fontSize = 11.sp)
+            Text(title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
         }
 
         Switch(
@@ -4292,14 +4292,14 @@ private fun SettingsItem(
         Spacer(Modifier.width(14.dp))
 
         Column(Modifier.weight(1f)) {
-            Text(title, color = Ink, fontWeight = FontWeight.SemiBold)
-            Text(subtitle, color = Muted, fontSize = 11.sp)
+            Text(title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
         }
 
         Icon(
             Icons.Default.ChevronRight,
             contentDescription = null,
-            tint = Muted
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
@@ -4384,7 +4384,7 @@ fun PlaceholderPage(
     Box(
         modifier
             .fillMaxSize()
-            .background(Pale)
+            .background(MaterialTheme.colorScheme.background)
             .padding(24.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -4400,7 +4400,7 @@ fun PlaceholderPage(
 
             Text(
                 title,
-                color = Ink,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.Bold,
                 fontSize = 20.sp
             )
@@ -4409,7 +4409,7 @@ fun PlaceholderPage(
 
             Text(
                 description,
-                color = Muted,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
             )
         }
