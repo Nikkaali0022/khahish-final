@@ -223,21 +223,21 @@ fun KhahishCallScreen(
                     isMuted = !isMuted
                     session?.setMicrophoneMuted(isMuted)
                 }) {
-                    Icon(if (isMuted) Icons.Default.MicOff else Icons.Default.Mic, if (isMuted) "Unmute microphone" else "Mute microphone", tint = Color.White)
+                    Icon(if (isMuted) Icons.Default.MicOff else Icons.Default.Mic, null, tint = Color.White)
                 }
                 if (call.isVideo) {
                     IconButton(onClick = {
                         cameraEnabled = !cameraEnabled
                         session?.setCameraEnabled(cameraEnabled)
                     }) {
-                        Icon(if (cameraEnabled) Icons.Default.Videocam else Icons.Default.VideocamOff, if (cameraEnabled) "Turn camera off" else "Turn camera on", tint = Color.White)
+                        Icon(if (cameraEnabled) Icons.Default.Videocam else Icons.Default.VideocamOff, null, tint = Color.White)
                     }
                 }
                 IconButton(onClick = {
                     speakerEnabled = !speakerEnabled
                     session?.setSpeakerEnabled(speakerEnabled)
                 }) {
-                    Icon(if (speakerEnabled) Icons.Default.VolumeUp else Icons.Default.VolumeOff, if (speakerEnabled) "Turn speaker off" else "Turn speaker on", tint = Color.White)
+                    Icon(if (speakerEnabled) Icons.Default.VolumeUp else Icons.Default.VolumeOff, null, tint = Color.White)
                 }
                 IconButton(onClick = {
                     repository.endCall(call.id) { errorText = it }
