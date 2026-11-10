@@ -2795,7 +2795,7 @@ private fun sendChatMessage(
 
         val members = chatSnapshot.get("members") as? List<*> ?: emptyList<Any>()
         val otherUid = members.filterIsInstance<String>().firstOrNull { it != senderId }.orEmpty()
-        if (members.size == 2 && otherUid.isNotBlank()) {
+        if (chatSnapshot.getBoolean("isGroup") != true && members.size == 2 && otherUid.isNotBlank()) {
             val db = FirebaseFirestore.getInstance()
             db.collection("users").document(senderId).collection("blocked").document(otherUid).get()
                 .addOnSuccessListener { myBlock ->
