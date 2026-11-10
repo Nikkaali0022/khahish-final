@@ -180,10 +180,11 @@ fun KhahishCallScreen(
         }
     }
 
-    LaunchedEffect(call.id, currentCall.status, currentCall.updatedAt) {
-        if (currentCall.status == "accepted" && currentCall.updatedAt > 0L) {
+    LaunchedEffect(call.id, currentCall.status, currentCall.acceptedAt, currentCall.updatedAt) {
+        val connectedAt = currentCall.acceptedAt.takeIf { it > 0L } ?: currentCall.updatedAt
+        if (currentCall.status == "accepted" && connectedAt > 0L) {
             while (currentCall.status == "accepted") {
-                callElapsedSeconds = ((System.currentTimeMillis() - currentCall.updatedAt)
+                callElapsedSeconds = ((System.currentTimeMillis() - connectedAt)
                     .coerceAtLeast(0L) / 1000L).toInt()
                 delay(1_000)
             }
