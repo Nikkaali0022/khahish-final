@@ -15,7 +15,9 @@ data class KhahishCall(
     val callType: String = "voice",
     val status: String = "ringing",
     val createdAt: Long = 0L,
-    val updatedAt: Long = 0L
+    val updatedAt: Long = 0L,
+    val acceptedAt: Long = 0L,
+    val endedAt: Long = 0L
 ) {
     val isVideo: Boolean get() = callType == "video"
 
@@ -30,7 +32,9 @@ data class KhahishCall(
             callType = document.getString("callType") ?: "voice",
             status = document.getString("status") ?: "ringing",
             createdAt = document.getLong("createdAt") ?: 0L,
-            updatedAt = document.getLong("updatedAt") ?: 0L
+            updatedAt = document.getLong("updatedAt") ?: 0L,
+            acceptedAt = document.getLong("acceptedAt") ?: 0L,
+            endedAt = document.getLong("endedAt") ?: 0L
         )
     }
 }
@@ -163,12 +167,16 @@ class KhahishCallRepository(
         status: String,
         onError: (String) -> Unit
     ) {
-        calls.document(callId).update(
-            mapOf(
-                "status" to status,
-                "updatedAt" to System.currentTimeMillis()
-            )
-        ).addOnFailureListener { error ->
+        val now = System.currentTimeMillis()
+        val updates = mutableMapOf<String, Any>(
+            "status" to status,
+            "updatedAt" to now
+        )
+        if (status == "accepted") updates["acceptedAt"] = now
+        if (status == "ended") updates["endedAt"] = now
+
+        calls.document(callId).update(updates)
+            .addOnFailureListener { error ->
             onError(error.message ?: "Unable to update call status.")
         }
     }
