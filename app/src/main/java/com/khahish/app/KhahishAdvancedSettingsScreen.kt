@@ -36,7 +36,8 @@ fun KhahishAdvancedSettingsScreen(
     onBack: () -> Unit,
     onLogout: () -> Unit,
     onAnimationsChanged: (Boolean) -> Unit,
-    onSlideTransitionsChanged: (Boolean) -> Unit
+    onSlideTransitionsChanged: (Boolean) -> Unit,
+    onOneHandedChanged: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
     val auth = remember { FirebaseAuth.getInstance() }
@@ -79,7 +80,7 @@ fun KhahishAdvancedSettingsScreen(
             ), com.google.firebase.firestore.SetOptions.merge())
             db.collection("accountRequests").document(uid).get()
                 .addOnSuccessListener { requestStatus = it.getString("status").orEmpty() }
-            db.collection("users").document(uid).collection("trustedDevices").get()
+            db.collection("users").document(uid).collection("trustedDevices").whereEqualTo("trusted", true).get()
                 .addOnSuccessListener { snap ->
                     devices = snap.documents.map { it.id to (it.getString("deviceName") ?: "Android device") }
                 }
@@ -104,15 +105,16 @@ fun KhahishAdvancedSettingsScreen(
         if (uid.isBlank() || busy) return
         busy = true
         val now = System.currentTimeMillis()
-        db.collection("accountRequests").document(uid).set(mapOf(
+        val requestData = mutableMapOf<String, Any>(
             "uid" to uid,
             "type" to type,
             "status" to "pending",
             "createdAt" to now,
-            "scheduledFor" to now + 30L * 24L * 60L * 60L * 1000L,
             "email" to (user?.email ?: ""),
             "note" to "User requested from Khahish Android app"
-        )).addOnSuccessListener {
+        )
+        if (type == "delete") requestData["scheduledFor"] = now + 30L * 24L * 60L * 60L * 1000L
+        db.collection("accountRequests").document(uid).set(requestData).addOnSuccessListener {
             requestStatus = "pending"
             busy = false
             Toast.makeText(context, if (type == "delete") "Deletion request saved. Recovery window: 30 days." else "Deactivation request saved.", Toast.LENGTH_LONG).show()
@@ -197,6 +199,7 @@ fun KhahishAdvancedSettingsScreen(
             AdvancedSwitch("One-handed mode", "Keep important controls easier to reach on smaller screens", oneHanded) {
                 oneHanded = it
                 prefs.edit().putBoolean("one_handed", it).apply()
+                onOneHandedChanged(it)
             }
             AdvancedSwitch("Reduced motion", "Turn off app animations and slide transitions", reducedMotion) {
                 reducedMotion = it
@@ -259,7 +262,11 @@ fun KhahishAdvancedSettingsScreen(
                         if (id != deviceId) TextButton(onClick = {
                             db.collection("users").document(uid).collection("trustedDevices").document(id)
                                 .update("trusted", false)
-                                .addOnSuccessListener { Toast.makeText(context, "Device marked untrusted", Toast.LENGTH_SHORT).show() }
+                                .addOnSuccessListener {
+                                    devices = devices.filterNot { it.first == id }
+                                    Toast.makeText(context, "Device access revoked", Toast.LENGTH_SHORT).show()
+                                }
+                                .addOnFailureListener { Toast.makeText(context, "Could not revoke device: " + it.message, Toast.LENGTH_LONG).show() }
                         }) { Text("Revoke") }
                     }
                 }
