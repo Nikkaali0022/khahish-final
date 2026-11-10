@@ -5,6 +5,7 @@ Khahish is an Android-first messaging app built with Kotlin, Jetpack Compose, Fi
 ## Current feature work on `feature/agora-calling`
 
 - Private chats, message receipts, replies, reactions, forwarding and disappearing messages
+- Unique editable usernames, exact-username discovery, and receiver-controlled first-contact message requests
 - Latest-message positioning, jump-to-latest button and swipe navigation between main tabs
 - Group chat creation, group participant management and admin roles
 - Communities with membership, posts and post reporting

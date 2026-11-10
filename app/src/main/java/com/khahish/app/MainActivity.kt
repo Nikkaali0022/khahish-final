@@ -112,6 +112,11 @@ data class ChatMessageSearchResult(
     val timestamp: Long
 )
 
+data class MessageRequestItem(val id: String, val senderUid: String, val senderName: String, val senderUsername: String, val createdAt: Long)
+
+internal fun normalizeKhahishUsername(value: String): String = value.trim().removePrefix("@").lowercase(Locale.ROOT)
+internal fun isValidKhahishUsername(value: String): Boolean = Regex("^[a-z0-9_]{3,20}$").matches(normalizeKhahishUsername(value))
+
 data class AppUser(
     val uid: String = "",
     val name: String = "",
@@ -640,6 +645,7 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
     val db = remember { FirebaseFirestore.getInstance() }
 
     var name by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var isSignUp by remember { mutableStateOf(true) }
@@ -715,6 +721,17 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
             )
             )
             Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = username,
+                onValueChange = { username = it.lowercase(Locale.ROOT).filter { ch -> ch in 'a'..'z' || ch in '0'..'9' || ch == '_' }.take(20) },
+                label = { Text("Unique username") },
+                placeholder = { Text("your_username") },
+                leadingIcon = { Text("@", color = Green) },
+                supportingText = { Text("3–20 characters; letters, numbers and _ only.", color = Muted) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Spacer(Modifier.height(12.dp))
         }
 
         OutlinedTextField(
@@ -786,20 +803,53 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                     showToast(context, "Enter your name")
                     return@Button
                 }
+                if (isSignUp && !isValidKhahishUsername(username)) {
+                    showToast(context, "Choose a valid unique username (3–20 characters).")
+                    return@Button
+                }
 
                 isLoading = true
 
                 if (isSignUp) {
                     auth.createUserWithEmailAndPassword(email.trim(), password)
                         .addOnSuccessListener { result ->
-                            saveUserToFirestore(
-                                db,
-                                result.user?.uid,
-                                name,
-                                email
-                            )
-                            isLoading = false
-                            onLoginSuccess()
+                            val newUid = result.user?.uid
+                            val cleanUsername = normalizeKhahishUsername(username)
+                            if (newUid.isNullOrBlank()) {
+                                auth.signOut()
+                                isLoading = false
+                                showToast(context, "Account created, but profile setup failed. Please sign in.")
+                                return@addOnSuccessListener
+                            }
+                            val usernameRef = db.collection("usernames").document(cleanUsername)
+                            db.runTransaction { transaction ->
+                                val existingClaim = transaction.get(usernameRef)
+                                if (existingClaim.exists()) throw IllegalStateException("That username is already taken.")
+                                val now = System.currentTimeMillis()
+                                val profileData = mapOf<String, Any>(
+                                    "uid" to newUid,
+                                    "name" to name.trim(),
+                                    "nameLowercase" to name.trim().lowercase(Locale.ROOT),
+                                    "email" to email.trim(),
+                                    "username" to cleanUsername,
+                                    "bio" to "",
+                                    "photoUrl" to "",
+                                    "createdAt" to now,
+                                    "updatedAt" to now
+                                )
+                                transaction.set(usernameRef, mapOf("uid" to newUid, "username" to cleanUsername, "updatedAt" to now))
+                                transaction.set(db.collection("users").document(newUid), profileData, SetOptions.merge())
+                                transaction.set(db.collection("publicProfiles").document(newUid), profileData, SetOptions.merge())
+                                null
+                            }.addOnSuccessListener {
+                                saveUserToFirestore(db, newUid, name, email)
+                                isLoading = false
+                                onLoginSuccess()
+                            }.addOnFailureListener { error ->
+                                auth.signOut()
+                                isLoading = false
+                                showToast(context, (error.message ?: "Username setup failed") + ". Sign in and choose a username in Edit Profile if the account was created.")
+                            }
                         }
                         .addOnFailureListener { error ->
                             isLoading = false
@@ -889,30 +939,20 @@ fun NewChatScreen(
     var creatingUid by remember { mutableStateOf("") }
 
     LaunchedEffect(search) {
-        val queryText = search.trim().lowercase(Locale.ROOT)
-
-        if (queryText.length < 2) {
-            users = emptyList()
-            loading = false
+        val term = normalizeKhahishUsername(search)
+        if (term.length < 3 || !isValidKhahishUsername(term)) {
+            users = emptyList(); loading = false
         } else {
             loading = true
-            db.collection("publicProfiles")
-                .orderBy("nameLowercase")
-                .startAt(queryText)
-                .endAt(queryText + "\uf8ff")
-                .limit(30)
-                .get()
-                .addOnSuccessListener { snapshot ->
-                    users = snapshot.documents.mapNotNull { doc ->
-                        val user = doc.toObject(AppUser::class.java)
-                        if (user != null && user.uid != currentUid) user else null
-                    }
+            db.collection("usernames").document(term).get().addOnSuccessListener { claim ->
+                val targetUid = claim.getString("uid").orEmpty()
+                if (targetUid.isBlank() || targetUid == currentUid) {
+                    users = emptyList(); loading = false
+                } else db.collection("publicProfiles").document(targetUid).get().addOnSuccessListener { profile ->
+                    users = listOfNotNull(profile.toObject(AppUser::class.java)?.takeIf { it.uid == targetUid })
                     loading = false
-                }
-                .addOnFailureListener { error ->
-                    loading = false
-                    showToast(context, "Search failed: ${error.message}")
-                }
+                }.addOnFailureListener { loading = false; showToast(context, "Profile lookup failed: " + it.message) }
+            }.addOnFailureListener { loading = false; showToast(context, "Username search failed: " + it.message) }
         }
     }
 
@@ -939,7 +979,7 @@ fun NewChatScreen(
                 value = search,
                 onValueChange = { search = it },
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Search users by name") },
+                placeholder = { Text("Enter exact username, e.g. ali_123") },
                 leadingIcon = { Icon(Icons.Default.Search, null) },
                 singleLine = true,
                 shape = RoundedCornerShape(16.dp)
@@ -947,7 +987,7 @@ fun NewChatScreen(
         }
 
         Text(
-            "Search registered Khahish users",
+            "Find one person by their unique username",
             modifier = Modifier.padding(18.dp),
             color = Muted,
             fontSize = 13.sp
@@ -960,9 +1000,9 @@ fun NewChatScreen(
             )
         }
 
-        if (search.trim().length < 2) {
+        if (normalizeKhahishUsername(search).length < 3) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Type at least 2 letters to search", color = Muted)
+                Text("Enter a complete username (3–20 letters, numbers or _)", color = Muted)
             }
         } else if (!loading && users.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -983,18 +1023,6 @@ fun NewChatScreen(
                                 val chatRef = db.collection("chats").document(chatId)
                                 val members = listOf(currentUid, user.uid).sorted()
                                 val now = System.currentTimeMillis()
-
-                                val chatData = hashMapOf<String, Any>(
-                                    "members" to members,
-                                    "memberNames" to mapOf(
-                                        currentUid to "You",
-                                        user.uid to user.name
-                                    ),
-                                    "lastMessage" to "",
-                                    "lastMessageAt" to 0L,
-                                    "updatedAt" to now,
-                                    "disappearingDurationMs" to 0L
-                                )
 
                                 db.collection("chats")
                                     .whereEqualTo(
@@ -1020,28 +1048,26 @@ fun NewChatScreen(
                                                 )
                                             )
                                         } else {
-                                            chatRef.set(chatData)
-                                                .addOnSuccessListener {
-                                                    creatingUid = ""
-                                                    onChatCreated(
-                                                        Chat(
-                                                            id = chatId,
-                                                            peerUid = user.uid,
-                                                            name = user.name.ifBlank { "Khahish User" },
-                                                            message = "",
-                                                            time = "",
-                                                            initials = user.name.firstOrNull()
-                                                                ?.uppercase() ?: "K"
-                                                        )
-                                                    )
+                                            val requestRef = db.collection("messageRequests").document(chatId)
+                                            requestRef.get().addOnSuccessListener { request ->
+                                                val status = request.getString("status").orEmpty()
+                                                when {
+                                                    !request.exists() -> {
+                                                        val senderName = FirebaseAuth.getInstance().currentUser?.displayName?.takeIf { it.isNotBlank() } ?: "Khahish User"
+                                                        requestRef.set(mapOf("senderUid" to currentUid, "receiverUid" to user.uid, "senderName" to senderName, "senderUsername" to "", "receiverName" to user.name, "status" to "pending", "createdAt" to now))
+                                                            .addOnSuccessListener { creatingUid = ""; showToast(context, "Message request sent. Chat opens after acceptance.") }
+                                                            .addOnFailureListener { creatingUid = ""; showToast(context, "Request failed: ${it.message}") }
+                                                    }
+                                                    status == "pending" && request.getString("senderUid") == currentUid -> { creatingUid = ""; showToast(context, "Your message request is already pending.") }
+                                                    status == "pending" -> { creatingUid = ""; showToast(context, "This person has already requested to chat. Accept it from Chats.") }
+                                                    status == "rejected" -> { creatingUid = ""; showToast(context, "This person rejected the request. Chat cannot start.") }
+                                                    status == "accepted" -> {
+                                                        creatingUid = ""
+                                                        showToast(context, "This request was accepted. Open your Chats list to continue.")
+                                                    }
+                                                    else -> { creatingUid = ""; showToast(context, "A chat request already exists.") }
                                                 }
-                                                .addOnFailureListener { error ->
-                                                    creatingUid = ""
-                                                    showToast(
-                                                        context,
-                                                        "Chat create failed: ${error.message}"
-                                                    )
-                                                }
+                                            }.addOnFailureListener { creatingUid = ""; showToast(context, "Request lookup failed: ${it.message}") }
                                         }
                                     }
                                     .addOnFailureListener { error ->
@@ -1078,7 +1104,7 @@ fun NewChatScreen(
                                 user.lastSeenVisible && user.lastSeenAt > 0L ->
                                     "Last seen " + java.text.SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault())
                                         .format(java.util.Date(user.lastSeenAt))
-                                else -> "Tap to start private chat"
+                                else -> "Tap to send a message request"
                             }
                             Text(statusText, color = if (statusText == "Online") Green else Muted, fontSize = 12.sp)
                             if (user.bio.isNotBlank()) {
@@ -1111,8 +1137,10 @@ fun ChatList(
     onViewProfile: (String) -> Unit
 ) {
     val db = remember { FirebaseFirestore.getInstance() }
+    val context = LocalContext.current
 
     var chats by remember { mutableStateOf(listOf<Chat>()) }
+    var incomingRequests by remember { mutableStateOf(listOf<MessageRequestItem>()) }
     var unreadCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     var loading by remember { mutableStateOf(true) }
     var search by remember { mutableStateOf("") }
@@ -1163,6 +1191,17 @@ fun ChatList(
                 }
             }
 
+        onDispose { registration.remove() }
+    }
+
+    DisposableEffect(currentUid) {
+        val registration = db.collection("messageRequests").whereEqualTo("receiverUid", currentUid)
+            .whereEqualTo("status", "pending").addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+                incomingRequests = snapshot.documents.map { doc ->
+                    MessageRequestItem(doc.id, doc.getString("senderUid").orEmpty(), doc.getString("senderName").orEmpty().ifBlank { "Khahish User" }, doc.getString("senderUsername").orEmpty(), doc.getLong("createdAt") ?: 0L)
+                }.sortedByDescending { it.createdAt }
+            }
         onDispose { registration.remove() }
     }
 
@@ -1276,7 +1315,7 @@ fun ChatList(
                 CircularProgressIndicator(color = Green)
             }
 
-            filtered.isEmpty() && messageSearchResults.isEmpty() && !isSearchingMessages -> Box(
+            filtered.isEmpty() && incomingRequests.isEmpty() && messageSearchResults.isEmpty() && !isSearchingMessages -> Box(
                 Modifier
                     .fillMaxSize()
                     .padding(24.dp),
@@ -1307,6 +1346,38 @@ fun ChatList(
             else -> LazyColumn(
                 contentPadding = PaddingValues(bottom = 90.dp)
             ) {
+                if (incomingRequests.isNotEmpty()) {
+                    item { Text("MESSAGE REQUESTS", modifier = Modifier.fillMaxWidth().padding(start = 18.dp, top = 10.dp, bottom = 4.dp), color = Green, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                    items(incomingRequests, key = { "request-${it.id}" }) { request ->
+                        Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                            Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                                Text(request.senderName, color = Ink, fontWeight = FontWeight.SemiBold)
+                                Text("wants to start a conversation", color = Muted, fontSize = 12.sp)
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                    TextButton(onClick = {
+                                        db.collection("messageRequests").document(request.id).update(mapOf("status" to "rejected", "handledBy" to currentUid, "rejectedAt" to System.currentTimeMillis()))
+                                            .addOnSuccessListener { showToast(context, "Message request rejected.") }
+                                            .addOnFailureListener { showToast(context, "Could not reject request: ${it.message}") }
+                                    }) { Text("Reject", color = Muted) }
+                                    Spacer(Modifier.width(8.dp))
+                                    Button(onClick = {
+                                        val reqRef = db.collection("messageRequests").document(request.id)
+                                        val chatRef = db.collection("chats").document(request.id)
+                                        val now = System.currentTimeMillis()
+                                        val members = listOf(currentUid, request.senderUid).sorted()
+                                        val batch = db.batch()
+                                        batch.update(reqRef, mapOf("status" to "accepted", "acceptedBy" to currentUid, "handledBy" to currentUid, "acceptedAt" to now))
+                                        batch.set(chatRef, mapOf("members" to members, "memberNames" to mapOf(currentUid to (FirebaseAuth.getInstance().currentUser?.displayName ?: "You"), request.senderUid to request.senderName), "lastMessage" to "", "lastMessageAt" to 0L, "updatedAt" to now, "createdAt" to now, "createdBy" to currentUid, "disappearingDurationMs" to 0L))
+                                        batch.commit().addOnSuccessListener {
+                                            showToast(context, "Request accepted. Chat is ready.")
+                                            onOpen(Chat(request.id, request.senderUid, request.senderName, "", "", request.senderName.firstOrNull()?.uppercase() ?: "K"))
+                                        }.addOnFailureListener { showToast(context, "Could not accept request: ${it.message}") }
+                                    }, colors = ButtonDefaults.buttonColors(containerColor = Green)) { Text("Accept", color = Color.White) }
+                                }
+                            }
+                        }
+                    }
+                }
                 items(filtered, key = { it.id }) { chat ->
                     Row(
                         Modifier
@@ -1488,6 +1559,7 @@ fun ConversationScreen(
     var reactionTarget by remember { mutableStateOf<MessageItem?>(null) }
     var showForwardDialog by remember { mutableStateOf(false) }
     var forwardUsers by remember { mutableStateOf(emptyList<AppUser>()) }
+    var forwardSearch by remember { mutableStateOf("") }
     var loadingForwardUsers by remember { mutableStateOf(false) }
     var forwarding by remember { mutableStateOf(false) }
 
@@ -1740,17 +1812,14 @@ fun ConversationScreen(
         if (!showAddGroupMembers) {
             groupSearchResults = emptyList()
         } else {
-            val term = groupMemberSearch.trim().lowercase(Locale.ROOT)
-            if (term.length < 2) {
-                groupSearchResults = emptyList()
-            } else {
-                db.collection("publicProfiles").orderBy("nameLowercase")
-                    .startAt(term).endAt(term + "\uf8ff").limit(20).get()
-                    .addOnSuccessListener { snapshot ->
-                        groupSearchResults = snapshot.documents.mapNotNull { doc ->
-                            doc.toObject(AppUser::class.java)?.takeIf { it.uid.isNotBlank() && it.uid != currentUserId && it.uid !in groupMemberUids }
-                        }
-                    }
+            val term = normalizeKhahishUsername(groupMemberSearch)
+            if (term.length < 3 || !isValidKhahishUsername(term)) groupSearchResults = emptyList()
+            else db.collection("usernames").document(term).get().addOnSuccessListener { claim ->
+                val targetUid = claim.getString("uid").orEmpty()
+                if (targetUid.isBlank() || targetUid == currentUserId || targetUid in groupMemberUids) groupSearchResults = emptyList()
+                else db.collection("publicProfiles").document(targetUid).get().addOnSuccessListener { profile ->
+                    groupSearchResults = listOfNotNull(profile.toObject(AppUser::class.java)?.takeIf { it.uid == targetUid })
+                }
             }
         }
     }
@@ -2371,40 +2440,44 @@ fun ConversationScreen(
     }
 
     if (showForwardDialog) {
-        LaunchedEffect(showForwardDialog) {
-            if (showForwardDialog && forwardUsers.isEmpty()) {
+        LaunchedEffect(showForwardDialog, forwardSearch) {
+            val term = normalizeKhahishUsername(forwardSearch)
+            if (!showForwardDialog || term.length < 3 || !isValidKhahishUsername(term)) { forwardUsers = emptyList(); loadingForwardUsers = false }
+            else {
                 loadingForwardUsers = true
-                db.collection("publicProfiles").limit(50).get()
-                    .addOnSuccessListener { snap ->
-                        forwardUsers = snap.documents.filter { it.id != currentUserId }.map { doc -> AppUser(uid = doc.id, name = doc.getString("name") ?: "Khahish User") }
-                        loadingForwardUsers = false
-                    }
-                    .addOnFailureListener { loadingForwardUsers = false; showToast(context, "Could not load contacts: ${it.message}") }
+                db.collection("usernames").document(term).get().addOnSuccessListener { claim ->
+                    val targetUid = claim.getString("uid").orEmpty()
+                    if (targetUid.isBlank() || targetUid == currentUserId) { forwardUsers = emptyList(); loadingForwardUsers = false }
+                    else db.collection("publicProfiles").document(targetUid).get().addOnSuccessListener { profile ->
+                        forwardUsers = listOfNotNull(profile.toObject(AppUser::class.java)?.takeIf { it.uid == targetUid }); loadingForwardUsers = false
+                    }.addOnFailureListener { loadingForwardUsers = false; showToast(context, "Profile lookup failed: ${it.message}") }
+                }.addOnFailureListener { loadingForwardUsers = false; showToast(context, "Username lookup failed: ${it.message}") }
             }
         }
         AlertDialog(onDismissRequest = { if (!forwarding) showForwardDialog = false }, title = { Text("Forward selected messages") }, text = {
             Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                OutlinedTextField(value = forwardSearch, onValueChange = { forwardSearch = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Recipient username") }, placeholder = { Text("Enter exact username") }, singleLine = true)
                 if (loadingForwardUsers) CircularProgressIndicator(color = Green)
                 else forwardUsers.forEach { target ->
                     TextButton(enabled = !forwarding, onClick = {
                         forwarding = true
                         val targetRef = db.collection("chats").document(privateChatId(currentUserId, target.uid))
-                        targetRef.set(mapOf("members" to listOf(currentUserId, target.uid), "updatedAt" to System.currentTimeMillis()), SetOptions.merge())
-                            .addOnSuccessListener {
-                                val batch = db.batch()
-                                messages.filter { it.id in selectedMessageIds }.forEach { original ->
-                                    val ref = targetRef.collection("messages").document()
-                                    batch.set(ref, mapOf("senderId" to currentUserId, "text" to original.text, "imageUrl" to original.imageUrl, "mediaType" to original.mediaType, "timestamp" to System.currentTimeMillis(), "deliveredTo" to emptyList<String>(), "readBy" to listOf(currentUserId), "forwarded" to true))
-                                }
-                                batch.commit().addOnSuccessListener {
-                                    targetRef.update(mapOf("lastMessage" to "Forwarded message", "lastMessageAt" to System.currentTimeMillis(), "updatedAt" to System.currentTimeMillis()))
-                                    forwarding = false; showForwardDialog = false; selectedMessageIds = emptySet()
-                                    showToast(context, "Messages forwarded to ${target.name}")
-                                }.addOnFailureListener { forwarding = false; showToast(context, "Forward failed: ${it.message}") }
-                            }.addOnFailureListener { forwarding = false; showToast(context, "Could not open chat: ${it.message}") }
+                        targetRef.get().addOnSuccessListener { existing ->
+                            if (!existing.exists()) { forwarding = false; showToast(context, "Send a message request and wait for acceptance before forwarding."); return@addOnSuccessListener }
+                            val batch = db.batch()
+                            messages.filter { it.id in selectedMessageIds }.forEach { original ->
+                                val ref = targetRef.collection("messages").document()
+                                batch.set(ref, mapOf("senderId" to currentUserId, "text" to original.text, "imageUrl" to original.imageUrl, "mediaType" to original.mediaType, "timestamp" to System.currentTimeMillis(), "deliveredTo" to emptyList<String>(), "readBy" to listOf(currentUserId), "forwarded" to true))
+                            }
+                            batch.commit().addOnSuccessListener {
+                                targetRef.update(mapOf("lastMessage" to "Forwarded message", "lastMessageAt" to System.currentTimeMillis(), "updatedAt" to System.currentTimeMillis()))
+                                forwarding = false; showForwardDialog = false; selectedMessageIds = emptySet()
+                                showToast(context, "Messages forwarded to ${target.name}")
+                            }.addOnFailureListener { forwarding = false; showToast(context, "Forward failed: ${it.message}") }
+                        }.addOnFailureListener { forwarding = false; showToast(context, "Could not open chat: ${it.message}") }
                     }) { Text(target.name, color = Ink) }
                 }
-                if (!loadingForwardUsers && forwardUsers.isEmpty()) Text("No contacts available", color = Muted)
+                if (!loadingForwardUsers && forwardUsers.isEmpty()) Text("Enter an existing user's exact username.", color = Muted)
             }
         }, confirmButton = { TextButton(onClick = { showForwardDialog = false }, enabled = !forwarding) { Text("Close") } })
     }
@@ -2418,10 +2491,10 @@ fun ConversationScreen(
                         value = groupMemberSearch,
                         onValueChange = { groupMemberSearch = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Search users") },
+                        label = { Text("Search by exact username") },
                         singleLine = true
                     )
-                    if (groupMemberSearch.trim().length < 2) {
+                    if (normalizeKhahishUsername(groupMemberSearch).length < 3) {
                         Text("Enter at least 2 letters to search.", color = Muted, modifier = Modifier.padding(top = 10.dp))
                     } else if (groupSearchResults.isEmpty()) {
                         Text("No new users found.", color = Muted, modifier = Modifier.padding(top = 10.dp))

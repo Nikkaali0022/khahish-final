@@ -44,27 +44,28 @@ fun KhahishGroupChatScreen(
     var creating by remember { mutableStateOf(false) }
 
     LaunchedEffect(search) {
-        val term = search.trim().lowercase(Locale.ROOT)
-        if (term.length < 2) {
+        val term = normalizeKhahishUsername(search)
+        if (term.length < 3 || !isValidKhahishUsername(term)) {
             users = emptyList()
+            loading = false
         } else {
             loading = true
-            db.collection("publicProfiles")
-                .orderBy("nameLowercase")
-                .startAt(term)
-                .endAt(term + "\uf8ff")
-                .limit(30)
-                .get()
-                .addOnSuccessListener { snapshot ->
-                    users = snapshot.documents.mapNotNull { doc ->
-                        doc.toObject(AppUser::class.java)?.takeIf { it.uid.isNotBlank() && it.uid != currentUid }
-                    }
+            db.collection("usernames").document(term).get().addOnSuccessListener { claim ->
+                val targetUid = claim.getString("uid").orEmpty()
+                if (targetUid.isBlank() || targetUid == currentUid) {
+                    users = emptyList()
                     loading = false
-                }
-                .addOnFailureListener {
+                } else db.collection("publicProfiles").document(targetUid).get().addOnSuccessListener { profile ->
+                    users = listOfNotNull(profile.toObject(AppUser::class.java)?.takeIf { it.uid == targetUid })
                     loading = false
-                    Toast.makeText(context, "User search failed: ${it.message}", Toast.LENGTH_LONG).show()
+                }.addOnFailureListener {
+                    users = emptyList(); loading = false
+                    Toast.makeText(context, "Profile lookup failed: ${it.message}", Toast.LENGTH_LONG).show()
                 }
+            }.addOnFailureListener {
+                users = emptyList(); loading = false
+                Toast.makeText(context, "Username lookup failed: ${it.message}", Toast.LENGTH_LONG).show()
+            }
         }
     }
 
@@ -91,7 +92,7 @@ fun KhahishGroupChatScreen(
             onValueChange = { search = it },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
             label = { Text("Add participants") },
-            placeholder = { Text("Search by name") },
+            placeholder = { Text("Search by exact username") },
             leadingIcon = { Icon(Icons.Default.Search, null) },
             singleLine = true,
             shape = RoundedCornerShape(14.dp)
@@ -105,9 +106,9 @@ fun KhahishGroupChatScreen(
             }
         }
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Green)
-        if (search.trim().length < 2) {
+        if (normalizeKhahishUsername(search).length < 3) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text("Search for people to add to your group", color = Muted)
+                Text("Enter a complete unique username to add someone", color = Muted)
             }
         } else if (!loading && users.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -144,8 +145,8 @@ fun KhahishGroupChatScreen(
                     Toast.makeText(context, "Enter a group name first.", Toast.LENGTH_SHORT).show()
                     return@Button
                 }
-                if (selected.isEmpty()) {
-                    Toast.makeText(context, "Select at least one participant.", Toast.LENGTH_SHORT).show()
+                if (selected.size < 2) {
+                    Toast.makeText(context, "Select at least two participants to create a group.", Toast.LENGTH_SHORT).show()
                     return@Button
                 }
                 if (creating) return@Button

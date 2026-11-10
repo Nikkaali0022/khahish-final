@@ -53,6 +53,8 @@ fun KhahishSettingsScreen(
     var showAdvanced by remember { mutableStateOf(false) }
     var showEditProfile by remember { mutableStateOf(false) }
     var editName by remember { mutableStateOf(user?.displayName.orEmpty()) }
+    var editUsername by remember { mutableStateOf("") }
+    var originalUsername by remember { mutableStateOf("") }
     var editBio by remember { mutableStateOf("") }
     var profilePhotoUrl by remember { mutableStateOf(user?.photoUrl?.toString().orEmpty()) }
     var uploadingPhoto by remember { mutableStateOf(false) }
@@ -74,6 +76,8 @@ fun KhahishSettingsScreen(
             db.collection("publicProfiles").document(uid).get()
                 .addOnSuccessListener { profile ->
                     editBio = profile.getString("bio").orEmpty()
+                    editUsername = profile.getString("username").orEmpty()
+                    originalUsername = profile.getString("username").orEmpty()
                     profilePhotoUrl = profile.getString("photoUrl") ?: user?.photoUrl?.toString().orEmpty()
                     editName = profile.getString("name") ?: user?.displayName.orEmpty()
                 }
@@ -326,6 +330,12 @@ fun KhahishSettingsScreen(
                     }
                     OutlinedTextField(value = editName, onValueChange = { editName = it },
                         label = { Text("Display name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(value = editUsername,
+                        onValueChange = { editUsername = it.lowercase(Locale.ROOT).filter { ch -> ch in 'a'..'z' || ch in '0'..'9' || ch == '_' }.take(20) },
+                        label = { Text("Unique username") }, placeholder = { Text("your_username") },
+                        leadingIcon = { Text("@", color = Green) },
+                        supportingText = { Text("3–20 characters. Letters, numbers and underscore only.", color = Muted) },
+                        singleLine = true, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(value = editBio, onValueChange = { if (it.length <= 160) editBio = it },
                         label = { Text("Bio") }, placeholder = { Text("Write something about yourself…") },
                         minLines = 3, maxLines = 4, modifier = Modifier.fillMaxWidth())
@@ -333,31 +343,37 @@ fun KhahishSettingsScreen(
                 }
             },
             confirmButton = {
-                TextButton(enabled = editName.isNotBlank() && !savingProfile && !uploadingPhoto, onClick = {
+                TextButton(enabled = editName.isNotBlank() && isValidKhahishUsername(editUsername) && !savingProfile && !uploadingPhoto, onClick = {
                     val cleanName = editName.trim()
+                    val cleanUsername = normalizeKhahishUsername(editUsername)
                     val current = auth.currentUser
                     if (current == null || uid.isBlank()) return@TextButton
                     savingProfile = true
-                    val profileRequest = UserProfileChangeRequest.Builder().setDisplayName(cleanName).setPhotoUri(if (profilePhotoUrl.isBlank()) null else Uri.parse(profilePhotoUrl)).build()
-                    current.updateProfile(profileRequest).addOnCompleteListener { authTask ->
-                        val updates = mapOf(
-                            "name" to cleanName,
-                            "nameLowercase" to cleanName.lowercase(Locale.ROOT),
-                            "bio" to editBio.trim(),
-                            "photoUrl" to profilePhotoUrl,
-                            "updatedAt" to System.currentTimeMillis()
-                        )
-                        db.collection("users").document(uid).set(updates, SetOptions.merge())
-                            .addOnSuccessListener {
-                                db.collection("publicProfiles").document(uid).set(updates, SetOptions.merge())
-                                savingProfile = false
-                                showEditProfile = false
-                                Toast.makeText(context, if (authTask.isSuccessful) "Profile updated" else "Profile saved; account display name may need refresh", Toast.LENGTH_LONG).show()
-                            }
-                            .addOnFailureListener {
-                                savingProfile = false
-                                Toast.makeText(context, "Profile update failed: ${it.message}", Toast.LENGTH_LONG).show()
-                            }
+                    val usernameRef = db.collection("usernames").document(cleanUsername)
+                    val oldUsername = normalizeKhahishUsername(originalUsername)
+                    val oldRef = oldUsername.takeIf { it.isNotBlank() && it != cleanUsername }?.let { db.collection("usernames").document(it) }
+                    db.runTransaction { transaction ->
+                        val claimed = transaction.get(usernameRef)
+                        val oldClaim = oldRef?.let { transaction.get(it) }
+                        if (claimed.exists() && claimed.getString("uid") != uid) throw IllegalStateException("That username is already taken.")
+                        val now = System.currentTimeMillis()
+                        transaction.set(usernameRef, mapOf("uid" to uid, "username" to cleanUsername, "updatedAt" to now))
+                        if (oldRef != null && oldClaim?.getString("uid") == uid) transaction.delete(oldRef)
+                        val updates = mapOf<String, Any>("name" to cleanName, "nameLowercase" to cleanName.lowercase(Locale.ROOT),
+                            "username" to cleanUsername, "bio" to editBio.trim(), "photoUrl" to profilePhotoUrl, "updatedAt" to now)
+                        transaction.set(db.collection("users").document(uid), updates, SetOptions.merge())
+                        transaction.set(db.collection("publicProfiles").document(uid), updates, SetOptions.merge())
+                        null
+                    }.addOnSuccessListener {
+                        val profileRequest = UserProfileChangeRequest.Builder().setDisplayName(cleanName)
+                            .setPhotoUri(if (profilePhotoUrl.isBlank()) null else Uri.parse(profilePhotoUrl)).build()
+                        current.updateProfile(profileRequest).addOnCompleteListener { authTask ->
+                            savingProfile = false; originalUsername = cleanUsername; showEditProfile = false
+                            Toast.makeText(context, if (authTask.isSuccessful) "Profile and username updated" else "Profile saved; account display name may need refresh", Toast.LENGTH_LONG).show()
+                        }
+                    }.addOnFailureListener { error ->
+                        savingProfile = false
+                        Toast.makeText(context, error.message ?: "Username update failed", Toast.LENGTH_LONG).show()
                     }
                 }) { Text(if (savingProfile) "Saving…" else "Save") }
             },
