@@ -96,6 +96,10 @@ jobs:
                   icon.save(output / "khahish_launcher.png")
                   icon.save(output / "khahish_launcher_round.png")
 
+              drawable = project / "app/src/main/res/drawable-nodpi"
+              drawable.mkdir(parents=True, exist_ok=True)
+              image.save(drawable / "khahish_logo.png")
+
               if manifest.exists():
                   content = manifest.read_text()
                   match = re.search(r'<application\b[^>]*>', content)
