@@ -20,6 +20,9 @@ Constraints: Firebase Spark Free; Android-first; preserve existing chat history 
 - mls-kmp is a Kotlin Multiplatform MLS implementation with Android support and RFC 9420 interoperability tests. Its current 1.x publication is very recent, so it needs independent code/security review, API maturity review, persistence/recovery review, and Android minSdk/CI proof before production use.
 - RFC 9420 MLS is designed for asynchronous group key establishment and forward secrecy/post-compromise security, but MLS is not a complete chat application: Khahish still needs an authentication service, delivery service, identity/credential validation, device lifecycle, and durable client-side group state.
 - Decision: no protocol dependency has been added to the production app yet. Do not invent a custom X3DH/Double Ratchet or group protocol to fill the gap.
+- The mls-kmp project is MIT-licensed, has an RFC 9420 test/interoperability suite, and its current Gradle configuration targets JVM 17; however, its Android target declares minSdk 26. Khahish currently supports minSdk 24. Raising Khahish to 26 would drop Android 7.0/7.1 devices, so it is not compatible with the current minimum-device policy without an explicit product decision. Its very recent 1.x release still requires independent security review.
+- The small Kotlin MLS wrappers found in the search are explicitly unaudited or have very limited adoption; they are not suitable for production security decisions without review.
+- Decision: no protocol dependency has been added to the production app yet. Do not invent a custom X3DH/Double Ratchet or group protocol to fill the gap.
 
 ## 1B. Local key-storage groundwork
 
