@@ -25,6 +25,12 @@ service cloud.firestore {
       match /{subcollection}/{document=**} {
         allow read, write: if signedIn() && request.auth.uid == userId;
       }
+
+      match /blocked/{blockedUid} {
+        allow read: if signedIn()
+          && (request.auth.uid == userId || request.auth.uid == blockedUid);
+        allow write: if signedIn() && request.auth.uid == userId;
+      }
     }
 
     match /publicProfiles/{userId} {
