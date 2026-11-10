@@ -1814,6 +1814,9 @@ fun ConversationScreen(
     var peerPhotoUrl by remember { mutableStateOf("") }
     var peerBio by remember { mutableStateOf("") }
     var showMediaPreviews by remember(chat.id) { mutableStateOf(true) }
+    var notificationsMuted by remember(chat.id) { mutableStateOf(false) }
+    var chatBubbleColorHex by remember(chat.id) { mutableStateOf("#18A889") }
+    var chatWallpaperColorHex by remember(chat.id) { mutableStateOf("#F4F8F7") }
 
     val chatSettingsRef = remember(currentUserId, chat.id) {
         db.collection("users").document(currentUserId)
@@ -1859,9 +1862,6 @@ fun ConversationScreen(
     var peerMenuExpanded by remember { mutableStateOf(false) }
     var chatMenuExpanded by remember { mutableStateOf(false) }
     var showChatThemeDialog by remember { mutableStateOf(false) }
-    var notificationsMuted by remember(chat.id) { mutableStateOf(false) }
-    var chatBubbleColorHex by remember(chat.id) { mutableStateOf("#18A889") }
-    var chatWallpaperColorHex by remember(chat.id) { mutableStateOf("#F4F8F7") }
     var showPeerPicture by remember { mutableStateOf(false) }
     var videoToPlay by remember { mutableStateOf("") }
     var photoToView by remember { mutableStateOf("") }
@@ -2584,7 +2584,7 @@ fun ConversationScreen(
                             .widthIn(max = 285.dp)
                             .pointerInput(msg.id) {
                                 var horizontalDrag = 0f
-                                androidx.compose.foundation.gestures.detectHorizontalDragGestures(
+                                detectHorizontalDragGestures(
                                     onHorizontalDrag = { _, amount -> horizontalDrag += amount },
                                     onDragEnd = {
                                         if (kotlin.math.abs(horizontalDrag) > 70f) replyTarget = msg
