@@ -996,9 +996,17 @@ fun NewChatScreen(
                                     "disappearingDurationMs" to 0L
                                 )
 
-                                chatRef.get()
-                                    .addOnSuccessListener { existing ->
-                                        if (existing.exists()) {
+                                db.collection("chats")
+                                    .whereEqualTo(
+                                        com.google.firebase.firestore.FieldPath.documentId(),
+                                        chatId
+                                    )
+                                    .whereArrayContains("members", currentUid)
+                                    .limit(1)
+                                    .get()
+                                    .addOnSuccessListener { matches ->
+                                        val existing = matches.documents.firstOrNull()
+                                        if (existing != null) {
                                             creatingUid = ""
                                             onChatCreated(
                                                 Chat(
@@ -1040,7 +1048,7 @@ fun NewChatScreen(
                                         creatingUid = ""
                                         showToast(
                                             context,
-                                            "Chat open failed: ${error.message}"
+                                            "Chat lookup failed: ${error.message}"
                                         )
                                     }
                             }
