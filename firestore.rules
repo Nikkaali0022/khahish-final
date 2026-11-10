@@ -620,29 +620,48 @@ service cloud.firestore {
         && request.resource.data.calleeUid == resource.data.calleeUid
         && request.resource.data.participants == resource.data.participants
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'status', 'updatedAt'
+          'status', 'updatedAt', 'acceptedAt', 'endedAt'
         ])
         && request.resource.data.updatedAt is int
         && (
           (
             request.auth.uid == resource.data.calleeUid
             && resource.data.status == 'ringing'
-            && request.resource.data.status in ['accepted', 'rejected', 'missed', 'ended']
+            && request.resource.data.status == 'accepted'
+            && request.resource.data.acceptedAt is int
+            && request.resource.data.acceptedAt == request.resource.data.updatedAt
+            && request.resource.data.get('endedAt', 0) == resource.data.get('endedAt', 0)
+            && request.resource.data.get('endedAt', 0) == 0
+          )
+          || (
+            request.auth.uid == resource.data.calleeUid
+            && resource.data.status == 'ringing'
+            && request.resource.data.status in ['rejected', 'missed']
+            && request.resource.data.get('acceptedAt', 0) == resource.data.get('acceptedAt', 0)
+            && request.resource.data.get('endedAt', 0) == resource.data.get('endedAt', 0)
           )
           || (
             request.auth.uid == resource.data.callerUid
             && resource.data.status == 'ringing'
             && request.resource.data.status == 'missed'
+            && request.resource.data.get('acceptedAt', 0) == resource.data.get('acceptedAt', 0)
+            && request.resource.data.get('endedAt', 0) == resource.data.get('endedAt', 0)
           )
           || (
             request.auth.uid == resource.data.callerUid
             && resource.data.status in ['ringing', 'accepted', 'rejected', 'missed']
             && request.resource.data.status == 'ended'
+            && request.resource.data.endedAt is int
+            && request.resource.data.endedAt == request.resource.data.updatedAt
+            && request.resource.data.get('acceptedAt', 0) == resource.data.get('acceptedAt', 0)
           )
           || (
             request.auth.uid == resource.data.calleeUid
-            && resource.data.status == 'accepted'
+            && resource.data.status in ['ringing', 'accepted']
             && request.resource.data.status == 'ended'
+            && request.resource.data.endedAt is int
+            && request.resource.data.endedAt == request.resource.data.updatedAt
+            && request.resource.data.get('acceptedAt', 0) == resource.data.get('acceptedAt', 0)
           )
         );
 
