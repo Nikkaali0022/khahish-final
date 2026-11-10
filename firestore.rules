@@ -449,6 +449,7 @@ service cloud.firestore {
                 'backupMemberUids'
               ])
               && request.resource.data.get('backupMemberUids', []) is list
+              && request.resource.data.backupMemberUids == resource.data.get('backupMemberUids', [])
               && request.auth.uid in request.resource.data.backupMemberUids
               && request.resource.data.senderId in request.resource.data.backupMemberUids
               && request.resource.data.restoredAt is int
