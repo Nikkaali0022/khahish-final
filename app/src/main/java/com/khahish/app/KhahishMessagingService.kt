@@ -44,7 +44,7 @@ class KhahishMessagingService : FirebaseMessagingService() {
         }
         val pendingIntent = PendingIntent.getActivity(
             this,
-            (payload["chatId"] ?: title).hashCode(),
+            (payload["chatId"] ?: payload["callId"] ?: title).hashCode(),
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
