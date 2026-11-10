@@ -100,7 +100,8 @@ service cloud.firestore {
     // -----------------------------------------------------
 
     match /users/{uid} {
-      allow get, create, update, delete: if isOwner(uid);
+      allow get, create, update: if isOwner(uid);
+      allow delete: if false;
       allow list: if false;
 
       // Explicit subcollection rules avoid broad wildcard permissions
@@ -155,7 +156,7 @@ service cloud.firestore {
           || request.resource.data.uid == uid
         );
 
-      allow delete: if isOwner(uid);
+      allow delete: if false;
     }
 
     // -----------------------------------------------------
@@ -475,7 +476,14 @@ service cloud.firestore {
         // Messages may only be deleted by their original sender.
         // Expiry is hidden client-side; cross-user client deletion is denied.
         allow delete: if isChatMember(chatId)
-          && resource.data.senderId == request.auth.uid;
+          && (
+            resource.data.senderId == request.auth.uid
+            || (
+              resource.data.get('expiresAt', 0) is int
+              && resource.data.get('expiresAt', 0) > 0
+              && resource.data.expiresAt <= request.time.toMillis()
+            )
+          );
       }
 
       match /typing/{typingUid} {
@@ -565,6 +573,8 @@ service cloud.firestore {
 
     match /stories/{storyId} {
       allow get, list: if canReadStory(resource.data)
+        && resource.data.get('expiresAt', 0) is int
+        && resource.data.expiresAt > request.time.toMillis()
         && (
           resource.data.get('audience', 'everyone') == 'everyone'
           || resource.data.ownerUid == request.auth.uid
