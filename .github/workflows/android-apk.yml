@@ -208,6 +208,16 @@ jobs:
           print("Build configurations applied successfully")
           PY
 
+      - name: Run Android Keystore instrumentation tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          disable-animations: true
+          script: |
+            cd "$PROJECT_DIR"
+            gradle :app:connectedDebugAndroidTest
+
       - name: Build Khahish APK
         run: |
           cd "$PROJECT_DIR"
