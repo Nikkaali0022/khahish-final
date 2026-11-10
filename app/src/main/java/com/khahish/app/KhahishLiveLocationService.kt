@@ -99,7 +99,7 @@ class KhahishLiveLocationService : Service() {
                 try { locationManager.isProviderEnabled(provider) } catch (_: Exception) { false }
             }.forEach { provider ->
                 if (hasLocationPermission()) {
-                    locationManager.requestLocationUpdates(provider, 10_000L, 10f, listener, Looper.getMainLooper())
+                    locationManager.requestLocationUpdates(provider, 30_000L, 15f, listener, Looper.getMainLooper())
                     try { locationManager.getLastKnownLocation(provider)?.let(::publishLocation) } catch (_: SecurityException) { }
                 }
             }
