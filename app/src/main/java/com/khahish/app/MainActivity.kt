@@ -3232,6 +3232,11 @@ private fun KhahishUserProfileScreen(uid: String, onBack: () -> Unit) {
     var online by remember(uid) { mutableStateOf(false) }
     var loading by remember(uid) { mutableStateOf(true) }
     var showPicture by remember { mutableStateOf(false) }
+    var showBlockConfirm by remember { mutableStateOf(false) }
+    var showReportDialog by remember { mutableStateOf(false) }
+    var reportReason by remember { mutableStateOf("Spam or unwanted content") }
+    val currentUid = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
+    val context = LocalContext.current
     DisposableEffect(uid) {
         val listener = db.collection("publicProfiles").document(uid).addSnapshotListener { snap, _ ->
             if (snap != null && snap.exists()) {
@@ -3259,7 +3264,76 @@ private fun KhahishUserProfileScreen(uid: String, onBack: () -> Unit) {
             if (username.isNotBlank()) Text("@$username", color = Green)
             Text(if (online) "Online" else "Khahish member", color = Muted, fontSize = 12.sp)
             if (bio.isNotBlank()) { Spacer(Modifier.height(18.dp)); Card(colors = CardDefaults.cardColors(containerColor = Color.White)) { Text(bio, Modifier.fillMaxWidth().padding(16.dp), color = Ink) } }
+            Spacer(Modifier.height(24.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(onClick = { showReportDialog = true }) {
+                    Icon(Icons.Default.Report, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Report")
+                }
+                OutlinedButton(onClick = { showBlockConfirm = true }) {
+                    Icon(Icons.Default.Block, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Block")
+                }
+            }
         }
+    }
+    if (showBlockConfirm) {
+        AlertDialog(
+            onDismissRequest = { showBlockConfirm = false },
+            title = { Text("Block $name?") },
+            text = { Text("This account will be added to your blocked list. You can unblock it later from Settings.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (currentUid.isBlank()) return@TextButton
+                    db.collection("users").document(currentUid).collection("blocked").document(uid)
+                        .set(mapOf("uid" to uid, "name" to name, "createdAt" to System.currentTimeMillis()))
+                        .addOnSuccessListener {
+                            showBlockConfirm = false
+                            Toast.makeText(context, "Account blocked", Toast.LENGTH_SHORT).show()
+                            onBack()
+                        }
+                        .addOnFailureListener { Toast.makeText(context, "Block failed: ${it.message}", Toast.LENGTH_LONG).show() }
+                }) { Text("Block", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { showBlockConfirm = false }) { Text("Cancel") } }
+        )
+    }
+    if (showReportDialog) {
+        AlertDialog(
+            onDismissRequest = { showReportDialog = false },
+            title = { Text("Report account") },
+            text = {
+                Column {
+                    Text("Why are you reporting this account?", color = Muted)
+                    listOf("Spam or unwanted content", "Harassment or bullying", "Fake or impersonation account", "Inappropriate content", "Other").forEach { reason ->
+                        Row(Modifier.fillMaxWidth().clickable { reportReason = reason }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selected = reportReason == reason, onClick = { reportReason = reason })
+                            Text(reason, color = Ink, fontSize = 13.sp)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (currentUid.isBlank()) return@TextButton
+                    db.collection("reports").add(mapOf(
+                        "type" to "user",
+                        "targetUid" to uid,
+                        "targetName" to name,
+                        "reporterUid" to currentUid,
+                        "reason" to reportReason,
+                        "status" to "pending",
+                        "createdAt" to System.currentTimeMillis()
+                    )).addOnSuccessListener {
+                        showReportDialog = false
+                        Toast.makeText(context, "Report submitted for review.", Toast.LENGTH_SHORT).show()
+                    }.addOnFailureListener { Toast.makeText(context, "Report failed: ${it.message}", Toast.LENGTH_LONG).show() }
+                }) { Text("Submit report") }
+            },
+            dismissButton = { TextButton(onClick = { showReportDialog = false }) { Text("Cancel") } }
+        )
     }
     if (showPicture && photo.isNotBlank()) Dialog(onDismissRequest = { showPicture = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(Modifier.fillMaxWidth().fillMaxHeight(.85f).background(Color.Black), contentAlignment = Alignment.Center) {
