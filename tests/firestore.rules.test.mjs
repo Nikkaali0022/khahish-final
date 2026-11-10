@@ -359,7 +359,8 @@ test("backup imports preserve historical sender labels but are explicitly unveri
     restoredAt: Date.now()
   }));
   await assertFails(updateDoc(doc(db("bob"), "chats/alice_bob/messages/backup_alice_old1"), {
-    text: "Another member must not edit Alice's imported record"
+    text: "Another member must not edit Alice's imported record",
+    editedAt: Date.now()
   }));
   await assertFails(setDoc(doc(db("alice"), "chats/alice_bob/messages/backup_alice_forged"), {
     ...imported,
