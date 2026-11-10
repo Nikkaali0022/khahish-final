@@ -2325,21 +2325,21 @@ fun ConversationScreen(
                     Box {
                         if (peerPhotoUrl.isNotBlank()) {
                             AsyncImage(model = peerPhotoUrl, contentDescription = "Profile picture",
-                                modifier = Modifier.size(40.dp).clip(CircleShape).clickable { peerMenuExpanded = true }, contentScale = ContentScale.Crop)
+                                modifier = Modifier.size(40.dp).clip(CircleShape).clickable { onViewProfile(chat.peerUid) }, contentScale = ContentScale.Crop)
                         } else {
-                            Box(Modifier.size(40.dp).background(Color(0xFFDCEFE9), CircleShape).clickable { peerMenuExpanded = true }, contentAlignment = Alignment.Center) {
+                            Box(Modifier.size(40.dp).background(Color(0xFFDCEFE9), CircleShape).clickable { onViewProfile(chat.peerUid) }, contentAlignment = Alignment.Center) {
                                 Text(chat.initials, color = Green, fontWeight = FontWeight.Bold)
                             }
                         }
                         DropdownMenu(expanded = peerMenuExpanded, onDismissRequest = { peerMenuExpanded = false }) {
                             DropdownMenuItem(text = { Text("View profile picture") }, leadingIcon = { Icon(Icons.Default.AccountCircle, null) }, enabled = peerPhotoUrl.isNotBlank(), onClick = { peerMenuExpanded = false; showPeerPicture = true })
-                            DropdownMenuItem(text = { Text("View profile") }, leadingIcon = { Icon(Icons.Default.Person, null) }, onClick = { peerMenuExpanded = false; onViewProfile(chat.peerUid) })
+                            DropdownMenuItem(text = { Text("View contact") }, leadingIcon = { Icon(Icons.Default.Person, null) }, onClick = { peerMenuExpanded = false; onViewProfile(chat.peerUid) })
                         }
                     }
                 }
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(if (chat.isGroup) displayGroupName else chat.name, fontWeight = FontWeight.SemiBold, color = Ink)
+                    Text(if (chat.isGroup) displayGroupName else chat.name, modifier = Modifier.clickable { if (!chat.isGroup) onViewProfile(chat.peerUid) else showGroupInfo = true }, fontWeight = FontWeight.SemiBold, color = Ink)
                     val peerStatusText = when {
                         chat.isGroup -> "Group · ${chat.memberUids.size} members"
                         peerTyping -> "typing..."
