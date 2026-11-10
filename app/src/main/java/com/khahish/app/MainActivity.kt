@@ -354,6 +354,31 @@ fun KhahishApp() {
         val uid = currentUser?.uid ?: return@LaunchedEffect
         val notificationIntent = hostActivity?.consumePendingNotificationIntent()
             ?: return@LaunchedEffect
+        val callId = notificationIntent.getStringExtra("khahish_call_id").orEmpty()
+        if (callId.isNotBlank()) {
+            FirebaseFirestore.getInstance().collection("calls").document(callId).get()
+                .addOnSuccessListener { snapshot ->
+                    val call = if (snapshot.exists()) KhahishCall.from(snapshot) else null
+                    if (call == null || call.calleeUid != uid) {
+                        Toast.makeText(appContext, "This incoming call is not available for your account.", Toast.LENGTH_LONG).show()
+                    } else if (call.status != "ringing") {
+                        Toast.makeText(appContext, "This call is no longer ringing.", Toast.LENGTH_LONG).show()
+                    } else {
+                        incomingCall = true
+                        activeCall = call
+                        tab = "Calls"
+                        selectedChat = null
+                        showNewChat = false
+                        showNewGroup = false
+                        profileTargetUid = ""
+                    }
+                }
+                .addOnFailureListener { error ->
+                    Toast.makeText(appContext, "Could not open incoming call: " + (error.message ?: "Unknown error"), Toast.LENGTH_LONG).show()
+                }
+            return@LaunchedEffect
+        }
+
         val chatId = notificationIntent.getStringExtra("khahish_chat_id").orEmpty()
         if (chatId.isBlank()) return@LaunchedEffect
 
