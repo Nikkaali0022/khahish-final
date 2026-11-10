@@ -399,7 +399,7 @@ fun KhahishApp() {
                                     ) {
                                         Text(
                                             "Khahish",
-                                            fontSize = 27.sp,
+                                            fontSize = 24.sp,
                                             fontWeight = FontWeight.Black,
                                             color = Color.White,
                                             letterSpacing = 0.4.sp
@@ -1668,11 +1668,11 @@ fun ConversationScreen(
                                 context
                             )
 
-                            "location" -> Text(msg.text, color = Ink)
+                            "location" -> Text(msg.text, color = if (isSelected) Color.Black else Ink)
                         }
 
                         if (msg.text.isNotBlank() && msg.mediaType != "location") {
-                            Text(msg.text, color = Ink, fontSize = 15.sp)
+                            Text(msg.text, color = if (isSelected) Color.Black else Ink, fontSize = 15.sp)
                         }
 
                         Row(
