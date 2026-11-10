@@ -2451,15 +2451,23 @@ fun ConversationScreen(
                     Column(
                         Modifier
                             .widthIn(max = 285.dp)
+                            .pointerInput(msg.id) {
+                                var horizontalDrag = 0f
+                                androidx.compose.foundation.gestures.detectHorizontalDragGestures(
+                                    onHorizontalDrag = { _, amount -> horizontalDrag += amount },
+                                    onDragEnd = {
+                                        if (kotlin.math.abs(horizontalDrag) > 70f) replyTarget = msg
+                                        horizontalDrag = 0f
+                                    }
+                                )
+                            }
                             .combinedClickable(
                                 onClick = {
                                     if (selectedMessageIds.isNotEmpty()) {
                                         selectedMessageIds = if (isSelected) selectedMessageIds - msg.id else selectedMessageIds + msg.id
                                     }
                                 },
-                                onLongClick = {
-                                    selectedMessageIds = if (isSelected) selectedMessageIds - msg.id else selectedMessageIds + msg.id
-                                }
+                                onLongClick = { reactionTarget = msg }
                             )
                             .border(2.dp, if (isSelected) Green else Color.Transparent, RoundedCornerShape(16.dp))
                             .background(
@@ -2575,9 +2583,16 @@ fun ConversationScreen(
                             Text("Imported backup • sender not verified", color = Muted, fontSize = 9.sp)
                         }
                         if (msg.reactions.isNotEmpty()) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Row(
+                                Modifier.align(Alignment.End)
+                                    .padding(top = 2.dp)
+                                    .background(Color(0xFFF4F8F7), RoundedCornerShape(12.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 msg.reactions.values.groupingBy { it }.eachCount().forEach { (emoji, count) ->
-                                    TextButton(onClick = { reactionTarget = msg }, contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)) { Text("$emoji $count", fontSize = 12.sp) }
+                                    Text(emoji + if (count > 1) " $count" else "", fontSize = 11.sp)
                                 }
                             }
                         }
@@ -2599,7 +2614,6 @@ fun ConversationScreen(
                             }
 
                             TextButton(onClick = { replyTarget = msg }, contentPadding = PaddingValues(horizontal = 3.dp, vertical = 0.dp)) { Icon(Icons.Default.Reply, "Reply", tint = Green, modifier = Modifier.size(16.dp)) }
-                            TextButton(onClick = { reactionTarget = msg }, contentPadding = PaddingValues(horizontal = 3.dp, vertical = 0.dp)) { Text("😊", fontSize = 14.sp) }
                             if (isMe) {
                                 val read = msg.readBy.any { it != currentUserId }
                                 val delivered =
