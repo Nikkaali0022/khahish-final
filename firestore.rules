@@ -431,6 +431,25 @@ service cloud.firestore {
               ).affectedKeys().hasOnly([request.auth.uid])
             )
             ||
+            // The user who imported a backup may update only their own
+            // explicitly marked, unverified historical import documents.
+            (
+              resource.data.get('restoredFromBackup', false) == true
+              && resource.data.get('restoredBy', '') == request.auth.uid
+              && request.resource.data.get('restoredFromBackup', false) == true
+              && request.resource.data.get('restoredBy', '') == request.auth.uid
+              && request.resource.data.senderId == resource.data.senderId
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'senderId', 'text', 'imageUrl', 'mediaType', 'timestamp',
+                'deliveredTo', 'readBy', 'hiddenFor', 'expiresAt',
+                'replyToMessageId', 'replyToText', 'editedAt', 'starredBy',
+                'reactions', 'restoredFromBackup', 'restoredBy', 'restoredAt'
+              ])
+              && request.resource.data.restoredAt is int
+              && request.resource.data.timestamp <= request.resource.data.restoredAt
+              && request.resource.data.restoredAt <= request.time.toMillis()
+            )
+            ||
             // A member may update their own delivery/read/hide/star marker.
             (
               request.resource.data.diff(resource.data).affectedKeys().hasOnly([
