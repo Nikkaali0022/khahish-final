@@ -1,0 +1,199 @@
+package com.khahish.app
+
+import android.widget.Toast
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.GroupAdd
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import java.util.Locale
+
+@Composable
+fun KhahishGroupChatScreen(
+    currentUid: String,
+    onBack: () -> Unit,
+    onCreated: (Chat) -> Unit
+) {
+    val db = remember { FirebaseFirestore.getInstance() }
+    val context = LocalContext.current
+    val currentName = FirebaseAuth.getInstance().currentUser?.displayName ?: "Khahish User"
+    var groupName by remember { mutableStateOf("") }
+    var search by remember { mutableStateOf("") }
+    var users by remember { mutableStateOf(emptyList<AppUser>()) }
+    var selected by remember { mutableStateOf(emptyMap<String, AppUser>()) }
+    var loading by remember { mutableStateOf(false) }
+    var creating by remember { mutableStateOf(false) }
+
+    LaunchedEffect(search) {
+        val term = search.trim().lowercase(Locale.ROOT)
+        if (term.length < 2) {
+            users = emptyList()
+        } else {
+            loading = true
+            db.collection("publicProfiles")
+                .orderBy("nameLowercase")
+                .startAt(term)
+                .endAt(term + "\uf8ff")
+                .limit(30)
+                .get()
+                .addOnSuccessListener { snapshot ->
+                    users = snapshot.documents.mapNotNull { doc ->
+                        doc.toObject(AppUser::class.java)?.takeIf { it.uid.isNotBlank() && it.uid != currentUid }
+                    }
+                    loading = false
+                }
+                .addOnFailureListener {
+                    loading = false
+                    Toast.makeText(context, "User search failed: ${it.message}", Toast.LENGTH_LONG).show()
+                }
+        }
+    }
+
+    Column(Modifier.fillMaxSize().background(Pale)) {
+        Row(
+            Modifier.fillMaxWidth().background(Color.White).statusBarsPadding().padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") }
+            Text("New group", modifier = Modifier.weight(1f), color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            if (selected.isNotEmpty()) Text("${selected.size} selected", color = Green, modifier = Modifier.padding(end = 10.dp))
+        }
+        OutlinedTextField(
+            value = groupName,
+            onValueChange = { groupName = it },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            label = { Text("Group name") },
+            placeholder = { Text("e.g. Friends") },
+            singleLine = true,
+            shape = RoundedCornerShape(14.dp)
+        )
+        OutlinedTextField(
+            value = search,
+            onValueChange = { search = it },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+            label = { Text("Add participants") },
+            placeholder = { Text("Search by name") },
+            leadingIcon = { Icon(Icons.Default.Search, null) },
+            singleLine = true,
+            shape = RoundedCornerShape(14.dp)
+        )
+        if (selected.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                selected.values.take(5).forEach { user ->
+                    AssistChip(onClick = { selected = selected - user.uid }, label = { Text(user.name.take(12)) })
+                }
+                if (selected.size > 5) Text("+${selected.size - 5}", color = Muted, modifier = Modifier.align(Alignment.CenterVertically))
+            }
+        }
+        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Green)
+        if (search.trim().length < 2) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text("Search for people to add to your group", color = Muted)
+            }
+        } else if (!loading && users.isEmpty()) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text("No users found", color = Muted)
+            }
+        } else {
+            LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+                items(users, key = { it.uid }) { user ->
+                    val isSelected = selected.containsKey(user.uid)
+                    Row(
+                        Modifier.fillMaxWidth().clickable {
+                            selected = if (isSelected) selected - user.uid else selected + (user.uid to user)
+                        }.padding(horizontal = 18.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(Modifier.size(44.dp).clip(CircleShape).background(Color(0xFFDCEFE9)), contentAlignment = Alignment.Center) {
+                            Text(user.name.firstOrNull()?.uppercase() ?: "K", color = Green, fontWeight = FontWeight.Bold)
+                        }
+                        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                            Text(user.name.ifBlank { "Khahish User" }, color = Ink, fontWeight = FontWeight.SemiBold)
+                            if (user.username.isNotBlank()) Text("@${user.username}", color = Muted, fontSize = 12.sp)
+                        }
+                        Checkbox(checked = isSelected, onCheckedChange = { checked ->
+                            selected = if (checked) selected + (user.uid to user) else selected - user.uid
+                        }, colors = CheckboxDefaults.colors(checkedColor = Green))
+                    }
+                }
+            }
+        }
+        Button(
+            onClick = {
+                val cleanName = groupName.trim()
+                if (cleanName.isBlank()) {
+                    Toast.makeText(context, "Enter a group name first.", Toast.LENGTH_SHORT).show()
+                    return@Button
+                }
+                if (selected.isEmpty()) {
+                    Toast.makeText(context, "Select at least one participant.", Toast.LENGTH_SHORT).show()
+                    return@Button
+                }
+                if (creating) return@Button
+                creating = true
+                val members = (selected.keys + currentUid).distinct()
+                val names = selected.mapValues { it.value.name }.toMutableMap().apply { put(currentUid, currentName) }
+                val now = System.currentTimeMillis()
+                val chatRef = db.collection("chats").document()
+                val data = mapOf(
+                    "members" to members,
+                    "memberNames" to names,
+                    "isGroup" to true,
+                    "groupName" to cleanName,
+                    "groupAdmins" to listOf(currentUid),
+                    "createdBy" to currentUid,
+                    "createdAt" to now,
+                    "lastMessage" to "Group created",
+                    "lastMessageAt" to now,
+                    "updatedAt" to now,
+                    "disappearingDurationMs" to 0L
+                )
+                chatRef.set(data)
+                    .addOnSuccessListener {
+                        creating = false
+                        onCreated(Chat(
+                            id = chatRef.id,
+                            peerUid = selected.keys.first(),
+                            name = cleanName,
+                            message = "Group created",
+                            time = "",
+                            initials = cleanName.firstOrNull()?.uppercase() ?: "G",
+                            isGroup = true,
+                            memberUids = members
+                        ))
+                    }
+                    .addOnFailureListener {
+                        creating = false
+                        Toast.makeText(context, "Group creation failed: ${it.message}", Toast.LENGTH_LONG).show()
+                    }
+            },
+            enabled = !creating,
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Green)
+        ) {
+            if (creating) CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+            else Icon(Icons.Default.GroupAdd, null)
+            Spacer(Modifier.width(8.dp))
+            Text(if (creating) "Creating group…" else "Create group")
+        }
+    }
+}
