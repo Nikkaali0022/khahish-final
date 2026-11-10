@@ -652,9 +652,23 @@ service cloud.firestore {
     // -----------------------------------------------------
 
     match /stories/{storyId} {
-      allow get, list: if canReadStory(resource.data)
+      // Direct document reads reject expired stories.
+      allow get: if canReadStory(resource.data)
         && resource.data.get('expiresAt', 0) is int
         && resource.data.expiresAt > request.time.toMillis();
+
+      // Firestore cannot use request.time as a query filter value. The app's
+      // list queries therefore include expiresAt > clientNow and the UI
+      // filters again; audience privacy is still checked per returned story.
+      allow list: if signedIn()
+        && (
+          resource.data.ownerUid == request.auth.uid
+          || resource.data.get('audience', 'everyone') == 'everyone'
+          || (
+            resource.data.get('allowedUids', []) is list
+            && request.auth.uid in resource.data.get('allowedUids', [])
+          )
+        );
 
       allow create: if signedIn()
         && request.resource.data.ownerUid == request.auth.uid
