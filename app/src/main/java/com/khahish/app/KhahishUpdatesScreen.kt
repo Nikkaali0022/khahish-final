@@ -112,35 +112,64 @@ fun KhahishUpdatesScreen(
     }
 
     DisposableEffect(currentUid) {
-        val listener: ListenerRegistration = db.collection("stories")
+        val publicDocs = mutableMapOf<String, com.google.firebase.firestore.DocumentSnapshot>()
+        val ownerDocs = mutableMapOf<String, com.google.firebase.firestore.DocumentSnapshot>()
+        val allowedDocs = mutableMapOf<String, com.google.firebase.firestore.DocumentSnapshot>()
+        fun refreshStories() {
+            val now = System.currentTimeMillis()
+            stories = (publicDocs.values + ownerDocs.values + allowedDocs.values)
+                .distinctBy { it.id }
+                .mapNotNull { doc ->
+                    val expires = doc.getLong("expiresAt") ?: 0L
+                    if (expires <= now) return@mapNotNull null
+                    val ownerUid = doc.getString("ownerUid").orEmpty()
+                    val audience = doc.getString("audience") ?: "everyone"
+                    KhahishStory(
+                        id = doc.id,
+                        ownerUid = ownerUid,
+                        ownerName = doc.getString("ownerName") ?: "Khahish User",
+                        text = doc.getString("text").orEmpty(),
+                        mediaUrl = doc.getString("mediaUrl").orEmpty(),
+                        mediaType = doc.getString("mediaType") ?: "text",
+                        createdAt = doc.getLong("createdAt") ?: 0L,
+                        expiresAt = expires,
+                        audience = audience
+                    )
+                }.sortedByDescending { it.createdAt }
+            loading = false
+        }
+        val publicListener = db.collection("stories").whereEqualTo("audience", "everyone")
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     loading = false
-                    Toast.makeText(context, "Unable to load updates: ${error.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, "Unable to load public updates: ${error.message}", Toast.LENGTH_LONG).show()
                 } else {
-                    val now = System.currentTimeMillis()
-                    stories = snapshot?.documents.orEmpty().mapNotNull { doc ->
-                        val expires = doc.getLong("expiresAt") ?: 0L
-                        if (expires <= now) return@mapNotNull null
-                        val ownerUid = doc.getString("ownerUid").orEmpty()
-                        val audience = doc.getString("audience") ?: "everyone"
-                        if (ownerUid != currentUid && audience == "only_me") return@mapNotNull null
-                        KhahishStory(
-                            id = doc.id,
-                            ownerUid = ownerUid,
-                            ownerName = doc.getString("ownerName") ?: "Khahish User",
-                            text = doc.getString("text").orEmpty(),
-                            mediaUrl = doc.getString("mediaUrl").orEmpty(),
-                            mediaType = doc.getString("mediaType") ?: "text",
-                            createdAt = doc.getLong("createdAt") ?: 0L,
-                            expiresAt = expires,
-                            audience = audience
-                        )
-                    }.sortedByDescending { it.createdAt }
-                    loading = false
+                    publicDocs.clear()
+                    snapshot?.documents?.forEach { publicDocs[it.id] = it }
+                    refreshStories()
                 }
             }
-        onDispose { listener.remove() }
+        val ownerListener = db.collection("stories").whereEqualTo("ownerUid", currentUid)
+            .addSnapshotListener { snapshot, error ->
+                if (error == null) {
+                    ownerDocs.clear()
+                    snapshot?.documents?.forEach { ownerDocs[it.id] = it }
+                    refreshStories()
+                }
+            }
+        val allowedListener = db.collection("stories").whereArrayContains("allowedUids", currentUid)
+            .addSnapshotListener { snapshot, error ->
+                if (error == null) {
+                    allowedDocs.clear()
+                    snapshot?.documents?.forEach { allowedDocs[it.id] = it }
+                    refreshStories()
+                }
+            }
+        onDispose {
+            publicListener.remove()
+            ownerListener.remove()
+            allowedListener.remove()
+        }
     }
 
     Column(
