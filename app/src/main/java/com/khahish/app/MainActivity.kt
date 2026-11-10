@@ -3039,7 +3039,11 @@ fun ConversationScreen(
             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 listOf("❤️", "😂", "😮", "😢", "👍", "🙏").forEach { emoji ->
                     TextButton(onClick = {
-                        chatRef.collection("messages").document(reactionTarget!!.id).update("reactions.$currentUserId", emoji)
+                        if (reactionTarget!!.reactions[currentUserId] == emoji) {
+                            chatRef.collection("messages").document(reactionTarget!!.id).update("reactions.$currentUserId", FieldValue.delete())
+                        } else {
+                            chatRef.collection("messages").document(reactionTarget!!.id).update("reactions.$currentUserId", emoji)
+                        }
                             .addOnSuccessListener { reactionTarget = null }
                             .addOnFailureListener { showToast(context, "Reaction failed: ${it.message}"); reactionTarget = null }
                     }) { Text(emoji, fontSize = 21.sp) }
