@@ -103,23 +103,41 @@ service cloud.firestore {
       allow get, create, update, delete: if isOwner(uid);
       allow list: if false;
 
-      // User-owned records include blocked, trustedDevices,
-      // loginHistory, privacySettings, appSettings and fcmTokens.
-      match /{subcollection}/{document=**} {
-        allow read, write: if isOwner(uid);
-      }
-
-      // A blocked user may check whether their own UID is blocked,
-      // but cannot read or change the blocker's other private data.
+      // Explicit subcollection rules avoid broad wildcard permissions
+      // accidentally overriding stricter login-history permissions.
       match /blocked/{blockedUid} {
         allow get: if isOwner(uid) || (signedIn() && request.auth.uid == blockedUid);
         allow list: if isOwner(uid);
         allow create, update, delete: if isOwner(uid);
       }
 
+      match /trustedDevices/{deviceId} {
+        allow read, create, update, delete: if isOwner(uid);
+      }
+
       match /loginHistory/{entryId} {
         allow get, list, create: if isOwner(uid);
         allow update, delete: if false;
+      }
+
+      match /privacySettings/{settingId} {
+        allow read, create, update, delete: if isOwner(uid);
+      }
+
+      match /appSettings/{settingId} {
+        allow read, create, update, delete: if isOwner(uid);
+      }
+
+      match /exportRequests/{exportId} {
+        allow read, create, delete: if isOwner(uid);
+        allow update: if isOwner(uid)
+          && request.resource.data.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'updatedAt']);
+      }
+
+      match /fcmTokens/{tokenId} {
+        allow read, create, update, delete: if isOwner(uid);
       }
     }
 
@@ -299,9 +317,11 @@ service cloud.firestore {
             && request.resource.data.members is list
             && request.resource.data.members.size() >= 2
             && request.resource.data.groupAdmins is list
-            && request.resource.data.groupAdmins.hasAll(
-              request.resource.data.members.size() == 0 ? [] : [request.auth.uid]
-            )
+            && request.auth.uid in request.resource.data.groupAdmins
+            && request.resource.data.members.hasAll(request.resource.data.groupAdmins)
+            && request.resource.data.memberNames is map
+            && request.resource.data.groupName is string
+            && request.resource.data.createdBy == resource.data.createdBy
             && request.resource.data.updatedAt is int
           )
           ||
@@ -312,8 +332,11 @@ service cloud.firestore {
             && !(request.auth.uid in request.resource.data.members)
             && resource.data.members.hasAll(request.resource.data.members)
             && request.resource.data.members.size() == resource.data.members.size() - 1
+            && !(request.auth.uid in resource.data.get('groupAdmins', []))
+            && request.resource.data.groupAdmins == resource.data.get('groupAdmins', [])
+            && request.resource.data.memberNames == resource.data.memberNames
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-              'members', 'memberNames', 'groupAdmins', 'updatedAt'
+              'members', 'updatedAt'
             ])
             && request.resource.data.updatedAt is int
           )
