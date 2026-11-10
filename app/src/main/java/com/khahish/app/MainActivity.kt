@@ -1520,6 +1520,13 @@ fun ConversationScreen(
     val chatRef = remember(chat.id) {
         db.collection("chats").document(chat.id)
     }
+    val displayedMessages = remember(messages, chatSearchQuery) {
+        val query = chatSearchQuery.trim()
+        if (query.isBlank()) messages else messages.filter { message ->
+            message.text.contains(query, ignoreCase = true) ||
+                message.replyToText.contains(query, ignoreCase = true)
+        }
+    }
 
     var text by remember { mutableStateOf("") }
     var messages by remember { mutableStateOf(listOf<MessageItem>()) }
@@ -1576,6 +1583,8 @@ fun ConversationScreen(
     var forwardSearch by remember { mutableStateOf("") }
     var loadingForwardUsers by remember { mutableStateOf(false) }
     var forwarding by remember { mutableStateOf(false) }
+    var chatSearchVisible by remember { mutableStateOf(false) }
+    var chatSearchQuery by remember { mutableStateOf("") }
 
     val imagePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
@@ -2116,12 +2125,39 @@ fun ConversationScreen(
                 IconButton(onClick = { showDisappearingOptions = true }) {
                     Icon(Icons.Default.Timer, "Disappearing messages", tint = if (disappearingDurationMs > 0L) Green else Muted)
                 }
+                IconButton(onClick = {
+                    chatSearchVisible = !chatSearchVisible
+                    chatSearchQuery = ""
+                }) {
+                    Icon(Icons.Default.Search, "Search chat history", tint = Green)
+                }
                 IconButton(onClick = { showStarredDialog = true }) {
                     Icon(Icons.Default.Star, "Starred messages", tint = Green)
                 }
                 if (!chat.isGroup) {
                     IconButton(onClick = { onStartCall(false) }) { Icon(Icons.Default.Call, "Voice call", tint = Green) }
                     IconButton(onClick = { onStartCall(true) }) { Icon(Icons.Default.Videocam, "Video call", tint = Green) }
+                }
+            }
+        }
+
+        if (chatSearchVisible) {
+            Row(
+                Modifier.fillMaxWidth().background(Color.White).padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = chatSearchQuery,
+                    onValueChange = { chatSearchQuery = it },
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("Search all messages in this chat") },
+                    leadingIcon = { Icon(Icons.Default.Search, null) },
+                    singleLine = true
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(displayedMessages.size.toString(), color = Muted, fontSize = 12.sp)
+                IconButton(onClick = { chatSearchVisible = false; chatSearchQuery = "" }) {
+                    Icon(Icons.Default.Close, "Close search")
                 }
             }
         }
@@ -2174,7 +2210,10 @@ fun ConversationScreen(
                     .padding(horizontal = 12.dp),
                 contentPadding = PaddingValues(vertical = 12.dp)
             ) {
-                items(messages, key = { it.id }) { msg ->
+                if (chatSearchVisible && displayedMessages.isEmpty()) {
+                    item { Text("No matching messages", color = Muted, modifier = Modifier.fillMaxWidth().padding(24.dp), textAlign = TextAlign.Center) }
+                }
+                items(displayedMessages, key = { it.id }) { msg ->
                 val isMe = msg.senderId == currentUserId
 
                 val isSelected = msg.id in selectedMessageIds
