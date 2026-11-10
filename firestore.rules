@@ -1,0 +1,162 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isChatMember(chatId) {
+      return signedIn()
+        && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.members;
+    }
+
+    function canReadStory(storyData) {
+      return signedIn()
+        && (
+          storyData.ownerUid == request.auth.uid
+          || storyData.audience == 'everyone'
+          || request.auth.uid in storyData.allowedUids
+        );
+    }
+
+    match /users/{userId} {
+      allow read, create, update, delete: if signedIn() && request.auth.uid == userId;
+
+      match /{subcollection}/{document=**} {
+        allow read, write: if signedIn() && request.auth.uid == userId;
+      }
+    }
+
+    match /publicProfiles/{userId} {
+      allow read: if signedIn();
+      allow create, update, delete: if signedIn() && request.auth.uid == userId;
+    }
+
+    match /chats/{chatId} {
+      allow read: if signedIn() && request.auth.uid in resource.data.members;
+      allow create: if signedIn() && request.auth.uid in request.resource.data.members;
+      allow update: if signedIn()
+        && request.auth.uid in resource.data.members
+        && (
+          request.resource.data.members == resource.data.members
+          || request.auth.uid in resource.data.groupAdmins
+          || !(request.auth.uid in request.resource.data.members)
+        );
+      allow delete: if signedIn()
+        && request.auth.uid == resource.data.createdBy;
+
+      match /messages/{messageId} {
+        allow read: if isChatMember(chatId);
+        allow create: if isChatMember(chatId)
+          && request.resource.data.senderId == request.auth.uid;
+        allow update: if isChatMember(chatId)
+          && (
+            (
+              resource.data.senderId == request.auth.uid
+              && request.resource.data.senderId == request.auth.uid
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'text', 'editedAt', 'reactions', 'starredBy', 'hiddenFor',
+                'deliveredTo', 'readBy'
+              ])
+            )
+            || request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'reactions', 'starredBy', 'hiddenFor', 'deliveredTo', 'readBy'
+            ])
+          );
+        allow delete: if isChatMember(chatId)
+          && resource.data.senderId == request.auth.uid;
+      }
+
+      match /typing/{typingUid} {
+        allow read: if isChatMember(chatId);
+        allow create, update, delete: if isChatMember(chatId)
+          && request.auth.uid == typingUid;
+      }
+    }
+
+    match /calls/{callId} {
+      allow create: if signedIn() && request.resource.data.callerUid == request.auth.uid;
+      allow read, update: if signedIn()
+        && (
+          resource.data.callerUid == request.auth.uid
+          || resource.data.calleeUid == request.auth.uid
+        );
+      allow delete: if signedIn()
+        && resource.data.callerUid == request.auth.uid;
+    }
+
+    match /stories/{storyId} {
+      allow read: if canReadStory(resource.data);
+      allow create: if signedIn()
+        && request.resource.data.ownerUid == request.auth.uid;
+      allow update, delete: if signedIn()
+        && resource.data.ownerUid == request.auth.uid;
+
+      match /views/{viewerUid} {
+        allow read: if signedIn()
+          && (
+            get(/databases/$(database)/documents/stories/$(storyId)).data.ownerUid == request.auth.uid
+            || viewerUid == request.auth.uid
+          );
+        allow create, update: if signedIn()
+          && viewerUid == request.auth.uid
+          && canReadStory(get(/databases/$(database)/documents/stories/$(storyId)).data);
+        allow delete: if signedIn()
+          && get(/databases/$(database)/documents/stories/$(storyId)).data.ownerUid == request.auth.uid;
+      }
+    }
+
+    match /communities/{communityId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.auth.uid in request.resource.data.members;
+      allow update: if signedIn()
+        && (
+          resource.data.ownerUid == request.auth.uid
+          || (
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'memberCount'])
+            && (
+              (
+                !(request.auth.uid in resource.data.members)
+                && request.auth.uid in request.resource.data.members
+              )
+              || (
+                request.auth.uid in resource.data.members
+                && !(request.auth.uid in request.resource.data.members)
+              )
+            )
+          )
+        );
+      allow delete: if signedIn()
+        && resource.data.ownerUid == request.auth.uid;
+
+      match /posts/{postId} {
+        function isCommunityMember() {
+          return signedIn()
+            && request.auth.uid in get(/databases/$(database)/documents/communities/$(communityId)).data.members;
+        }
+        allow read: if isCommunityMember();
+        allow create: if isCommunityMember()
+          && request.resource.data.authorUid == request.auth.uid;
+        allow update, delete: if isCommunityMember()
+          && (
+            resource.data.authorUid == request.auth.uid
+            || get(/databases/$(database)/documents/communities/$(communityId)).data.ownerUid == request.auth.uid
+          );
+      }
+    }
+
+    match /accountRequests/{userId} {
+      allow read, create, update: if signedIn() && request.auth.uid == userId;
+      allow delete: if signedIn() && request.auth.uid == userId;
+    }
+
+    match /reports/{reportId} {
+      allow create: if signedIn()
+        && request.resource.data.reporterUid == request.auth.uid;
+      allow read, update, delete: if signedIn()
+        && request.auth.token.admin == true;
+    }
+  }
+}
