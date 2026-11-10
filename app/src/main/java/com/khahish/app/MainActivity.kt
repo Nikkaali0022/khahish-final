@@ -946,7 +946,8 @@ fun NewChatScreen(
 fun ChatList(
     modifier: Modifier = Modifier,
     currentUid: String,
-    onOpen: (Chat) -> Unit
+    onOpen: (Chat) -> Unit,
+    onViewProfile: (String) -> Unit
 ) {
     val db = remember { FirebaseFirestore.getInstance() }
 
@@ -954,6 +955,9 @@ fun ChatList(
     var unreadCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     var loading by remember { mutableStateOf(true) }
     var search by remember { mutableStateOf("") }
+    var profilePhotos by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var expandedProfileMenu by remember { mutableStateOf("") }
+    var selectedPictureUrl by remember { mutableStateOf("") }
 
     DisposableEffect(currentUid) {
         val registration = db.collection("chats")
@@ -1022,12 +1026,28 @@ fun ChatList(
         onDispose { registrations.forEach { it.second.remove() } }
     }
 
+    DisposableEffect(chats.map { it.peerUid }.distinct().joinToString("|")) {
+        val registrations = chats.map { it.peerUid }.distinct().map { peerUid ->
+            db.collection("publicProfiles").document(peerUid).addSnapshotListener { snap, _ ->
+                val photo = snap?.getString("photoUrl").orEmpty()
+                profilePhotos = profilePhotos.toMutableMap().apply { if (photo.isBlank()) remove(peerUid) else put(peerUid, photo) }
+            }
+        }
+        onDispose { registrations.forEach { it.remove() } }
+    }
+
     val filtered = chats.filter {
         it.name.contains(search, true) || it.message.contains(search, true)
     }
 
+    if (selectedPictureUrl.isNotBlank()) Dialog(onDismissRequest = { selectedPictureUrl = "" }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(Modifier.fillMaxWidth().fillMaxHeight(.82f).background(Color.Black, RoundedCornerShape(18.dp)), contentAlignment = Alignment.Center) {
+            AsyncImage(model = selectedPictureUrl, contentDescription = "Profile picture", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+            IconButton(onClick = { selectedPictureUrl = "" }, modifier = Modifier.align(Alignment.TopEnd)) { Icon(Icons.Default.Close, "Close", tint = Color.White) }
+        }
+    }
     Column(modifier.fillMaxSize()) {
-        OutlinedTextField(
+        OutlinedTextField,
             value = search,
             onValueChange = { search = it },
             placeholder = { Text("Search conversations") },
@@ -1086,18 +1106,24 @@ fun ChatList(
                             .padding(horizontal = 18.dp, vertical = 13.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            Modifier
-                                .size(52.dp)
-                                .background(Color(0xFFDCEFE9), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                chat.initials,
-                                color = Green,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp
-                            )
+                        Box {
+                            val photo = profilePhotos[chat.peerUid].orEmpty()
+                            if (photo.isNotBlank()) {
+                                AsyncImage(model = photo, contentDescription = "Profile picture",
+                                    modifier = Modifier.size(52.dp).clip(CircleShape).clickable { expandedProfileMenu = chat.id },
+                                    contentScale = ContentScale.Crop)
+                            } else {
+                                Box(Modifier.size(52.dp).background(Color(0xFFDCEFE9), CircleShape)
+                                    .clickable { expandedProfileMenu = chat.id }, contentAlignment = Alignment.Center) {
+                                    Text(chat.initials, color = Green, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                }
+                            }
+                            DropdownMenu(expanded = expandedProfileMenu == chat.id, onDismissRequest = { expandedProfileMenu = "" }) {
+                                DropdownMenuItem(text = { Text("View profile picture") }, leadingIcon = { Icon(Icons.Default.AccountCircle, null) },
+                                    enabled = photo.isNotBlank(), onClick = { selectedPictureUrl = photo; expandedProfileMenu = "" })
+                                DropdownMenuItem(text = { Text("View profile") }, leadingIcon = { Icon(Icons.Default.Person, null) },
+                                    onClick = { expandedProfileMenu = ""; onViewProfile(chat.peerUid) })
+                            }
                         }
 
                         Spacer(Modifier.width(13.dp))
