@@ -20,6 +20,8 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -45,7 +47,8 @@ private data class KhahishStory(
     val mediaUrl: String,
     val mediaType: String,
     val createdAt: Long,
-    val expiresAt: Long
+    val expiresAt: Long,
+    val audience: String = "everyone"
 )
 
 @Composable
@@ -62,6 +65,10 @@ fun KhahishUpdatesScreen(
     var storyText by remember { mutableStateOf("") }
     var uploading by remember { mutableStateOf(false) }
     var videoPlayerUrl by remember { mutableStateOf("") }
+    var storyAudience by remember { mutableStateOf("everyone") }
+    var audienceMenu by remember { mutableStateOf(false) }
+    var viewerStoryId by remember { mutableStateOf("") }
+    var storyViewers by remember { mutableStateOf(emptyList<String>()) }
 
     fun publishStory(text: String, mediaUrl: String = "", mediaType: String = "text") {
         val now = System.currentTimeMillis()
@@ -72,7 +79,8 @@ fun KhahishUpdatesScreen(
             "mediaUrl" to mediaUrl,
             "mediaType" to mediaType,
             "createdAt" to now,
-            "expiresAt" to now + 24L * 60L * 60L * 1000L
+            "expiresAt" to now + 24L * 60L * 60L * 1000L,
+            "audience" to storyAudience
         )
         db.collection("stories").add(data)
             .addOnSuccessListener { Toast.makeText(context, "Story shared for 24 hours", Toast.LENGTH_SHORT).show() }
@@ -114,15 +122,19 @@ fun KhahishUpdatesScreen(
                     stories = snapshot?.documents.orEmpty().mapNotNull { doc ->
                         val expires = doc.getLong("expiresAt") ?: 0L
                         if (expires <= now) return@mapNotNull null
+                        val ownerUid = doc.getString("ownerUid").orEmpty()
+                        val audience = doc.getString("audience") ?: "everyone"
+                        if (ownerUid != currentUid && audience == "only_me") return@mapNotNull null
                         KhahishStory(
                             id = doc.id,
-                            ownerUid = doc.getString("ownerUid").orEmpty(),
+                            ownerUid = ownerUid,
                             ownerName = doc.getString("ownerName") ?: "Khahish User",
                             text = doc.getString("text").orEmpty(),
                             mediaUrl = doc.getString("mediaUrl").orEmpty(),
                             mediaType = doc.getString("mediaType") ?: "text",
                             createdAt = doc.getLong("createdAt") ?: 0L,
-                            expiresAt = expires
+                            expiresAt = expires,
+                            audience = audience
                         )
                     }.sortedByDescending { it.createdAt }
                     loading = false
@@ -146,12 +158,23 @@ fun KhahishUpdatesScreen(
             }
         }
         Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(onClick = { imagePicker.launch("image/*") }, enabled = !uploading) {
                 Icon(Icons.Default.Image, null); Spacer(Modifier.width(5.dp)); Text("Photo")
             }
             OutlinedButton(onClick = { videoPicker.launch("video/*") }, enabled = !uploading) {
                 Icon(Icons.Default.Videocam, null); Spacer(Modifier.width(5.dp)); Text("Video")
+            }
+            Box {
+                TextButton(onClick = { audienceMenu = true }) {
+                    Icon(Icons.Default.People, null, tint = Green)
+                    Spacer(Modifier.width(4.dp))
+                    Text(if (storyAudience == "everyone") "Everyone" else "Only me", color = Green)
+                }
+                DropdownMenu(expanded = audienceMenu, onDismissRequest = { audienceMenu = false }) {
+                    DropdownMenuItem(text = { Text("Everyone") }, onClick = { storyAudience = "everyone"; audienceMenu = false })
+                    DropdownMenuItem(text = { Text("Only me") }, onClick = { storyAudience = "only_me"; audienceMenu = false })
+                }
             }
         }
         if (uploading) {
@@ -186,11 +209,30 @@ fun KhahishUpdatesScreen(
                                     Text(story.ownerName.take(1).uppercase(Locale.getDefault()), color = Color.White, fontWeight = FontWeight.Bold)
                                 }
                                 Spacer(Modifier.width(10.dp))
-                                Column(Modifier.weight(1f)) {
+                                Column(Modifier.weight(1f).clickable {
+                                    if (story.ownerUid != currentUid) {
+                                        db.collection("stories").document(story.id).collection("views").document(currentUid)
+                                            .set(mapOf("uid" to currentUid, "name" to currentName, "viewedAt" to System.currentTimeMillis()))
+                                    }
+                                }) {
                                     Text(if (story.ownerUid == currentUid) "Your story" else story.ownerName, color = Ink, fontWeight = FontWeight.SemiBold)
-                                    Text("Expires in 24 hours", color = Muted, fontSize = 11.sp)
+                                    Text(
+                                        if (story.ownerUid == currentUid) "Audience: ${if (story.audience == "everyone") "Everyone" else "Only me"}" else "Tap name to mark viewed",
+                                        color = Muted, fontSize = 11.sp
+                                    )
                                 }
                                 if (story.ownerUid == currentUid) {
+                                    IconButton(onClick = {
+                                        db.collection("stories").document(story.id).collection("views").get()
+                                            .addOnSuccessListener { snapshot ->
+                                                storyViewers = snapshot.documents.map { doc ->
+                                                    doc.getString("name") ?: doc.getString("uid") ?: "Khahish user"
+                                                }
+                                                viewerStoryId = story.id
+                                            }
+                                            .addOnFailureListener { Toast.makeText(context, "Could not load viewers: ${it.message}", Toast.LENGTH_LONG).show() }
+                                    }) { Icon(Icons.Default.Visibility, "View story viewers", tint = Green) }
+
                                     IconButton(onClick = {
                                         db.collection("stories").document(story.id).delete()
                                             .addOnFailureListener { Toast.makeText(context, it.message, Toast.LENGTH_LONG).show() }
@@ -227,6 +269,20 @@ fun KhahishUpdatesScreen(
                 }
             }
         }
+    }
+
+    if (viewerStoryId.isNotBlank()) {
+        AlertDialog(
+            onDismissRequest = { viewerStoryId = "" },
+            title = { Text("Story viewers") },
+            text = {
+                if (storyViewers.isEmpty()) Text("No views recorded yet.", color = Muted)
+                else Column {
+                    storyViewers.forEach { viewer -> Text(viewer, color = Ink, modifier = Modifier.padding(vertical = 4.dp)) }
+                }
+            },
+            confirmButton = { TextButton(onClick = { viewerStoryId = "" }) { Text("Close") } }
+        )
     }
 
     if (videoPlayerUrl.isNotBlank()) {
