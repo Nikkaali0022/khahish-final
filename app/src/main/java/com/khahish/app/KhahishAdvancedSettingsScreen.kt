@@ -143,7 +143,8 @@ fun KhahishAdvancedSettingsScreen(
                                 "starredBy" to (message.optJSONArray("starredBy")?.let { array -> (0 until array.length()).map { array.optString(it) } } ?: emptyList<String>()),
                                 "restoredFromBackup" to true,
                                 "restoredBy" to uid,
-                                "restoredAt" to restoredAt
+                                "restoredAt" to restoredAt,
+                                "backupMemberUids" to members
                             )
                             val reactionsJson = message.optJSONObject("reactions")
                             if (reactionsJson != null) {
