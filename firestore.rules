@@ -497,8 +497,7 @@ service cloud.firestore {
             )
           );
 
-        // Messages may only be deleted by their original sender.
-        // Expiry is hidden client-side; cross-user client deletion is denied.
+        // Messages may be deleted by their sender, or by a chat member after expiry.
         allow delete: if isChatMember(chatId)
           && (
             resource.data.senderId == request.auth.uid
