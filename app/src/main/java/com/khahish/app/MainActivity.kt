@@ -633,7 +633,7 @@ fun KhahishApp() {
                     )
                 } else {
                     Scaffold(
-                        containerColor = Pale,
+                        containerColor = MaterialTheme.colorScheme.background,
                         floatingActionButtonPosition = if (oneHandedMode) FabPosition.Center else FabPosition.End,
                         topBar = {
                             Column(
@@ -698,7 +698,7 @@ fun KhahishApp() {
                             }
                         },
                         bottomBar = {
-                            NavigationBar(containerColor = Color.White) {
+                            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                                 listOf(
                                     "Chats" to Icons.Default.Chat,
                                     "Updates" to Icons.Default.DonutLarge,
@@ -897,8 +897,8 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = Green,
                 unfocusedBorderColor = Color(0xFFD8E5E0),
-                focusedContainerColor = Color.White,
-                unfocusedContainerColor = Color.White,
+                focusedContainerColor = MaterialTheme.colorScheme.surface,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                 cursorColor = Green
             )
             )
@@ -1298,7 +1298,7 @@ fun NewChatScreen(
                                         .format(java.util.Date(user.lastSeenAt))
                                 else -> "Tap to send a message request"
                             }
-                            Text(statusText, color = if (statusText == "Online") Green else Muted, fontSize = 12.sp)
+                            Text(statusText, color = if (statusText == "Online") Green else MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                             if (user.bio.isNotBlank()) {
                                 Text(user.bio, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, maxLines = 2)
                             }
@@ -1614,7 +1614,7 @@ fun ChatList(
                 if (incomingRequests.isNotEmpty()) {
                     item { Text("MESSAGE REQUESTS", modifier = Modifier.fillMaxWidth().padding(start = 18.dp, top = 10.dp, bottom = 4.dp), color = Green, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
                     items(incomingRequests, key = { "request-${it.id}" }) { request ->
-                        Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                        Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                             Column(Modifier.fillMaxWidth().padding(14.dp)) {
                                 Text(request.senderName, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
                                 Text("wants to start a conversation", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
@@ -2783,7 +2783,7 @@ fun ConversationScreen(
                                             delivered -> "✓✓"
                                             else -> "✓"
                                         },
-                                        color = if (read) Color(0xFF1686D9) else Muted,
+                                        color = if (read) Color(0xFF1686D9) else MaterialTheme.colorScheme.onSurfaceVariant,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold
                                     )
@@ -4265,7 +4265,7 @@ private fun SettingsGroup(
     Column(
         Modifier
             .fillMaxWidth()
-            .background(Color.White, RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp))
             .padding(14.dp)
     ) {
         Text(
