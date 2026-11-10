@@ -197,6 +197,15 @@ private fun saveUserToFirestore(
 }
 
 class MainActivity : ComponentActivity() {
+    var pendingNotificationIntent by mutableStateOf<Intent?>(null)
+        private set
+
+    fun consumePendingNotificationIntent(): Intent? {
+        val pending = pendingNotificationIntent
+        pendingNotificationIntent = null
+        return pending
+    }
+
     private var appInForeground = false
     private var presenceUid: String? = null
     private val presenceAuthListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
@@ -211,6 +220,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
+        pendingNotificationIntent = intent.takeIf {
+            it.hasExtra("khahish_chat_id") || it.hasExtra("khahish_call_id")
+        }
 
         // Ask Android 13+ users for permission to show message notifications.
         if (Build.VERSION.SDK_INT >= 33 &&
@@ -234,6 +246,14 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             KhahishApp()
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        pendingNotificationIntent = intent.takeIf {
+            it.hasExtra("khahish_chat_id") || it.hasExtra("khahish_call_id")
         }
     }
 
@@ -315,6 +335,74 @@ fun KhahishApp() {
         }
         auth.addAuthStateListener(listener)
         onDispose { auth.removeAuthStateListener(listener) }
+    }
+
+    val hostActivity = appContext as? MainActivity
+    val pendingNotificationIntent = hostActivity?.pendingNotificationIntent
+
+    LaunchedEffect(currentUser?.uid, pendingNotificationIntent) {
+        val uid = currentUser?.uid ?: return@LaunchedEffect
+        val notificationIntent = hostActivity?.consumePendingNotificationIntent()
+            ?: return@LaunchedEffect
+        val chatId = notificationIntent.getStringExtra("khahish_chat_id").orEmpty()
+        if (chatId.isBlank()) return@LaunchedEffect
+
+        FirebaseFirestore.getInstance().collection("chats").document(chatId).get()
+            .addOnSuccessListener { snapshot ->
+                val members = (snapshot.get("members") as? List<*>)
+                    ?.filterIsInstance<String>()
+                    .orEmpty()
+                if (!snapshot.exists() || uid !in members) {
+                    Toast.makeText(appContext, "This chat is not available.", Toast.LENGTH_LONG).show()
+                    return@addOnSuccessListener
+                }
+
+                val isGroup = snapshot.getBoolean("isGroup") == true
+                val peerUid = members.firstOrNull { it != uid }.orEmpty()
+                val memberNames = snapshot.get("memberNames") as? Map<*, *>
+                val storedPeerName = memberNames?.get(peerUid) as? String
+                val lastMessage = snapshot.getString("lastMessage").orEmpty()
+
+                fun openChat(name: String) {
+                    val cleanName = name.ifBlank { if (isGroup) "Group chat" else "Khahish User" }
+                    selectedChat = Chat(
+                        id = chatId,
+                        peerUid = if (isGroup) "" else peerUid,
+                        name = cleanName,
+                        message = lastMessage,
+                        time = "",
+                        initials = cleanName.take(1).uppercase(Locale.ROOT),
+                        isGroup = isGroup,
+                        memberUids = members
+                    )
+                    tab = "Chats"
+                    showNewChat = false
+                    showNewGroup = false
+                    profileTargetUid = ""
+                }
+
+                if (isGroup) {
+                    openChat(snapshot.getString("groupName").orEmpty())
+                } else if (peerUid.isBlank()) {
+                    Toast.makeText(appContext, "This chat has no valid other participant.", Toast.LENGTH_LONG).show()
+                } else {
+                    FirebaseFirestore.getInstance().collection("publicProfiles").document(peerUid).get()
+                        .addOnSuccessListener { profile ->
+                            openChat(
+                                storedPeerName
+                                    ?: profile.getString("name")
+                                    ?: profile.getString("displayName")
+                                    ?: "Khahish User"
+                            )
+                        }
+                        .addOnFailureListener {
+                            openChat(storedPeerName ?: "Khahish User")
+                        }
+                }
+            }
+            .addOnFailureListener { error ->
+                Toast.makeText(appContext, "Could not open chat: " + (error.message ?: "Unknown error"), Toast.LENGTH_LONG).show()
+            }
     }
 
     DisposableEffect(currentUser?.uid) {
