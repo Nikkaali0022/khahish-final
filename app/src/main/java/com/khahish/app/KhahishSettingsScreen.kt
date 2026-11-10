@@ -40,7 +40,9 @@ fun KhahishSettingsScreen(
     onLogout: () -> Unit,
     onAnimationsChanged: (Boolean) -> Unit,
     onSlideTransitionsChanged: (Boolean) -> Unit,
-    onOneHandedChanged: (Boolean) -> Unit
+    onOneHandedChanged: (Boolean) -> Unit,
+    themeMode: String,
+    onThemeModeChanged: (String) -> Unit
 ) {
     val context = LocalContext.current
     val auth = remember { FirebaseAuth.getInstance() }
@@ -234,6 +236,27 @@ fun KhahishSettingsScreen(
 
         Spacer(Modifier.height(14.dp))
         KhahishSettingsGroup("CHAT & APPEARANCE") {
+            var themeMenuExpanded by remember { mutableStateOf(false) }
+            KhahishSettingsItem(
+                Icons.Default.DarkMode,
+                "App theme",
+                when (themeMode) {
+                    "light" -> "Light"
+                    "dark" -> "Dark"
+                    else -> "System default"
+                }
+            ) { themeMenuExpanded = true }
+            DropdownMenu(expanded = themeMenuExpanded, onDismissRequest = { themeMenuExpanded = false }) {
+                DropdownMenuItem(text = { Text("System default") }, onClick = {
+                    onThemeModeChanged("system"); themeMenuExpanded = false
+                })
+                DropdownMenuItem(text = { Text("Light") }, onClick = {
+                    onThemeModeChanged("light"); themeMenuExpanded = false
+                })
+                DropdownMenuItem(text = { Text("Dark") }, onClick = {
+                    onThemeModeChanged("dark"); themeMenuExpanded = false
+                })
+            }
             KhahishSettingsItem(Icons.Default.Tune, "Animations and transitions", "Smooth movement and slide effects") {
                 showAppearance = !showAppearance
             }
