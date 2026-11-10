@@ -364,13 +364,33 @@ service cloud.firestore {
           && privateChatIsUnblocked(
             get(/databases/$(database)/documents/chats/$(chatId)).data.members
           )
-          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.senderId is string
           && request.resource.data.text is string
           && request.resource.data.imageUrl is string
           && request.resource.data.mediaType is string
           && request.resource.data.timestamp is int
           && request.resource.data.deliveredTo is list
           && request.resource.data.readBy is list
+          && (
+            // Normal messages must be authored by the signed-in user.
+            (
+              request.resource.data.senderId == request.auth.uid
+              && request.resource.data.deliveredTo == []
+              && request.resource.data.readBy == [request.auth.uid]
+            )
+            ||
+            // Backup imports preserve historical sender labels but are
+            // explicitly marked as unverified imported history.
+            (
+              request.resource.data.get('restoredFromBackup', false) == true
+              && request.resource.data.get('restoredBy', '') == request.auth.uid
+              && request.resource.data.senderId in
+                get(/databases/$(database)/documents/chats/$(chatId)).data.members
+              && request.resource.data.get('restoredAt', 0) is int
+              && request.resource.data.restoredAt <= request.time.toMillis()
+              && request.resource.data.timestamp <= request.resource.data.restoredAt
+            )
+          )
           && (
             !('expiresAt' in request.resource.data)
             || request.resource.data.expiresAt is int
