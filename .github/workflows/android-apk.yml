@@ -6,6 +6,14 @@ on:
     branches:
       - main
       - feature/agora-calling
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "app/**"
+      - "gradle/**"
+      - "*.gradle.kts"
+      - ".github/workflows/android-apk.yml"
 
 permissions:
   contents: read
