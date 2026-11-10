@@ -2799,21 +2799,14 @@ private fun sendChatMessage(
             val db = FirebaseFirestore.getInstance()
             db.collection("users").document(senderId).collection("blocked").document(otherUid).get()
                 .addOnSuccessListener { myBlock ->
-                    db.collection("users").document(otherUid).collection("blocked").document(senderId).get()
-                        .addOnSuccessListener { theirBlock ->
-                            if (myBlock.exists() || theirBlock.exists()) {
-                                onComplete()
-                                showToast(context, "Message not sent. One of the accounts has blocked this conversation.")
-                            } else sendNow()
-                        }
-                        .addOnFailureListener {
-                            onComplete()
-                            showToast(context, "Could not verify chat permissions. Please try again.")
-                        }
+                    if (myBlock.exists()) {
+                        onComplete()
+                        showToast(context, "Message not sent. You have blocked this account.")
+                    } else sendNow()
                 }
                 .addOnFailureListener {
                     onComplete()
-                    showToast(context, "Could not verify chat permissions. Please try again.")
+                    showToast(context, "Could not verify your blocked list. Please try again.")
                 }
         } else {
             sendNow()
