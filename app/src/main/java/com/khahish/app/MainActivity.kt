@@ -187,7 +187,11 @@ private fun saveUserToFirestore(
         "name" to cleanName,
         "nameLowercase" to cleanName.lowercase(Locale.ROOT),
         "photoUrl" to "",
-        "updatedAt" to now
+        "updatedAt" to now,
+        "email" to FieldValue.delete(),
+        "contact" to FieldValue.delete(),
+        "phone" to FieldValue.delete(),
+        "phoneNumber" to FieldValue.delete()
     )
 
     db.collection("users").document(uid)
@@ -289,7 +293,12 @@ class MainActivity : ComponentActivity() {
         val publicUpdates = hashMapOf<String, Any>(
             "isOnline" to (foreground && showOnline),
             "onlineStatusVisible" to showOnline,
-            "lastSeenVisible" to showLastSeen
+            "lastSeenVisible" to showLastSeen,
+            // Remove any legacy private fields from public profile documents.
+            "email" to FieldValue.delete(),
+            "contact" to FieldValue.delete(),
+            "phone" to FieldValue.delete(),
+            "phoneNumber" to FieldValue.delete()
         )
         if (!foreground && showLastSeen) publicUpdates["lastSeenAt"] = now
         else if (!showLastSeen) publicUpdates["lastSeenAt"] = FieldValue.delete()
@@ -924,7 +933,17 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                                 )
                                 transaction.set(usernameRef, mapOf("uid" to newUid, "username" to cleanUsername, "updatedAt" to now))
                                 transaction.set(db.collection("users").document(newUid), profileData, SetOptions.merge())
-                                transaction.set(db.collection("publicProfiles").document(newUid), profileData, SetOptions.merge())
+                                val publicProfileData = mapOf(
+                                    "uid" to newUid,
+                                    "name" to name.trim(),
+                                    "nameLowercase" to name.trim().lowercase(Locale.ROOT),
+                                    "username" to cleanUsername,
+                                    "bio" to "",
+                                    "photoUrl" to "",
+                                    "createdAt" to now,
+                                    "updatedAt" to now
+                                )
+                                transaction.set(db.collection("publicProfiles").document(newUid), publicProfileData, SetOptions.merge())
                                 null
                             }.addOnSuccessListener {
                                 saveUserToFirestore(db, newUid, name, email)
