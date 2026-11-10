@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -169,6 +170,7 @@ class MainActivity : ComponentActivity() {
     private val presenceAuthListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
         val newUid = firebaseAuth.currentUser?.uid
         if (presenceUid != null && presenceUid != newUid) updateKhahishPresence(presenceUid, false)
+        if (newUid != null && presenceUid != newUid) recordKhahishSession(newUid)
         presenceUid = newUid
         if (appInForeground) updateKhahishPresence(newUid, true)
     }
@@ -219,6 +221,20 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
+    private fun recordKhahishSession(uid: String) {
+        val deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: "android-device"
+        val deviceName = Build.MANUFACTURER + " " + Build.MODEL
+        val now = System.currentTimeMillis()
+        val userRef = FirebaseFirestore.getInstance().collection("users").document(uid)
+        userRef.collection("trustedDevices").document(deviceId).set(
+            mapOf("deviceName" to deviceName, "lastActiveAt" to now, "trusted" to true, "platform" to "Android"),
+            SetOptions.merge()
+        )
+        userRef.collection("loginHistory").add(
+            mapOf("deviceName" to deviceName, "deviceId" to deviceId, "time" to now, "event" to "session_started")
+        )
+    }
+
     private fun updateKhahishPresence(uid: String?, foreground: Boolean) {
         if (uid.isNullOrBlank()) return
         val prefs = getSharedPreferences("khahish_privacy_settings", Context.MODE_PRIVATE)
@@ -254,6 +270,12 @@ fun KhahishApp() {
     }
     var slideTransitionsEnabled by remember {
         mutableStateOf(uiPreferences.getBoolean("slide_transitions_enabled", true))
+    }
+    val advancedPreferences = remember {
+        appContext.getSharedPreferences("khahish_advanced_settings", Context.MODE_PRIVATE)
+    }
+    var oneHandedMode by remember {
+        mutableStateOf(advancedPreferences.getBoolean("one_handed", false))
     }
 
     var currentUser by remember { mutableStateOf(auth.currentUser) }
@@ -369,6 +391,7 @@ fun KhahishApp() {
                 } else {
                     Scaffold(
                         containerColor = Pale,
+                        floatingActionButtonPosition = if (oneHandedMode) FabPosition.Center else FabPosition.End,
                         topBar = {
                             Column(
                                 Modifier
@@ -502,7 +525,8 @@ fun KhahishApp() {
                                         tab = "Chats"
                                     },
                                     onAnimationsChanged = { animationsEnabled = it },
-                                    onSlideTransitionsChanged = { slideTransitionsEnabled = it }
+                                    onSlideTransitionsChanged = { slideTransitionsEnabled = it },
+                                    onOneHandedChanged = { oneHandedMode = it }
                                 )
                             }
                         }
