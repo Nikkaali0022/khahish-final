@@ -266,7 +266,7 @@ fun KhahishSettingsScreen(
 
         Spacer(Modifier.height(14.dp))
         KhahishSettingsGroup("ADVANCED FEATURES") {
-            KhahishSettingsItem(Icons.Default.Tune, "Advanced settings", "Accessibility, multiple accounts, trusted devices, data export and more") {
+            KhahishSettingsItem(Icons.Default.Tune, "Advanced settings", "Accessibility, account controls, trusted devices, privacy and data tools") {
                 showAdvanced = true
             }
         }
