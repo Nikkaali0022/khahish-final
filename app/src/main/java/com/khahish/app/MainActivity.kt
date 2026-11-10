@@ -1520,14 +1520,6 @@ fun ConversationScreen(
     val chatRef = remember(chat.id) {
         db.collection("chats").document(chat.id)
     }
-    val displayedMessages = remember(messages, chatSearchQuery) {
-        val query = chatSearchQuery.trim()
-        if (query.isBlank()) messages else messages.filter { message ->
-            message.text.contains(query, ignoreCase = true) ||
-                message.replyToText.contains(query, ignoreCase = true)
-        }
-    }
-
     var text by remember { mutableStateOf("") }
     var messages by remember { mutableStateOf(listOf<MessageItem>()) }
     var liveLocations by remember(chat.id) { mutableStateOf(emptyMap<String, LiveLocationPoint>()) }
@@ -1585,6 +1577,15 @@ fun ConversationScreen(
     var forwarding by remember { mutableStateOf(false) }
     var chatSearchVisible by remember { mutableStateOf(false) }
     var chatSearchQuery by remember { mutableStateOf("") }
+
+    val displayedMessages = remember(messages, chatSearchQuery) {
+        val query = chatSearchQuery.trim()
+        if (query.isBlank()) messages else messages.filter { message ->
+            message.text.contains(query, ignoreCase = true) ||
+                message.replyToText.contains(query, ignoreCase = true)
+        }
+    }
+
 
     val imagePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
