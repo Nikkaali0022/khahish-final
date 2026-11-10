@@ -562,7 +562,26 @@ fun KhahishApp() {
                         }
                     )
                 } else if (profileTargetUid.isNotBlank()) {
-                    KhahishUserProfileScreen(uid = profileTargetUid, onBack = { profileTargetUid = "" })
+                    KhahishUserProfileScreen(
+                        uid = profileTargetUid,
+                        onBack = { profileTargetUid = "" },
+                        onStartCall = { peerUid, peerName, isVideo ->
+                            KhahishCallRepository().createOutgoingCall(
+                                callerUid = user.uid,
+                                callerName = user.displayName ?: "Khahish User",
+                                calleeUid = peerUid,
+                                calleeName = peerName,
+                                isVideo = isVideo,
+                                onSuccess = { call ->
+                                    incomingCall = false
+                                    activeCall = call
+                                },
+                                onError = { message ->
+                                    Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
+                                }
+                            )
+                        }
+                    )
                 } else if (selectedChat != null) {
                     ConversationScreen(
                         chat = selectedChat!!,
@@ -1786,6 +1805,16 @@ fun ConversationScreen(
     var peerOnlineStatusVisible by remember { mutableStateOf(true) }
     var peerPhotoUrl by remember { mutableStateOf("") }
     var peerBio by remember { mutableStateOf("") }
+    var showMediaPreviews by remember(chat.id) { mutableStateOf(true) }
+
+    DisposableEffect(currentUserId, chat.id) {
+        val settingsRegistration = db.collection("users").document(currentUserId)
+            .collection("appSettings").document("chat_${chat.peerUid}")
+            .addSnapshotListener { snapshot, _ ->
+                showMediaPreviews = snapshot?.getBoolean("showMediaPreviews") != false
+            }
+        onDispose { settingsRegistration.remove() }
+    }
     var attachmentMenu by remember { mutableStateOf(false) }
     var isRecordingVoice by remember { mutableStateOf(false) }
     var voiceRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
@@ -2507,15 +2536,30 @@ fun ConversationScreen(
                             )
                         }
                         when (msg.mediaType) {
-                            "image" -> AsyncImage(
-                                model = msg.imageUrl,
-                                contentDescription = "Shared photo — tap to view full screen",
-                                modifier = Modifier
-                                    .sizeIn(maxWidth = 250.dp, maxHeight = 250.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable { photoToView = msg.imageUrl },
-                                contentScale = ContentScale.Crop
-                            )
+                            "image" -> {
+                                if (showMediaPreviews) {
+                                    AsyncImage(
+                                        model = msg.imageUrl,
+                                        contentDescription = "Shared photo — tap to view full screen",
+                                        modifier = Modifier
+                                            .sizeIn(maxWidth = 250.dp, maxHeight = 250.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .clickable { photoToView = msg.imageUrl },
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Row(
+                                        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                                            .clickable { photoToView = msg.imageUrl }.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.VisibilityOff, null, tint = Green)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Photo preview hidden • tap to view", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            }
 
                             "video" -> Row(
                                 Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
@@ -2524,7 +2568,11 @@ fun ConversationScreen(
                             ) {
                                 Icon(Icons.Default.PlayCircle, null, tint = Green, modifier = Modifier.size(30.dp))
                                 Spacer(Modifier.width(8.dp))
-                                Text("Play video", color = Ink, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    if (showMediaPreviews) "Play video" else "Video preview hidden • tap to play",
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    fontWeight = FontWeight.SemiBold
+                                )
                             }
 
                             "audio" -> AudioMessagePlayer(msg.imageUrl)
@@ -4132,8 +4180,18 @@ fun PlaceholderPage(
 
 
 @Composable
-private fun KhahishUserProfileScreen(uid: String, onBack: () -> Unit) {
+private fun KhahishUserProfileScreen(
+    uid: String,
+    onBack: () -> Unit,
+    onStartCall: (peerUid: String, peerName: String, isVideo: Boolean) -> Unit
+) {
     val db = remember { FirebaseFirestore.getInstance() }
+    val currentUid = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
+    val context = LocalContext.current
+    val settingsRef = remember(currentUid, uid) {
+        db.collection("users").document(currentUid).collection("appSettings").document("chat_${uid}")
+    }
+
     var name by remember(uid) { mutableStateOf("Loading profile…") }
     var photo by remember(uid) { mutableStateOf("") }
     var username by remember(uid) { mutableStateOf("") }
@@ -4144,8 +4202,73 @@ private fun KhahishUserProfileScreen(uid: String, onBack: () -> Unit) {
     var showBlockConfirm by remember { mutableStateOf(false) }
     var showReportDialog by remember { mutableStateOf(false) }
     var reportReason by remember { mutableStateOf("Spam or unwanted content") }
-    val currentUid = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
-    val context = LocalContext.current
+
+    var notificationsMuted by remember(uid) { mutableStateOf(false) }
+    var showMediaPreviews by remember(uid) { mutableStateOf(true) }
+    var showSearchDialog by remember { mutableStateOf(false) }
+    var showMediaDialog by remember { mutableStateOf(false) }
+    var showStarredDialog by remember { mutableStateOf(false) }
+    var showStorageDialog by remember { mutableStateOf(false) }
+    var searchText by remember { mutableStateOf("") }
+    var chatMessages by remember(uid) { mutableStateOf(emptyList<MessageItem>()) }
+    var loadingMessages by remember { mutableStateOf(false) }
+    var messageLoadError by remember { mutableStateOf("") }
+    var mediaStorageBytes by remember(uid) { mutableStateOf(0L) }
+
+    val chatId = privateChatId(currentUid, uid)
+    val mediaMessages = remember(chatMessages) {
+        chatMessages.filter { it.mediaType != "text" || it.imageUrl.isNotBlank() || it.text.contains("http", true) }
+    }
+    val starredMessages = remember(chatMessages, currentUid) {
+        chatMessages.filter { currentUid in it.starredBy }
+    }
+    val searchResults = remember(chatMessages, searchText) {
+        val query = searchText.trim()
+        if (query.isBlank()) emptyList()
+        else chatMessages.filter { it.text.contains(query, ignoreCase = true) }
+    }
+
+    fun loadChatMessages() {
+        if (currentUid.isBlank() || loadingMessages) return
+        loadingMessages = true
+        messageLoadError = ""
+        db.collection("chats").document(chatId).collection("messages")
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .limit(250)
+            .get()
+            .addOnSuccessListener { snapshot ->
+                chatMessages = snapshot.documents.map { document ->
+                    MessageItem(
+                        id = document.id,
+                        senderId = document.getString("senderId").orEmpty(),
+                        text = document.getString("text").orEmpty(),
+                        imageUrl = document.getString("imageUrl").orEmpty(),
+                        mediaType = document.getString("mediaType") ?: "text",
+                        timestamp = document.getLong("timestamp") ?: 0L,
+                        starredBy = document.get("starredBy") as? List<String> ?: emptyList()
+                    )
+                }
+                mediaStorageBytes = snapshot.documents.sumOf {
+                    it.getLong("fileSizeBytes") ?: it.getLong("sizeBytes") ?: 0L
+                }
+                loadingMessages = false
+            }
+            .addOnFailureListener {
+                loadingMessages = false
+                messageLoadError = it.message ?: "Unable to load chat details."
+            }
+    }
+
+    fun saveChatSetting(key: String, value: Boolean) {
+        if (currentUid.isBlank()) return
+        settingsRef.set(
+            mapOf(key to value, "updatedAt" to System.currentTimeMillis()),
+            SetOptions.merge()
+        ).addOnFailureListener {
+            Toast.makeText(context, "Setting could not be saved: ${it.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
     DisposableEffect(uid) {
         val listener = db.collection("publicProfiles").document(uid).addSnapshotListener { snap, _ ->
             if (snap != null && snap.exists()) {
@@ -4159,35 +4282,252 @@ private fun KhahishUserProfileScreen(uid: String, onBack: () -> Unit) {
         }
         onDispose { listener.remove() }
     }
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).statusBarsPadding().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") }
-            Text("Profile", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+
+    DisposableEffect(uid, currentUid) {
+        val registration = settingsRef.addSnapshotListener { snapshot, _ ->
+            notificationsMuted = snapshot?.getBoolean("notificationsMuted") == true
+            showMediaPreviews = snapshot?.getBoolean("showMediaPreviews") != false
         }
-        if (loading) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Green) }
-        else Column(Modifier.fillMaxWidth().padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            if (photo.isNotBlank()) AsyncImage(model = photo, contentDescription = "Profile picture", modifier = Modifier.size(116.dp).clip(CircleShape).clickable { showPicture = true }, contentScale = ContentScale.Crop)
-            else Box(Modifier.size(116.dp).background(Color(0xFFDCEFE9), CircleShape), contentAlignment = Alignment.Center) { Text(name.take(1).uppercase(Locale.getDefault()), color = Green, fontSize = 42.sp, fontWeight = FontWeight.Bold) }
-            Spacer(Modifier.height(16.dp))
-            Text(name, color = Ink, fontSize = 23.sp, fontWeight = FontWeight.Bold)
-            if (username.isNotBlank()) Text("@$username", color = Green)
-            Text(if (online) "Online" else "Khahish member", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-            if (bio.isNotBlank()) { Spacer(Modifier.height(18.dp)); Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) { Text(bio, Modifier.fillMaxWidth().padding(16.dp), color = Ink) } }
-            Spacer(Modifier.height(24.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(onClick = { showReportDialog = true }) {
-                    Icon(Icons.Default.Report, null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("Report")
+        onDispose { registration.remove() }
+    }
+
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Row(
+            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)
+                .statusBarsPadding().padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") }
+            Text("Contact Info", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+        }
+
+        if (loading) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = Green)
+            }
+        } else {
+            Column(
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 18.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                if (photo.isNotBlank()) {
+                    AsyncImage(
+                        model = photo,
+                        contentDescription = "Profile picture",
+                        modifier = Modifier.size(142.dp).clip(CircleShape).clickable { showPicture = true },
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Box(Modifier.size(142.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape), contentAlignment = Alignment.Center) {
+                        Text(name.take(1).uppercase(Locale.getDefault()), color = MaterialTheme.colorScheme.onPrimaryContainer, fontSize = 48.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
-                OutlinedButton(onClick = { showBlockConfirm = true }) {
-                    Icon(Icons.Default.Block, null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("Block")
+                Spacer(Modifier.height(16.dp))
+                Text(name, color = MaterialTheme.colorScheme.onBackground, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                if (username.isNotBlank()) Text("@$username", color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)
+                Text(if (online) "Online" else "Khahish member", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                if (bio.isNotBlank()) {
+                    Spacer(Modifier.height(14.dp))
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                        Text(bio, Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.onSurface)
+                    }
+                }
+
+                Spacer(Modifier.height(22.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Button(
+                        onClick = { onStartCall(uid, name, false) },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Green)
+                    ) {
+                        Icon(Icons.Default.Call, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Voice")
+                    }
+                    OutlinedButton(
+                        onClick = { onStartCall(uid, name, true) },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Videocam, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Video")
+                    }
+                }
+
+                Spacer(Modifier.height(18.dp))
+                Card(
+                    Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Column {
+                        ContactInfoActionRow(Icons.Default.Search, "Search in chat", "Find messages in the latest 250 records") {
+                            showSearchDialog = true
+                            loadChatMessages()
+                        }
+                        HorizontalDivider()
+                        ContactInfoActionRow(Icons.Default.PhotoLibrary, "Media, links & docs", "${mediaMessages.size} items in recent messages") {
+                            showMediaDialog = true
+                            loadChatMessages()
+                        }
+                        HorizontalDivider()
+                        ContactInfoActionRow(Icons.Default.Storage, "Manage storage", "Review shared media usage") {
+                            showStorageDialog = true
+                            loadChatMessages()
+                        }
+                        HorizontalDivider()
+                        ContactInfoActionRow(Icons.Default.Star, "Starred messages", "${starredMessages.size} starred in recent messages") {
+                            showStarredDialog = true
+                            loadChatMessages()
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+                Card(
+                    Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Mute notifications", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                                Text("Silence message alerts from this chat", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                            }
+                            Switch(checked = notificationsMuted, onCheckedChange = {
+                                notificationsMuted = it
+                                saveChatSetting("notificationsMuted", it)
+                            })
+                        }
+                        HorizontalDivider()
+                        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Media visibility", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                                Text("Show or hide photo previews in this chat", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                            }
+                            Switch(checked = showMediaPreviews, onCheckedChange = {
+                                showMediaPreviews = it
+                                saveChatSetting("showMediaPreviews", it)
+                            })
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(onClick = { showReportDialog = true }, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.Report, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Report")
+                    }
+                    OutlinedButton(onClick = { showBlockConfirm = true }, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.Block, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Block")
+                    }
                 }
             }
         }
     }
+
+    if (showSearchDialog) {
+        AlertDialog(
+            onDismissRequest = { showSearchDialog = false },
+            title = { Text("Search in chat") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = searchText,
+                        onValueChange = { searchText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("Search messages") }
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    if (loadingMessages) CircularProgressIndicator()
+                    else if (messageLoadError.isNotBlank()) Text(messageLoadError, color = MaterialTheme.colorScheme.error)
+                    else if (searchResults.isEmpty()) Text(if (searchText.isBlank()) "Enter a word to search recent messages." else "No matching messages.")
+                    else LazyColumn(Modifier.heightIn(max = 260.dp)) {
+                        items(searchResults.take(30), key = { it.id }) { message ->
+                            Text(message.text.ifBlank { message.mediaType }, Modifier.fillMaxWidth().padding(vertical = 7.dp), color = MaterialTheme.colorScheme.onSurface)
+                            HorizontalDivider()
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showSearchDialog = false }) { Text("Done") } }
+        )
+    }
+
+    if (showMediaDialog) {
+        AlertDialog(
+            onDismissRequest = { showMediaDialog = false },
+            title = { Text("Media, links & docs") },
+            text = {
+                when {
+                    loadingMessages -> CircularProgressIndicator()
+                    messageLoadError.isNotBlank() -> Text(messageLoadError, color = MaterialTheme.colorScheme.error)
+                    mediaMessages.isEmpty() -> Text("No media or links found in the latest 250 messages.")
+                    else -> LazyColumn(Modifier.heightIn(max = 320.dp)) {
+                        items(mediaMessages, key = { it.id }) { message ->
+                            Text(
+                                "${message.mediaType.replaceFirstChar { it.uppercase() }} • ${message.text.ifBlank { "Shared item" }}",
+                                Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 2
+                            )
+                            HorizontalDivider()
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showMediaDialog = false }) { Text("Done") } }
+        )
+    }
+
+    if (showStarredDialog) {
+        AlertDialog(
+            onDismissRequest = { showStarredDialog = false },
+            title = { Text("Starred messages") },
+            text = {
+                when {
+                    loadingMessages -> CircularProgressIndicator()
+                    messageLoadError.isNotBlank() -> Text(messageLoadError, color = MaterialTheme.colorScheme.error)
+                    starredMessages.isEmpty() -> Text("No starred messages in the latest 250 messages.")
+                    else -> LazyColumn(Modifier.heightIn(max = 320.dp)) {
+                        items(starredMessages, key = { it.id }) { message ->
+                            Text(message.text.ifBlank { message.mediaType }, Modifier.fillMaxWidth().padding(vertical = 8.dp), color = MaterialTheme.colorScheme.onSurface)
+                            HorizontalDivider()
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showStarredDialog = false }) { Text("Done") } }
+        )
+    }
+
+    if (showStorageDialog) {
+        AlertDialog(
+            onDismissRequest = { showStorageDialog = false },
+            title = { Text("Manage storage") },
+            text = {
+                when {
+                    loadingMessages -> CircularProgressIndicator()
+                    messageLoadError.isNotBlank() -> Text(messageLoadError, color = MaterialTheme.colorScheme.error)
+                    else -> Column {
+                        Text("Media and link items in recent messages: ${mediaMessages.size}")
+                        Text(
+                            if (mediaStorageBytes > 0L) "Recorded file size: ${android.text.format.Formatter.formatShortFileSize(context, mediaStorageBytes)}"
+                            else "File sizes are not recorded for these uploads."
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text("This page reviews usage only; it does not delete chat files.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showStorageDialog = false }) { Text("Done") } }
+        )
+    }
+
     if (showBlockConfirm) {
         AlertDialog(
             onDismissRequest = { showBlockConfirm = false },
@@ -4209,17 +4549,18 @@ private fun KhahishUserProfileScreen(uid: String, onBack: () -> Unit) {
             dismissButton = { TextButton(onClick = { showBlockConfirm = false }) { Text("Cancel") } }
         )
     }
+
     if (showReportDialog) {
         AlertDialog(
             onDismissRequest = { showReportDialog = false },
             title = { Text("Report account") },
             text = {
                 Column {
-                    Text("Why are you reporting this account?", color = Muted)
+                    Text("Why are you reporting this account?", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     listOf("Spam or unwanted content", "Harassment or bullying", "Fake or impersonation account", "Inappropriate content", "Other").forEach { reason ->
                         Row(Modifier.fillMaxWidth().clickable { reportReason = reason }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                             RadioButton(selected = reportReason == reason, onClick = { reportReason = reason })
-                            Text(reason, color = Ink, fontSize = 13.sp)
+                            Text(reason, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
                         }
                     }
                 }
@@ -4244,10 +4585,37 @@ private fun KhahishUserProfileScreen(uid: String, onBack: () -> Unit) {
             dismissButton = { TextButton(onClick = { showReportDialog = false }) { Text("Cancel") } }
         )
     }
-    if (showPicture && photo.isNotBlank()) Dialog(onDismissRequest = { showPicture = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+
+    if (showPicture && photo.isNotBlank()) Dialog(
+        onDismissRequest = { showPicture = false },
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Box(Modifier.fillMaxWidth().fillMaxHeight(.85f).background(Color.Black), contentAlignment = Alignment.Center) {
             AsyncImage(model = photo, contentDescription = "Profile picture", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
-            IconButton(onClick = { showPicture = false }, modifier = Modifier.align(Alignment.TopEnd)) { Icon(Icons.Default.Close, "Close", tint = Color.White) }
+            IconButton(onClick = { showPicture = false }, modifier = Modifier.align(Alignment.TopEnd)) {
+                Icon(Icons.Default.Close, "Close", tint = Color.White)
+            }
         }
+    }
+}
+
+@Composable
+private fun ContactInfoActionRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, null, tint = Green, modifier = Modifier.size(24.dp))
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+        }
+        Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
