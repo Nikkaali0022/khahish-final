@@ -394,8 +394,11 @@ service cloud.firestore {
                 'text', 'editedAt'
               ])
               && request.resource.data.text is string
+              && resource.data.mediaType == 'text'
               && request.resource.data.editedAt is int
               && request.resource.data.editedAt >= resource.data.timestamp
+              && request.resource.data.editedAt <= request.time.toMillis()
+              && resource.data.timestamp <= request.time.toMillis()
               && request.time.toMillis() - resource.data.timestamp <= 900000
             )
             ||
