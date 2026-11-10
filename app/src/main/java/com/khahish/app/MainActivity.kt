@@ -52,6 +52,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
@@ -2825,10 +2826,16 @@ fun ConversationScreen(
         Row(
             Modifier
                 .fillMaxWidth()
-                .background(Color.White)
-                .padding(horizontal = 5.dp, vertical = 7.dp),
+                .padding(horizontal = 10.dp, vertical = 8.dp)
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(30.dp))
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(30.dp))
+                .padding(horizontal = 5.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            IconButton(onClick = { text += "😊" }) {
+                Icon(Icons.Default.EmojiEmotions, "Insert emoji", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
             Box {
                 IconButton(onClick = { attachmentMenu = true }) {
                     Icon(Icons.Default.AttachFile, "Attachments", tint = Green)
@@ -2908,6 +2915,10 @@ fun ConversationScreen(
                 }
             }
 
+            IconButton(onClick = { imagePicker.launch("image/*") }) {
+                Icon(Icons.Default.PhotoLibrary, "Open gallery", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
             OutlinedTextField(
                 value = text,
                 onValueChange = {
@@ -2917,14 +2928,21 @@ fun ConversationScreen(
                 modifier = Modifier.weight(1f),
                 placeholder = { Text("Message...") },
                 shape = RoundedCornerShape(24.dp),
-                singleLine = true
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                    focusedBorderColor = Color.Transparent,
+                    unfocusedBorderColor = Color.Transparent
+                )
             )
 
             IconButton(
                 enabled = !isUploading && !isSending,
                 modifier = Modifier
-                    .padding(start = 5.dp)
-                    .size(48.dp)
+                    .padding(start = 4.dp)
+                    .size(54.dp)
+                    .shadow(8.dp, CircleShape)
                     .background(Green, CircleShape),
                 onClick = {
                     val message = text.trim()
