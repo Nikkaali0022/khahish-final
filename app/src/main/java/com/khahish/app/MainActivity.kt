@@ -1211,23 +1211,30 @@ fun ChatList(
                             .padding(horizontal = 18.dp, vertical = 13.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box {
-                            val photo = profilePhotos[chat.peerUid].orEmpty()
-                            if (photo.isNotBlank()) {
-                                AsyncImage(model = photo, contentDescription = "Profile picture",
-                                    modifier = Modifier.size(52.dp).clip(CircleShape).clickable { expandedProfileMenu = chat.id },
-                                    contentScale = ContentScale.Crop)
-                            } else {
-                                Box(Modifier.size(52.dp).background(Color(0xFFDCEFE9), CircleShape)
-                                    .clickable { expandedProfileMenu = chat.id }, contentAlignment = Alignment.Center) {
-                                    Text(chat.initials, color = Green, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        if (chat.isGroup) {
+                            Box(
+                                Modifier.size(52.dp).background(Color(0xFFDCEFE9), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) { Icon(Icons.Default.Groups, "Group chat", tint = Green, modifier = Modifier.size(28.dp)) }
+                        } else {
+                            Box {
+                                val photo = profilePhotos[chat.peerUid].orEmpty()
+                                if (photo.isNotBlank()) {
+                                    AsyncImage(model = photo, contentDescription = "Profile picture",
+                                        modifier = Modifier.size(52.dp).clip(CircleShape).clickable { expandedProfileMenu = chat.id },
+                                        contentScale = ContentScale.Crop)
+                                } else {
+                                    Box(Modifier.size(52.dp).background(Color(0xFFDCEFE9), CircleShape)
+                                        .clickable { expandedProfileMenu = chat.id }, contentAlignment = Alignment.Center) {
+                                        Text(chat.initials, color = Green, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                    }
                                 }
-                            }
-                            DropdownMenu(expanded = expandedProfileMenu == chat.id, onDismissRequest = { expandedProfileMenu = "" }) {
-                                DropdownMenuItem(text = { Text("View profile picture") }, leadingIcon = { Icon(Icons.Default.AccountCircle, null) },
-                                    enabled = photo.isNotBlank(), onClick = { selectedPictureUrl = photo; expandedProfileMenu = "" })
-                                DropdownMenuItem(text = { Text("View profile") }, leadingIcon = { Icon(Icons.Default.Person, null) },
-                                    onClick = { expandedProfileMenu = ""; onViewProfile(chat.peerUid) })
+                                DropdownMenu(expanded = expandedProfileMenu == chat.id, onDismissRequest = { expandedProfileMenu = "" }) {
+                                    DropdownMenuItem(text = { Text("View profile picture") }, leadingIcon = { Icon(Icons.Default.AccountCircle, null) },
+                                        enabled = photo.isNotBlank(), onClick = { selectedPictureUrl = photo; expandedProfileMenu = "" })
+                                    DropdownMenuItem(text = { Text("View profile") }, leadingIcon = { Icon(Icons.Default.Person, null) },
+                                        onClick = { expandedProfileMenu = ""; onViewProfile(chat.peerUid) })
+                                }
                             }
                         }
 
