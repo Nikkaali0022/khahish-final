@@ -352,7 +352,7 @@ fun KhahishApp() {
             ), SetOptions.merge()).addOnSuccessListener {
                 if (active) {
                     deviceRegistration = deviceRef.addSnapshotListener { snapshot, _ ->
-                        if (snapshot != null && !snapshot.exists()) {
+                        if (snapshot != null && (!snapshot.exists() || snapshot.getBoolean("trusted") == false)) {
                             auth.signOut()
                             currentUser = null
                             Toast.makeText(appContext, "This device was removed from trusted devices. Please sign in again.", Toast.LENGTH_LONG).show()
