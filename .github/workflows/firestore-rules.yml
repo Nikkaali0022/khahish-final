@@ -1,9 +1,5 @@
 name: Firestore Rules Tests
 
-concurrency:
-  group: khahish-firestore-${{ github.ref }}
-  cancel-in-progress: true
-
 on:
   pull_request:
     branches: [main]
