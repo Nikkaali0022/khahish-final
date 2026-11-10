@@ -151,30 +151,30 @@ fun KhahishCallScreen(
     val displayName = if (isIncoming) call.callerName else call.calleeName
 
     Column(
-        Modifier.fillMaxSize().background(Color(0xFF10231F)).padding(24.dp),
+        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text(if (call.isVideo) "Video call" else "Voice call", color = Color.White, fontSize = 16.sp)
+        Text(if (call.isVideo) "Video call" else "Voice call", color = MaterialTheme.colorScheme.onBackground, fontSize = 16.sp)
         Spacer(Modifier.height(30.dp))
         Box(
-            Modifier.size(148.dp).background(Color(0xFF1B594B), CircleShape),
+            Modifier.size(148.dp).background(MaterialTheme.colorScheme.primary, CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 text = displayName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
-                color = Color.White,
+                color = MaterialTheme.colorScheme.onPrimary,
                 fontSize = 58.sp
             )
         }
         Spacer(Modifier.height(22.dp))
         Text(
             displayName.ifBlank { "Khahish user" },
-            color = Color.White,
+            color = MaterialTheme.colorScheme.onBackground,
             fontSize = 27.sp
         )
         Spacer(Modifier.height(10.dp))
-        Text(statusText, color = Color(0xFFB7D8CE), fontSize = 14.sp)
+        Text(statusText, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
 
         if (call.isVideo && credentials != null) {
             Spacer(Modifier.height(24.dp))
