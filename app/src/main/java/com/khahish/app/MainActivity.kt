@@ -1898,189 +1898,119 @@ private fun AudioMessagePlayer(url: String) {
     var playing by remember(url) { mutableStateOf(false) }
     var loading by remember(url) { mutableStateOf(false) }
     var durationMs by remember(url) { mutableStateOf(0) }
-    var seekProgress by remember(url) { mutableStateOf(0f) }
-    var isSeeking by remember(url) { mutableStateOf(false) }
+    var progress by remember(url) { mutableStateOf(0f) }
+    var seeking by remember(url) { mutableStateOf(false) }
 
     DisposableEffect(url) {
-        onDispose {
-            try { player?.release() } catch (_: Exception) { }
-            player = null
-        }
+        onDispose { try { player?.release() } catch (_: Exception) { }; player = null }
     }
-
     LaunchedEffect(player, playing) {
         while (playing) {
-            val activePlayer = player
-            if (activePlayer != null && !isSeeking) {
-                val duration = durationMs.coerceAtLeast(1)
-                seekProgress = (activePlayer.currentPosition.toFloat() / duration).coerceIn(0f, 1f)
+            if (!seeking) {
+                val active = player
+                if (active != null) {
+                    durationMs = active.duration.coerceAtLeast(durationMs)
+                    progress = (active.currentPosition.toFloat() / durationMs.coerceAtLeast(1)).coerceIn(0f, 1f)
+                }
             }
             kotlinx.coroutines.delay(100)
         }
     }
-
-    fun timeLabel(milliseconds: Int): String {
-        val seconds = (milliseconds.coerceAtLeast(0) / 1000)
-        return String.format(Locale.US, "%02d:%02d", seconds / 60, seconds % 60)
+    fun timeText(ms: Int): String {
+        val seconds = ms.coerceAtLeast(0) / 1000
+        return String.format(Locale.US, "%d:%02d", seconds / 60, seconds % 60)
     }
 
-    val currentPosition = (durationMs * seekProgress).toInt()
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .background(
-                Brush.linearGradient(listOf(Color(0xFF071B26), Color(0xFF102B3A))),
-                RoundedCornerShape(18.dp)
-            )
-            .padding(horizontal = 12.dp, vertical = 10.dp)
+    Row(
+        Modifier.widthIn(max = 248.dp)
+            .background(Color(0xFF102B2A), RoundedCornerShape(14.dp))
+            .padding(horizontal = 9.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(48.dp)
-                    .background(
-                        Brush.linearGradient(
-                            listOf(Color(0xFF00E676), Color(0xFF00CFA8), Color(0xFF00B8D4))
-                        ),
-                        CircleShape
-                    )
-                    .clickable(enabled = !loading) {
-                        if (playing) {
-                            player?.pause()
-                            playing = false
-                        } else if (player != null) {
-                            if (durationMs > 0 && seekProgress >= 0.999f) {
-                                player?.seekTo(0)
-                                seekProgress = 0f
-                            }
-                            player?.start()
-                            playing = true
-                        } else {
-                            loading = true
-                            val created = MediaPlayer()
-                            try {
-                                created.setDataSource(url)
-                                created.setOnPreparedListener { prepared ->
-                                    loading = false
-                                    durationMs = prepared.duration.coerceAtLeast(0)
-                                    player = prepared
-                                    prepared.start()
-                                    playing = true
-                                }
-                                created.setOnCompletionListener { completed ->
-                                    playing = false
-                                    completed.seekTo(0)
-                                    seekProgress = 0f
-                                }
-                                created.setOnErrorListener { failed, _, _ ->
-                                    loading = false
-                                    playing = false
-                                    failed.release()
-                                    player = null
-                                    Toast.makeText(context, "Unable to play this voice message", Toast.LENGTH_SHORT).show()
-                                    true
-                                }
-                                created.prepareAsync()
-                            } catch (_: Exception) {
-                                loading = false
-                                created.release()
-                                Toast.makeText(context, "Unable to play this voice message", Toast.LENGTH_SHORT).show()
-                            }
+        Box(
+            Modifier.size(38.dp)
+                .background(Brush.linearGradient(listOf(Color(0xFF00E6A0), Color(0xFF00A98B))), CircleShape)
+                .clickable(enabled = !loading) {
+                    if (playing) {
+                        player?.pause()
+                        playing = false
+                    } else if (player != null) {
+                        if (durationMs > 0 && progress >= 0.999f) {
+                            player?.seekTo(0)
+                            progress = 0f
                         }
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                if (loading) {
-                    CircularProgressIndicator(
-                        Modifier.size(23.dp),
-                        color = Color.White,
-                        strokeWidth = 2.dp
-                    )
-                } else {
-                    Icon(
-                        if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (playing) "Pause voice message" else "Play voice message",
-                        tint = Color.White,
-                        modifier = Modifier.size(29.dp)
-                    )
-                }
-            }
-
-            Spacer(Modifier.width(12.dp))
-            Text(
-                "Voice Message",
-                modifier = Modifier.weight(1f),
-                color = Color.White,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 13.sp
-            )
-            Text(
-                "${timeLabel(currentPosition)} / ${timeLabel(durationMs)}",
-                color = Color.White,
-                fontSize = 12.sp
-            )
-        }
-
-        Spacer(Modifier.height(7.dp))
-
-        BoxWithConstraints(
-            Modifier.fillMaxWidth().height(54.dp),
-            contentAlignment = Alignment.CenterStart
+                        player?.start()
+                        playing = true
+                    } else {
+                        loading = true
+                        val created = MediaPlayer()
+                        try {
+                            created.setDataSource(url)
+                            created.setOnPreparedListener { ready ->
+                                loading = false
+                                durationMs = ready.duration.coerceAtLeast(0)
+                                player = ready
+                                ready.start()
+                                playing = true
+                            }
+                            created.setOnCompletionListener { done ->
+                                playing = false
+                                done.seekTo(0)
+                                progress = 0f
+                            }
+                            created.setOnErrorListener { failed, _, _ ->
+                                loading = false
+                                playing = false
+                                failed.release()
+                                player = null
+                                Toast.makeText(context, "Unable to play this voice message", Toast.LENGTH_SHORT).show()
+                                true
+                            }
+                            created.prepareAsync()
+                        } catch (_: Exception) {
+                            loading = false
+                            created.release()
+                            Toast.makeText(context, "Unable to play this voice message", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
+            contentAlignment = Alignment.Center
         ) {
-            val barCount = 40
-            Row(
-                Modifier.fillMaxWidth().height(48.dp),
-                horizontalArrangement = Arrangement.spacedBy(3.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                repeat(barCount) { index ->
-                    val wave = kotlin.math.abs(kotlin.math.sin(index * 0.73)).toFloat()
-                    val height = (12 + wave * 29).dp
-                    val passed = index.toFloat() / (barCount - 1) <= seekProgress
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .height(height)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(
-                                if (passed) {
-                                    Brush.verticalGradient(listOf(Color(0xFF00F5A0), Color(0xFF00B8D4)))
-                                } else {
-                                    Brush.verticalGradient(listOf(Color(0x6657C6D5), Color(0x443A7194)))
-                                }
-                            )
-                    )
-                }
-            }
-            Text(
-                "🦎",
-                modifier = Modifier
-                    .offset(x = (maxWidth - 28.dp) * seekProgress)
-                    .align(Alignment.CenterStart),
-                fontSize = 23.sp
-            )
+            if (loading) CircularProgressIndicator(Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
+            else Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, "Play or pause", tint = Color.White, modifier = Modifier.size(25.dp))
         }
-
-        Slider(
-            value = seekProgress,
-            onValueChange = {
-                isSeeking = true
-                seekProgress = it
-            },
-            onValueChangeFinished = {
-                if (durationMs > 0) {
-                    player?.seekTo((durationMs * seekProgress).toInt())
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            BoxWithConstraints(Modifier.fillMaxWidth().height(32.dp), contentAlignment = Alignment.CenterStart) {
+                val bars = 25
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    repeat(bars) { index ->
+                        val barHeight = 7f + kotlin.math.abs(kotlin.math.sin(index * 0.79)).toFloat() * 19f
+                        Box(
+                            Modifier.weight(1f).height(barHeight.dp).clip(RoundedCornerShape(3.dp))
+                                .background(if (index.toFloat() / (bars - 1) <= progress) Color(0xFF00E6A0) else Color(0xFF66827D))
+                        )
+                    }
                 }
-                isSeeking = false
-            },
-            enabled = durationMs > 0 && !loading,
-            modifier = Modifier.fillMaxWidth().height(28.dp),
-            colors = SliderDefaults.colors(
-                thumbColor = Color.White,
-                activeTrackColor = Color(0xFF00E6A0),
-                inactiveTrackColor = Color(0xFF40536A)
-            )
-        )
+                Text("🦎", Modifier.offset(x = (maxWidth - 19.dp) * progress).align(Alignment.CenterStart), fontSize = 17.sp)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Slider(
+                    value = progress,
+                    onValueChange = { seeking = true; progress = it },
+                    onValueChangeFinished = {
+                        if (durationMs > 0) player?.seekTo((durationMs * progress).toInt())
+                        seeking = false
+                    },
+                    enabled = durationMs > 0 && !loading,
+                    modifier = Modifier.weight(1f).height(17.dp),
+                    colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Color(0xFF00E6A0), inactiveTrackColor = Color(0xFF66827D))
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(timeText(durationMs), color = Color.White, fontSize = 10.sp)
+            }
+            Text(timeText((durationMs * progress).toInt()), color = Color(0xFFB8D9D0), fontSize = 9.sp)
+        }
     }
 }
 
