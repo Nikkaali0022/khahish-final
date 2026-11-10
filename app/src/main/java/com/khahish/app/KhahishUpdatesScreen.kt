@@ -1,7 +1,5 @@
 package com.khahish.app
 
-import android.content.Context
-import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -26,6 +24,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -58,6 +58,7 @@ fun KhahishUpdatesScreen(
     var showTextDialog by remember { mutableStateOf(false) }
     var storyText by remember { mutableStateOf("") }
     var uploading by remember { mutableStateOf(false) }
+    var videoPlayerUrl by remember { mutableStateOf("") }
 
     fun publishStory(text: String, mediaUrl: String = "", mediaType: String = "text") {
         val now = System.currentTimeMillis()
@@ -204,7 +205,7 @@ fun KhahishUpdatesScreen(
                                 } else {
                                     Row(
                                         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                                            .background(Pale).clickable { openStoryUrl(context, story.mediaUrl) }
+                                            .background(Pale).clickable { videoPlayerUrl = story.mediaUrl }
                                             .padding(16.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
@@ -221,6 +222,17 @@ fun KhahishUpdatesScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+
+    if (videoPlayerUrl.isNotBlank()) {
+        Dialog(onDismissRequest = { videoPlayerUrl = "" }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Column(Modifier.fillMaxWidth().background(Color.Black, RoundedCornerShape(16.dp)).padding(10.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    IconButton(onClick = { videoPlayerUrl = "" }) { Icon(Icons.Default.DeleteOutline, "Close video", tint = Color.White) }
+                }
+                KhahishVideoPlayer(url = videoPlayerUrl, modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f))
             }
         }
     }
@@ -254,10 +266,4 @@ fun KhahishUpdatesScreen(
     }
 }
 
-private fun openStoryUrl(context: Context, url: String) {
-    try {
-        context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url)))
-    } catch (_: Exception) {
-        Toast.makeText(context, "Unable to open video story", Toast.LENGTH_SHORT).show()
-    }
-}
+
