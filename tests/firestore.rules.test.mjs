@@ -15,6 +15,7 @@ import {
   updateDoc,
   writeBatch,
   arrayUnion,
+  deleteField,
   query,
   where
 } from "firebase/firestore";
@@ -76,6 +77,40 @@ test("private user records are owner-only and login history is append-only", asy
   }));
   await assertFails(updateDoc(doc(db("alice"), "users/alice/loginHistory/entry1"), {
     time: Date.now()
+  }));
+});
+
+test("public profiles never expose private contact fields", async () => {
+  const safeProfile = {
+    uid: "alice",
+    name: "Alice",
+    username: "alice_name",
+    photoUrl: ""
+  };
+  await assertSucceeds(setDoc(doc(db("alice"), "publicProfiles/alice"), safeProfile));
+  await assertSucceeds(getDoc(doc(db("bob"), "publicProfiles/alice")));
+
+  await assertFails(setDoc(doc(db("alice"), "publicProfiles/unsafe"), {
+    uid: "alice",
+    name: "Alice",
+    email: "alice@example.test"
+  }));
+
+  await seed("publicProfiles/legacy", {
+    uid: "legacy",
+    name: "Legacy User",
+    email: "legacy@example.test",
+    contact: "+10000000000"
+  });
+  await assertFails(getDoc(doc(db("bob"), "publicProfiles/legacy")));
+
+  await assertSucceeds(updateDoc(doc(db("legacy"), "publicProfiles/legacy"), {
+    email: deleteField(),
+    contact: deleteField()
+  }));
+  await assertSucceeds(getDoc(doc(db("bob"), "publicProfiles/legacy")));
+  await assertFails(updateDoc(doc(db("bob"), "publicProfiles/alice"), {
+    name: "Changed by another user"
   }));
 });
 
