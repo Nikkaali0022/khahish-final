@@ -26,6 +26,8 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -76,6 +78,8 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
 import java.util.Locale
+import kotlin.math.abs
+import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
 private const val CLOUDINARY_CLOUD_NAME = "koctiaes"
@@ -280,6 +284,7 @@ fun KhahishApp() {
 
     var currentUser by remember { mutableStateOf(auth.currentUser) }
     var tab by remember { mutableStateOf("Chats") }
+    val tabOrder = listOf("Chats", "Updates", "Calls", "Settings")
     var selectedChat by remember { mutableStateOf<Chat?>(null) }
     var profileTargetUid by remember { mutableStateOf("") }
     var showNewChat by remember { mutableStateOf(false) }
@@ -485,11 +490,28 @@ fun KhahishApp() {
                     ) { padding ->
                         AnimatedContent(
                             targetState = tab,
+                            modifier = Modifier.pointerInput(tab) {
+                                var dragDistance = 0f
+                                detectHorizontalDragGestures(
+                                    onHorizontalDrag = { _, amount -> dragDistance += amount },
+                                    onDragEnd = {
+                                        if (abs(dragDistance) > 80f) {
+                                            val currentIndex = tabOrder.indexOf(tab)
+                                            val nextIndex = if (dragDistance < 0f) currentIndex + 1 else currentIndex - 1
+                                            if (nextIndex in tabOrder.indices) tab = tabOrder[nextIndex]
+                                        }
+                                        dragDistance = 0f
+                                    },
+                                    onDragCancel = { dragDistance = 0f }
+                                )
+                            },
                             transitionSpec = {
                                 when {
-                                    animationsEnabled && slideTransitionsEnabled ->
-                                        (slideInHorizontally { it / 4 } + fadeIn()) togetherWith
-                                            (slideOutHorizontally { -it / 4 } + fadeOut())
+                                    animationsEnabled && slideTransitionsEnabled -> {
+                                        val movingForward = tabOrder.indexOf(targetState) > tabOrder.indexOf(initialState)
+                                        (slideInHorizontally { width -> if (movingForward) width / 3 else -width / 3 } + fadeIn()) togetherWith
+                                            (slideOutHorizontally { width -> if (movingForward) -width / 3 else width / 3 } + fadeOut())
+                                    }
                                     animationsEnabled -> fadeIn() togetherWith fadeOut()
                                     else -> EnterTransition.None togetherWith ExitTransition.None
                                 }
@@ -1254,6 +1276,14 @@ fun ConversationScreen(
 
     var text by remember { mutableStateOf("") }
     var messages by remember { mutableStateOf(listOf<MessageItem>()) }
+    val messageListState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val messageScrollScope = rememberCoroutineScope()
+    var initialMessagesPositioned by remember(chat.id) { mutableStateOf(false) }
+    val isAtLatestMessage by remember {
+        derivedStateOf {
+            messages.isEmpty() || messageListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index == messages.lastIndex
+        }
+    }
     var isUploading by remember { mutableStateOf(false) }
     var isSending by remember { mutableStateOf(false) }
     var peerTyping by remember { mutableStateOf(false) }
@@ -1475,6 +1505,13 @@ fun ConversationScreen(
         onDispose { profileRegistration.remove() }
     }
 
+    LaunchedEffect(messages.size, chat.id) {
+        if (!initialMessagesPositioned && messages.isNotEmpty()) {
+            messageListState.scrollToItem(messages.lastIndex)
+            initialMessagesPositioned = true
+        }
+    }
+
     DisposableEffect(chat.id, currentUserId) {
         val messagesRegistration = chatRef.collection("messages")
             .orderBy("timestamp", Query.Direction.ASCENDING)
@@ -1637,14 +1674,19 @@ fun ConversationScreen(
             )
         }
 
-        LazyColumn(
+        Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp),
-            contentPadding = PaddingValues(vertical = 12.dp)
         ) {
-            items(messages, key = { it.id }) { msg ->
+            LazyColumn(
+                state = messageListState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 12.dp),
+                contentPadding = PaddingValues(vertical = 12.dp)
+            ) {
+                items(messages, key = { it.id }) { msg ->
                 val isMe = msg.senderId == currentUserId
 
                 val isSelected = msg.id in selectedMessageIds
@@ -1761,6 +1803,29 @@ fun ConversationScreen(
                             }
                         }
                     }
+                }
+                }
+            }
+            if (!isAtLatestMessage && messages.isNotEmpty()) {
+                SmallFloatingActionButton(
+                    onClick = {
+                        val lastIndex = messages.lastIndex
+                        if (lastIndex >= 0) {
+                            // Smoothly jump to the newest message.
+                            messageScrollScope.launch {
+                                messageListState.animateScrollToItem(lastIndex)
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 18.dp, bottom = 16.dp),
+                    containerColor = Color.White,
+                    contentColor = Green,
+                    shape = CircleShape,
+                    elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 5.dp)
+                ) {
+                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Jump to latest message")
                 }
             }
         }
