@@ -384,8 +384,9 @@ service cloud.firestore {
             (
               request.resource.data.get('restoredFromBackup', false) == true
               && request.resource.data.get('restoredBy', '') == request.auth.uid
-              && request.resource.data.senderId in
-                get(/databases/$(database)/documents/chats/$(chatId)).data.members
+              && request.resource.data.get('backupMemberUids', []) is list
+              && request.auth.uid in request.resource.data.backupMemberUids
+              && request.resource.data.senderId in request.resource.data.backupMemberUids
               && request.resource.data.get('restoredAt', 0) is int
               && request.resource.data.restoredAt <= request.time.toMillis()
               && request.resource.data.timestamp <= request.resource.data.restoredAt
@@ -444,8 +445,12 @@ service cloud.firestore {
                 'senderId', 'text', 'imageUrl', 'mediaType', 'timestamp',
                 'deliveredTo', 'readBy', 'hiddenFor', 'expiresAt',
                 'replyToMessageId', 'replyToText', 'editedAt', 'starredBy',
-                'reactions', 'restoredFromBackup', 'restoredBy', 'restoredAt'
+                'reactions', 'restoredFromBackup', 'restoredBy', 'restoredAt',
+                'backupMemberUids'
               ])
+              && request.resource.data.get('backupMemberUids', []) is list
+              && request.auth.uid in request.resource.data.backupMemberUids
+              && request.resource.data.senderId in request.resource.data.backupMemberUids
               && request.resource.data.restoredAt is int
               && request.resource.data.timestamp <= request.resource.data.restoredAt
               && request.resource.data.restoredAt <= request.time.toMillis()
