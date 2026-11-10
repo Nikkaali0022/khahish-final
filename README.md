@@ -10,7 +10,7 @@ Khahish is an Android-first messaging app built with Kotlin, Jetpack Compose, Fi
 - Group chat creation, group participant management and admin roles
 - Communities with membership, posts and post reporting
 - Message editing (sender's text messages within 15 minutes), starring and pinning
-- Full in-chat search across the conversation messages currently loaded by the app
+- Paginated in-chat search across full conversation history
 - One-time location sharing, timed foreground live-location sharing, and contact-card sharing
 - FCM device-token registration and Android notification receiving (trusted push sender/backend still required)
 - Profile reporting and blocking; private-message sending checks the sender's blocked list
@@ -50,7 +50,7 @@ Story audience privacy and server-side block enforcement depend on the matching 
 - Linked-device pairing requires a separate web/desktop client plus secure QR-based device provisioning
 - FCM push sender for messages and incoming calls; the Android receiver and token registration are now in the app, but the trusted sender/backend is not
 - Server-side account deactivation workflow
-- Full app-wide Urdu/Roman Urdu localization and a complete TalkBack/accessibility audit
+- Full app-wide Urdu/Roman Urdu localization
 - Firestore rules review/deployment, emulator/security testing and real-device QA
 
 Account deletion is intentionally excluded from Khahish.
