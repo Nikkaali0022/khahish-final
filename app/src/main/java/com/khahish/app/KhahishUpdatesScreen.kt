@@ -75,6 +75,7 @@ fun KhahishUpdatesScreen(
     var showSearch by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var updatesMenu by remember { mutableStateOf(false) }
+    var viewedStoryIds by remember { mutableStateOf(setOf<String>()) }
 
     fun publishStory(text: String, mediaUrl: String = "", mediaType: String = "text") {
         val now = System.currentTimeMillis()
@@ -115,6 +116,20 @@ fun KhahishUpdatesScreen(
     }
     val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) uploadStory(uri, "video")
+    }
+
+    DisposableEffect(currentUid, stories) {
+        val registrations = stories.filter { it.ownerUid != currentUid }.map { story ->
+            db.collection("stories").document(story.id).collection("views").document(currentUid)
+                .addSnapshotListener { snapshot, _ ->
+                    viewedStoryIds = if (snapshot?.exists() == true) {
+                        viewedStoryIds + story.id
+                    } else {
+                        viewedStoryIds - story.id
+                    }
+                }
+        }
+        onDispose { registrations.forEach { it.remove() } }
     }
 
     DisposableEffect(currentUid) {
@@ -306,7 +321,17 @@ fun KhahishUpdatesScreen(
                     ) {
                         Column(Modifier.fillMaxWidth().padding(14.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.size(38.dp).background(Green, CircleShape), contentAlignment = Alignment.Center) {
+                                Box(
+                                    Modifier.size(44.dp)
+                                        .border(
+                                            2.dp,
+                                            if (story.id in viewedStoryIds) MaterialTheme.colorScheme.outline else Green,
+                                            CircleShape
+                                        )
+                                        .padding(3.dp)
+                                        .background(Green, CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
                                     Text(story.ownerName.take(1).uppercase(Locale.getDefault()), color = Color.White, fontWeight = FontWeight.Bold)
                                 }
                                 Spacer(Modifier.width(10.dp))
