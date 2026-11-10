@@ -236,9 +236,13 @@ fun KhahishCommunitiesScreen(
                     }) { Icon(Icons.Default.Send, "Publish post", tint = Green) }
                 }
             }
-            if (posts.isEmpty()) {
+            if (!joined) {
                 Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text(if (joined) "No posts yet. Start the conversation." else "Join this community to see and publish posts.", color = Muted)
+                    Text("Join this community to see and publish posts.", color = Muted)
+                }
+            } else if (posts.isEmpty()) {
+                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Text("No posts yet. Start the conversation.", color = Muted)
                 }
             } else {
                 LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(12.dp)) {
@@ -299,11 +303,12 @@ fun KhahishCommunitiesScreen(
                             "memberCount" to 1L,
                             "createdAt" to now
                         )).addOnSuccessListener {
+                            val description = communityDescription.trim()
                             communityName = ""
                             communityDescription = ""
                             showCreate = false
                             busy = false
-                            selected = KhahishCommunity(ref.id, name, communityDescription, currentUid, listOf(currentUid), 1L)
+                            selected = KhahishCommunity(ref.id, name, description, currentUid, listOf(currentUid), 1L)
                         }.addOnFailureListener {
                             busy = false
                             Toast.makeText(context, "Community creation failed: ${it.message}", Toast.LENGTH_LONG).show()
