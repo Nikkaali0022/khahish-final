@@ -12,7 +12,7 @@ Khahish is an Android-first messaging app built with Kotlin, Jetpack Compose, Fi
 - Message editing (sender's text messages within 15 minutes), starring and pinning
 - Paginated in-chat search across full conversation history
 - One-time location sharing, timed foreground live-location sharing, and contact-card sharing
-- FCM device-token registration and Android notification receiving (trusted push sender/backend still required)
+- FCM device-token registration, Android notification receiving, and authenticated Cloudflare Worker push-sender integration (Worker deployment and encrypted service-account secret setup still required)
 - Profile reporting and blocking; private-message sending checks the sender's blocked list
 - Story audience selection, viewer records and viewer list
 - Same-account JSON chat backup and restore
@@ -48,7 +48,7 @@ Story audience privacy and server-side block enforcement depend on the matching 
 - End-to-end encryption with reviewed device-key provisioning, key exchange and recovery; existing plaintext history must remain readable
 - Two-step verification: Firebase's native MFA requires Identity Platform; a Spark-compatible trusted-backend alternative must be designed without pretending a local app lock is account MFA
 - Linked-device pairing requires a separate web/desktop client plus secure QR-based device provisioning
-- FCM push sender for messages and incoming calls; the Android receiver and token registration are now in the app, but the trusted sender/backend is not
+- Configure and deploy the authenticated FCM sender in the Cloudflare Worker, then test message and incoming-call push delivery on two real devices (draft Worker PR: https://github.com/Nikkaali0022/khahish-agora-token/pull/1)
 - Server-side account deactivation workflow
 - Full app-wide Urdu/Roman Urdu localization
 - Firestore rules review/deployment, emulator/security testing and real-device QA
