@@ -352,7 +352,15 @@ test("backup imports preserve historical sender labels but are explicitly unveri
     restoredBy: "alice",
     restoredAt
   };
-  await assertSucceeds(setDoc(doc(db("alice"), "chats/alice_bob/messages/backup_alice_old1"), imported));
+  const importedRef = doc(db("alice"), "chats/alice_bob/messages/backup_alice_old1");
+  await assertSucceeds(setDoc(importedRef, imported));
+  await assertSucceeds(updateDoc(importedRef, {
+    text: "Re-imported historical message",
+    restoredAt: Date.now()
+  }));
+  await assertFails(updateDoc(importedRef, {
+    text: "Another member must not edit Alice's imported record"
+  }).then(() => { throw new Error("Expected the other account update to fail."); }));
   await assertFails(setDoc(doc(db("alice"), "chats/alice_bob/messages/backup_alice_forged"), {
     ...imported,
     restoredBy: "bob"
