@@ -80,6 +80,19 @@ test("private user records are owner-only and login history is append-only", asy
   }));
 });
 
+test("blocked-account records are private to the blocker", async () => {
+  await seed("users/alice/blocked/bob", {
+    uid: "bob",
+    name: "Bob",
+    createdAt: Date.now()
+  });
+
+  await assertSucceeds(getDoc(doc(db("alice"), "users/alice/blocked/bob")));
+  await assertFails(getDoc(doc(db("bob"), "users/alice/blocked/bob")));
+  await assertFails(getDoc(doc(db("carol"), "users/alice/blocked/bob")));
+  await assertFails(getDocs(collection(db("bob"), "users/alice/blocked")));
+});
+
 test("public profiles never expose private contact fields", async () => {
   const safeProfile = {
     uid: "alice",
