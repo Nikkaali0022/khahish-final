@@ -396,6 +396,7 @@ service cloud.firestore {
               && request.resource.data.text is string
               && request.resource.data.editedAt is int
               && request.resource.data.editedAt >= resource.data.timestamp
+              && request.time.toMillis() - resource.data.timestamp <= 900000
             )
             ||
             // Each member can add/remove only their own reaction-map entry.
@@ -422,7 +423,10 @@ service cloud.firestore {
                   && (
                     request.resource.data.deliveredTo.size()
                       == resource.data.get('deliveredTo', []).size()
-                    || request.auth.uid in request.resource.data.deliveredTo
+                    || (
+                      !(request.auth.uid in resource.data.get('deliveredTo', []))
+                      && request.auth.uid in request.resource.data.deliveredTo
+                    )
                   )
                 )
               )
@@ -436,7 +440,10 @@ service cloud.firestore {
                   && (
                     request.resource.data.readBy.size()
                       == resource.data.get('readBy', []).size()
-                    || request.auth.uid in request.resource.data.readBy
+                    || (
+                      !(request.auth.uid in resource.data.get('readBy', []))
+                      && request.auth.uid in request.resource.data.readBy
+                    )
                   )
                 )
               )
@@ -449,6 +456,7 @@ service cloud.firestore {
                       request.resource.data.hiddenFor.hasAll(resource.data.get('hiddenFor', []))
                       && request.resource.data.hiddenFor.size()
                         == resource.data.get('hiddenFor', []).size() + 1
+                      && !(request.auth.uid in resource.data.get('hiddenFor', []))
                       && request.auth.uid in request.resource.data.hiddenFor
                     )
                     || (
@@ -456,6 +464,7 @@ service cloud.firestore {
                       && resource.data.get('hiddenFor', []).size()
                         == request.resource.data.hiddenFor.size() + 1
                       && request.auth.uid in resource.data.get('hiddenFor', [])
+                      && !(request.auth.uid in request.resource.data.hiddenFor)
                     )
                   )
                 )
@@ -469,6 +478,7 @@ service cloud.firestore {
                       request.resource.data.starredBy.hasAll(resource.data.get('starredBy', []))
                       && request.resource.data.starredBy.size()
                         == resource.data.get('starredBy', []).size() + 1
+                      && !(request.auth.uid in resource.data.get('starredBy', []))
                       && request.auth.uid in request.resource.data.starredBy
                     )
                     || (
@@ -476,6 +486,7 @@ service cloud.firestore {
                       && resource.data.get('starredBy', []).size()
                         == request.resource.data.starredBy.size() + 1
                       && request.auth.uid in resource.data.get('starredBy', [])
+                      && !(request.auth.uid in request.resource.data.starredBy)
                     )
                   )
                 )
@@ -723,11 +734,21 @@ service cloud.firestore {
         && validAccountDeactivation(request.resource.data, uid)
         && resource.data.uid == uid
         && resource.data.type == 'deactivate'
-        && resource.data.status == 'pending'
-        && request.resource.data.status == 'cancelled'
-        && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['status', 'cancelledAt'])
-        && request.resource.data.cancelledAt is int;
+        && (
+          (
+            resource.data.status == 'pending'
+            && request.resource.data.status == 'cancelled'
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'cancelledAt'])
+            && request.resource.data.cancelledAt is int
+          )
+          || (
+            resource.data.status == 'cancelled'
+            && request.resource.data.status == 'pending'
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'createdAt', 'email', 'note'])
+          )
+        );
 
       allow delete: if false;
     }
