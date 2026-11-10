@@ -96,7 +96,9 @@ data class Chat(
     val name: String,
     val message: String,
     val time: String,
-    val initials: String
+    val initials: String,
+    val isGroup: Boolean = false,
+    val memberUids: List<String> = emptyList()
 )
 
 data class AppUser(
@@ -290,6 +292,7 @@ fun KhahishApp() {
     var selectedChat by remember { mutableStateOf<Chat?>(null) }
     var profileTargetUid by remember { mutableStateOf("") }
     var showNewChat by remember { mutableStateOf(false) }
+    var showNewGroup by remember { mutableStateOf(false) }
     var activeCall by remember { mutableStateOf<KhahishCall?>(null) }
     var incomingCall by remember { mutableStateOf(false) }
     val latestActiveCall by rememberUpdatedState(activeCall)
@@ -319,7 +322,7 @@ fun KhahishApp() {
 
     BackHandler(
         enabled = currentUser != null &&
-            (selectedChat != null || showNewChat || profileTargetUid.isNotBlank() || tab != "Chats")
+            (selectedChat != null || showNewChat || showNewGroup || profileTargetUid.isNotBlank() || tab != "Chats")
     ) {
         when {
             profileTargetUid.isNotBlank() -> profileTargetUid = ""
@@ -328,6 +331,7 @@ fun KhahishApp() {
                 incomingCall = false
             }
             selectedChat != null -> selectedChat = null
+            showNewGroup -> showNewGroup = false
             showNewChat -> showNewChat = false
             tab != "Chats" -> tab = "Chats"
         }
@@ -386,10 +390,20 @@ fun KhahishApp() {
                             )
                         }
                     )
+                } else if (showNewGroup) {
+                    KhahishGroupChatScreen(
+                        currentUid = user.uid,
+                        onBack = { showNewGroup = false },
+                        onCreated = {
+                            selectedChat = it
+                            showNewGroup = false
+                        }
+                    )
                 } else if (showNewChat) {
                     NewChatScreen(
                         currentUid = user.uid,
                         onBack = { showNewChat = false },
+                        onCreateGroup = { showNewChat = false; showNewGroup = true },
                         onChatCreated = {
                             selectedChat = it
                             showNewChat = false
@@ -805,6 +819,7 @@ fun NewChatScreen(
     modifier: Modifier = Modifier,
     currentUid: String,
     onBack: () -> Unit,
+    onCreateGroup: () -> Unit = {},
     onChatCreated: (Chat) -> Unit
 ) {
     val db = remember { FirebaseFirestore.getInstance() }
@@ -857,6 +872,9 @@ fun NewChatScreen(
         ) {
             IconButton(onClick = onBack) {
                 Icon(Icons.Default.ArrowBack, "Back")
+            }
+            IconButton(onClick = onCreateGroup) {
+                Icon(Icons.Default.GroupAdd, "Create group")
             }
 
             OutlinedTextField(
@@ -1050,22 +1068,23 @@ fun ChatList(
 
                     chats = docs.mapNotNull { doc ->
                         val members = doc.get("members") as? List<*>
-                        val peerUid = members
-                            ?.filterIsInstance<String>()
-                            ?.firstOrNull { it != currentUid }
+                        val memberUids = members?.filterIsInstance<String>() ?: emptyList()
+                        val peerUid = memberUids.firstOrNull { it != currentUid }
                             ?: return@mapNotNull null
-
                         val names = doc.get("memberNames") as? Map<*, *>
-                        val peerName = names?.get(peerUid) as? String
-                            ?: "Khahish User"
+                        val isGroup = doc.getBoolean("isGroup") == true
+                        val peerName = names?.get(peerUid) as? String ?: "Khahish User"
+                        val displayName = if (isGroup) doc.getString("groupName") ?: "Group chat" else peerName
 
                         Chat(
                             id = doc.id,
                             peerUid = peerUid,
-                            name = peerName,
+                            name = displayName,
                             message = doc.getString("lastMessage") ?: "",
                             time = "",
-                            initials = peerName.firstOrNull()?.uppercase() ?: "K"
+                            initials = displayName.firstOrNull()?.uppercase() ?: "K",
+                            isGroup = isGroup,
+                            memberUids = memberUids
                         )
                     }.sortedByDescending { chat ->
                         docs.firstOrNull { it.id == chat.id }
@@ -1588,11 +1607,17 @@ fun ConversationScreen(
                 }
             }
 
-        val typingRegistration = chatRef.collection("typing")
-            .document(chat.peerUid)
-            .addSnapshotListener { snapshot, _ ->
-                peerTyping = snapshot?.getBoolean("isTyping") == true
-            }
+        val typingRegistration = if (chat.isGroup) {
+            chatRef.collection("typing").whereEqualTo("isTyping", true)
+                .addSnapshotListener { snapshot, _ ->
+                    peerTyping = snapshot?.documents?.any { it.id != currentUserId } == true
+                }
+        } else {
+            chatRef.collection("typing").document(chat.peerUid)
+                .addSnapshotListener { snapshot, _ ->
+                    peerTyping = snapshot?.getBoolean("isTyping") == true
+                }
+        }
 
         onDispose {
             messagesRegistration.remove()
@@ -1702,6 +1727,7 @@ fun ConversationScreen(
                 Column(Modifier.weight(1f)) {
                     Text(chat.name, fontWeight = FontWeight.SemiBold, color = Ink)
                     val peerStatusText = when {
+                        chat.isGroup -> "Group · ${chat.memberUids.size} members"
                         peerTyping -> "typing..."
                         peerOnline && peerOnlineStatusVisible -> "Online"
                         peerLastSeenVisible && peerLastSeenAt > 0L ->
@@ -1715,8 +1741,10 @@ fun ConversationScreen(
                 IconButton(onClick = { showDisappearingOptions = true }) {
                     Icon(Icons.Default.Timer, "Disappearing messages", tint = if (disappearingDurationMs > 0L) Green else Muted)
                 }
-                IconButton(onClick = { onStartCall(false) }) { Icon(Icons.Default.Call, "Voice call", tint = Green) }
-                IconButton(onClick = { onStartCall(true) }) { Icon(Icons.Default.Videocam, "Video call", tint = Green) }
+                if (!chat.isGroup) {
+                    IconButton(onClick = { onStartCall(false) }) { Icon(Icons.Default.Call, "Voice call", tint = Green) }
+                    IconButton(onClick = { onStartCall(true) }) { Icon(Icons.Default.Videocam, "Video call", tint = Green) }
+                }
             }
         }
 
