@@ -2255,10 +2255,10 @@ fun ConversationScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .background(Pale)
+            .background(MaterialTheme.colorScheme.background)
     ) {
         Row(
-            Modifier.fillMaxWidth().background(Color.White).statusBarsPadding()
+            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).statusBarsPadding()
                 .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -2267,7 +2267,7 @@ fun ConversationScreen(
             }) { Icon(Icons.Default.ArrowBack, "Back") }
             if (selectedMessageIds.isNotEmpty()) {
                 Text("${selectedMessageIds.size} selected", modifier = Modifier.weight(1f),
-                    color = Ink, fontWeight = FontWeight.SemiBold)
+                    color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
                 TextButton(onClick = {
                     selectedMessageIds.forEach { id ->
                         val item = messages.firstOrNull { it.id == id } ?: return@forEach
@@ -2352,8 +2352,8 @@ fun ConversationScreen(
                         }
                         else -> ""
                     }
-                    Text(peerStatusText, color = if (peerTyping || peerStatusText == "Online") Green else Muted, fontSize = 11.sp)
-                    if (peerBio.isNotBlank()) Text(peerBio, color = Muted, fontSize = 10.sp, maxLines = 1)
+                    Text(peerStatusText, color = if (peerTyping || peerStatusText == "Online") Green else MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                    if (peerBio.isNotBlank()) Text(peerBio, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp, maxLines = 1)
                 }
                 IconButton(onClick = {
                     chatSearchVisible = !chatSearchVisible
@@ -2391,7 +2391,7 @@ fun ConversationScreen(
 
         if (pinnedMessageId.isNotBlank()) {
             Row(
-                Modifier.fillMaxWidth().background(Color(0xFFE8F5F0))
+                Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant)
                     .clickable {
                         val index = messages.indexOfFirst { it.id == pinnedMessageId }
                         if (index >= 0) messageScrollScope.launch { messageListState.animateScrollToItem(index) }
@@ -2471,7 +2471,7 @@ fun ConversationScreen(
                             )
                             .border(2.dp, if (isSelected) Green else Color.Transparent, RoundedCornerShape(16.dp))
                             .background(
-                                if (isSelected) Color.White else if (isMe) Color(0xFFD9F7EC) else Color.White,
+                                if (isSelected) MaterialTheme.colorScheme.surfaceVariant else if (isMe) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
                                 RoundedCornerShape(
                                     topStart = 16.dp,
                                     topEnd = 16.dp,
@@ -2500,7 +2500,7 @@ fun ConversationScreen(
                             )
 
                             "video" -> Row(
-                                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Color(0xFFEAF4F0))
+                                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
                                     .clickable { videoToPlay = msg.imageUrl }.padding(10.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -2577,7 +2577,7 @@ fun ConversationScreen(
                             Spacer(Modifier.height(5.dp))
                         }
                         if (msg.text.isNotBlank() && msg.mediaType != "location" && msg.mediaType != "contact") {
-                            Text(msg.text, color = if (isSelected) Color.Black else Ink, fontSize = 15.sp)
+                            Text(msg.text, color = if (isSelected) Color.Black else MaterialTheme.colorScheme.onSurface, fontSize = 15.sp)
                         }
                         if (msg.restoredFromBackup) {
                             Text("Imported backup • sender not verified", color = Muted, fontSize = 9.sp)
@@ -2650,7 +2650,7 @@ fun ConversationScreen(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(end = 18.dp, bottom = 16.dp),
-                    containerColor = Color.White,
+                    containerColor = MaterialTheme.colorScheme.surface,
                     contentColor = Green,
                     shape = CircleShape,
                     elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 5.dp)
