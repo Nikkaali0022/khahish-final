@@ -10,12 +10,14 @@ Khahish is an Android-first messaging app built with Kotlin, Jetpack Compose, Fi
 - Group chat creation, group participant management and admin roles
 - Communities with membership, posts and post reporting
 - Message editing (sender's text messages within 15 minutes), starring and pinning
-- Recent message search across the latest 100 messages per conversation
-- One-time location sharing and contact-card sharing
+- Full in-chat search across the conversation messages currently loaded by the app
+- One-time location sharing, timed foreground live-location sharing, and contact-card sharing
+- FCM device-token registration and Android notification receiving (trusted push sender/backend still required)
 - Profile reporting and blocking; private-message sending checks the sender's blocked list
 - Story audience selection, viewer records and viewer list
 - Same-account JSON chat backup and restore
 - Trusted-device records, remote session sign-out when a device is removed, and login history
+- One-handed mode, reduced-motion controls, privacy dashboard, storage breakdown, data export and chat backup/restore
 - Firestore security rules in `firestore.rules`
 
 ## Build APK
@@ -43,12 +45,14 @@ Story audience privacy and server-side block enforcement depend on the matching 
 
 ## Known server/platform work still required
 
-- End-to-end encryption with a reviewed key-exchange and recovery design
-- Firebase Auth multi-factor / two-step verification setup
-- Linked-device pairing and a web/desktop client (trusted-device revocation is separate)
-- Push notifications for background messages and incoming calls, including server-side FCM delivery
+- End-to-end encryption with reviewed device-key provisioning, key exchange and recovery; existing plaintext history must remain readable
+- Two-step verification: Firebase's native MFA requires Identity Platform; a Spark-compatible trusted-backend alternative must be designed without pretending a local app lock is account MFA
+- Linked-device pairing requires a separate web/desktop client plus secure QR-based device provisioning
+- FCM push sender for messages and incoming calls; the Android receiver and token registration are now in the app, but the trusted sender/backend is not
 - Server-side account deactivation workflow
-- Full app-wide Urdu/Roman Urdu localization and a complete accessibility audit
-- Production Firebase rules deployment, emulator/security testing and real-device QA
+- Full app-wide Urdu/Roman Urdu localization and a complete TalkBack/accessibility audit
+- Firestore rules review/deployment, emulator/security testing and real-device QA
+
+Account deletion is intentionally excluded from Khahish.
 
 Location sharing currently sends the device's last known location; it is not continuous live-location tracking. Chat backup restores JSON message records and media URLs, not separate copies of Cloudinary media files.
