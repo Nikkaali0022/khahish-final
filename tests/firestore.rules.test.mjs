@@ -350,7 +350,8 @@ test("backup imports preserve historical sender labels but are explicitly unveri
     readBy: ["bob", "alice"],
     restoredFromBackup: true,
     restoredBy: "alice",
-    restoredAt
+    restoredAt,
+    backupMemberUids: ["alice", "bob"]
   };
   const importedRef = doc(db("alice"), "chats/alice_bob/messages/backup_alice_old1");
   await assertSucceeds(setDoc(importedRef, imported));
