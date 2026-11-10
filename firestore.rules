@@ -741,8 +741,11 @@ service cloud.firestore {
     match /reports/{reportId} {
       allow create: if signedIn()
         && request.resource.data.reporterUid == request.auth.uid
-        && request.resource.data.type is string
-        && request.resource.data.targetId is string
+        && request.resource.data.type == 'user'
+        && request.resource.data.targetUid is string
+        && request.resource.data.targetUid != request.auth.uid
+        && request.resource.data.targetName is string
+        && request.resource.data.reason is string
         && request.resource.data.createdAt is int
         && request.resource.data.status == 'pending';
 
