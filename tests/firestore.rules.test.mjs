@@ -300,3 +300,33 @@ test("call records are visible only to participants and support incoming-call qu
     updatedAt: Date.now()
   }));
 });
+
+test("caller timeout and incoming-call back navigation can close ringing calls", async () => {
+  const base = {
+    callerUid: "alice",
+    calleeUid: "bob",
+    callerName: "Alice",
+    calleeName: "Bob",
+    participants: ["alice", "bob"],
+    channelName: "khahish_timeout",
+    callType: "voice",
+    status: "ringing",
+    createdAt: Date.now(),
+    updatedAt: Date.now()
+  };
+  await seed("calls/caller-timeout", base);
+  await seed("calls/callee-back", { ...base, channelName: "khahish_back" });
+
+  await assertSucceeds(updateDoc(doc(db("alice"), "calls/caller-timeout"), {
+    status: "missed",
+    updatedAt: Date.now()
+  }));
+  await assertSucceeds(updateDoc(doc(db("alice"), "calls/caller-timeout"), {
+    status: "ended",
+    updatedAt: Date.now()
+  }));
+  await assertSucceeds(updateDoc(doc(db("bob"), "calls/callee-back"), {
+    status: "ended",
+    updatedAt: Date.now()
+  }));
+});
