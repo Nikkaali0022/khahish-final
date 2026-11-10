@@ -578,11 +578,16 @@ service cloud.firestore {
           (
             request.auth.uid == resource.data.calleeUid
             && resource.data.status == 'ringing'
-            && request.resource.data.status in ['accepted', 'rejected', 'missed']
+            && request.resource.data.status in ['accepted', 'rejected', 'missed', 'ended']
           )
           || (
             request.auth.uid == resource.data.callerUid
-            && resource.data.status in ['ringing', 'accepted']
+            && resource.data.status == 'ringing'
+            && request.resource.data.status == 'missed'
+          )
+          || (
+            request.auth.uid == resource.data.callerUid
+            && resource.data.status in ['ringing', 'accepted', 'rejected', 'missed']
             && request.resource.data.status == 'ended'
           )
           || (
