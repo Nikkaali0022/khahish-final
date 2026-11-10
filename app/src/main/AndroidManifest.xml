@@ -27,6 +27,14 @@
         android:required="false" />
 
     <application
+        <service
+            android:name=".KhahishMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
         android:label="Khahish"
         android:allowBackup="true"
         android:icon="@mipmap/khahish_launcher"

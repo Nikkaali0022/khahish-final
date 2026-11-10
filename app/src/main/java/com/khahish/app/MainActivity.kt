@@ -194,7 +194,10 @@ class MainActivity : ComponentActivity() {
     private val presenceAuthListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
         val newUid = firebaseAuth.currentUser?.uid
         if (presenceUid != null && presenceUid != newUid) updateKhahishPresence(presenceUid, false)
-        if (newUid != null && presenceUid != newUid) recordKhahishSession(newUid)
+        if (newUid != null && presenceUid != newUid) {
+            recordKhahishSession(newUid)
+            KhahishMessagingService.syncCurrentToken(this@MainActivity)
+        }
         presenceUid = newUid
         if (appInForeground) updateKhahishPresence(newUid, true)
     }
