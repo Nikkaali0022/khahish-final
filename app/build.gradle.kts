@@ -14,6 +14,7 @@ android {
         applicationId = "com.khahish.app"
         minSdk = 24
         targetSdk = 35
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         versionCode = 1
         versionName = "1.0"
     }
@@ -61,6 +62,11 @@ dependencies {
     // Native in-app video playback
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
+
+    // Android instrumentation tests for device-backed Keystore behavior
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:core:1.6.1")
 
     // Agora Voice & Video Calling SDK
     implementation("io.agora.rtc:full-sdk:4.7.0")
