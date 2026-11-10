@@ -39,7 +39,8 @@ fun KhahishSettingsScreen(
     modifier: Modifier = Modifier,
     onLogout: () -> Unit,
     onAnimationsChanged: (Boolean) -> Unit,
-    onSlideTransitionsChanged: (Boolean) -> Unit
+    onSlideTransitionsChanged: (Boolean) -> Unit,
+    onOneHandedChanged: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
     val auth = remember { FirebaseAuth.getInstance() }
@@ -118,7 +119,8 @@ fun KhahishSettingsScreen(
             onBack = { showAdvanced = false },
             onLogout = onLogout,
             onAnimationsChanged = onAnimationsChanged,
-            onSlideTransitionsChanged = onSlideTransitionsChanged
+            onSlideTransitionsChanged = onSlideTransitionsChanged,
+            onOneHandedChanged = onOneHandedChanged
         )
         return
     }
