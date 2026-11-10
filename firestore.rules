@@ -143,11 +143,21 @@ service cloud.firestore {
     // Public profiles (document get only; no directory listing)
     // -----------------------------------------------------
 
+    function safePublicProfile(data) {
+      return !('email' in data)
+        && !('contact' in data)
+        && !('phone' in data)
+        && !('phoneNumber' in data);
+    }
+
     match /publicProfiles/{uid} {
-      allow get: if signedIn();
+      // Legacy documents containing private contact fields are hidden until
+      // their owner signs in and the app removes those fields.
+      allow get: if signedIn() && safePublicProfile(resource.data);
       allow list: if false;
 
       allow create, update: if isOwner(uid)
+        && safePublicProfile(request.resource.data)
         && (
           !('uid' in request.resource.data)
           || request.resource.data.uid == uid
