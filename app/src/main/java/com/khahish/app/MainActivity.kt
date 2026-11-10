@@ -4095,10 +4095,10 @@ private fun KhahishUserProfileScreen(uid: String, onBack: () -> Unit) {
         }
         onDispose { listener.remove() }
     }
-    Column(Modifier.fillMaxSize().background(Pale)) {
-        Row(Modifier.fillMaxWidth().background(Color.White).statusBarsPadding().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).statusBarsPadding().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") }
-            Text("Profile", color = Ink, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+            Text("Profile", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, fontSize = 20.sp)
         }
         if (loading) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Green) }
         else Column(Modifier.fillMaxWidth().padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -4107,8 +4107,8 @@ private fun KhahishUserProfileScreen(uid: String, onBack: () -> Unit) {
             Spacer(Modifier.height(16.dp))
             Text(name, color = Ink, fontSize = 23.sp, fontWeight = FontWeight.Bold)
             if (username.isNotBlank()) Text("@$username", color = Green)
-            Text(if (online) "Online" else "Khahish member", color = Muted, fontSize = 12.sp)
-            if (bio.isNotBlank()) { Spacer(Modifier.height(18.dp)); Card(colors = CardDefaults.cardColors(containerColor = Color.White)) { Text(bio, Modifier.fillMaxWidth().padding(16.dp), color = Ink) } }
+            Text(if (online) "Online" else "Khahish member", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+            if (bio.isNotBlank()) { Spacer(Modifier.height(18.dp)); Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) { Text(bio, Modifier.fillMaxWidth().padding(16.dp), color = Ink) } }
             Spacer(Modifier.height(24.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(onClick = { showReportDialog = true }) {
