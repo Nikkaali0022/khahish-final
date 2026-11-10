@@ -1382,6 +1382,7 @@ fun ConversationScreen(
     var pinnedMessageText by remember { mutableStateOf("") }
     var pinnedBy by remember { mutableStateOf("") }
     var showGroupInfo by remember { mutableStateOf(false) }
+    var showStarredDialog by remember { mutableStateOf(false) }
     var groupAdmins by remember(chat.id) { mutableStateOf(emptyList<String>()) }
     var groupMemberUids by remember(chat.id) { mutableStateOf(chat.memberUids) }
     var groupMemberNames by remember(chat.id) { mutableStateOf(emptyMap<String, String>()) }
@@ -1872,6 +1873,9 @@ fun ConversationScreen(
                 IconButton(onClick = { showDisappearingOptions = true }) {
                     Icon(Icons.Default.Timer, "Disappearing messages", tint = if (disappearingDurationMs > 0L) Green else Muted)
                 }
+                IconButton(onClick = { showStarredDialog = true }) {
+                    Icon(Icons.Default.Star, "Starred messages", tint = Green)
+                }
                 if (!chat.isGroup) {
                     IconButton(onClick = { onStartCall(false) }) { Icon(Icons.Default.Call, "Voice call", tint = Green) }
                     IconButton(onClick = { onStartCall(true) }) { Icon(Icons.Default.Videocam, "Video call", tint = Green) }
@@ -1960,6 +1964,14 @@ fun ConversationScreen(
                             )
                             .padding(10.dp)
                     ) {
+                        if (chat.isGroup && !isMe) {
+                            Text(
+                                groupMemberNames[msg.senderId] ?: "Group member",
+                                color = Green,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                         when (msg.mediaType) {
                             "image" -> AsyncImage(
                                 model = msg.imageUrl,
@@ -2284,6 +2296,29 @@ fun ConversationScreen(
             }
         }, confirmButton = { TextButton(onClick = { showForwardDialog = false }, enabled = !forwarding) { Text("Close") } })
     }
+    if (showStarredDialog) {
+        val starred = messages.filter { currentUserId in it.starredBy }
+        AlertDialog(
+            onDismissRequest = { showStarredDialog = false },
+            title = { Text("Starred messages") },
+            text = {
+                if (starred.isEmpty()) Text("You have not starred any messages in this chat.", color = Muted)
+                else Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                    starred.forEach { item ->
+                        TextButton(onClick = {
+                            val index = messages.indexOfFirst { it.id == item.id }
+                            if (index >= 0) messageScrollScope.launch { messageListState.animateScrollToItem(index) }
+                            showStarredDialog = false
+                        }, modifier = Modifier.fillMaxWidth()) {
+                            Text(item.text.ifBlank { item.mediaType.replaceFirstChar { ch -> ch.uppercase() } }, color = Ink, maxLines = 2)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showStarredDialog = false }) { Text("Close") } }
+        )
+    }
+
     if (showGroupInfo && chat.isGroup) {
         val isGroupAdmin = currentUserId in groupAdmins
         AlertDialog(
