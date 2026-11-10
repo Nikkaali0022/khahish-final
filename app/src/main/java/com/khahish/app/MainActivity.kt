@@ -53,6 +53,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.res.painterResource
@@ -1575,8 +1577,8 @@ fun ConversationScreen(
     var forwardSearch by remember { mutableStateOf("") }
     var loadingForwardUsers by remember { mutableStateOf(false) }
     var forwarding by remember { mutableStateOf(false) }
-    var chatSearchVisible by remember { mutableStateOf(false) }
-    var chatSearchQuery by remember { mutableStateOf("") }
+    var chatSearchVisible by remember(chat.id) { mutableStateOf(false) }
+    var chatSearchQuery by remember(chat.id) { mutableStateOf("") }
 
     val displayedMessages = remember(messages, chatSearchQuery) {
         val query = chatSearchQuery.trim()
@@ -2235,6 +2237,13 @@ fun ConversationScreen(
                                     selectedMessageIds = if (isSelected) selectedMessageIds - msg.id else selectedMessageIds + msg.id
                                 }
                             )
+                            .semantics(mergeDescendants = true) {
+                                contentDescription = if (msg.text.isNotBlank()) {
+                                    "Message from ${if (isMe) "you" else (groupMemberNames[msg.senderId] ?: chat.name)}: ${msg.text}"
+                                } else {
+                                    "Shared ${msg.mediaType} message"
+                                }
+                            }
                             .border(2.dp, if (isSelected) Green else Color.Transparent, RoundedCornerShape(16.dp))
                             .background(
                                 if (isSelected) Color.White else if (isMe) Color(0xFFD9F7EC) else Color.White,
