@@ -153,7 +153,8 @@ data class MessageItem(
     val replyToText: String = "",
     val reactions: Map<String, String> = emptyMap(),
     val editedAt: Long = 0L,
-    val starredBy: List<String> = emptyList()
+    val starredBy: List<String> = emptyList(),
+    val restoredFromBackup: Boolean = false
 )
 
 private fun privateChatId(uid1: String, uid2: String): String =
@@ -2113,7 +2114,8 @@ fun ConversationScreen(
                         replyToText = doc.getString("replyToText") ?: "",
                         reactions = (doc.get("reactions") as? Map<*, *>)?.mapNotNull { (k, v) -> if (k is String && v is String) k to v else null }?.toMap() ?: emptyMap(),
                         editedAt = doc.getLong("editedAt") ?: 0L,
-                        starredBy = doc.get("starredBy") as? List<String> ?: emptyList()
+                        starredBy = doc.get("starredBy") as? List<String> ?: emptyList(),
+                        restoredFromBackup = doc.getBoolean("restoredFromBackup") == true
                     )
                 }.filter { currentUserId !in it.hiddenFor && (it.expiresAt == 0L || it.expiresAt > System.currentTimeMillis()) }
 
@@ -2513,6 +2515,9 @@ fun ConversationScreen(
                         }
                         if (msg.text.isNotBlank() && msg.mediaType != "location" && msg.mediaType != "contact") {
                             Text(msg.text, color = if (isSelected) Color.Black else Ink, fontSize = 15.sp)
+                        }
+                        if (msg.restoredFromBackup) {
+                            Text("Imported backup • sender not verified", color = Muted, fontSize = 9.sp)
                         }
                         if (msg.reactions.isNotEmpty()) {
                             Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
