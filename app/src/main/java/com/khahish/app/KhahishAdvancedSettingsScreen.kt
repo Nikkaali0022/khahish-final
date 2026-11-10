@@ -5,6 +5,8 @@ import android.content.Intent
 import android.os.Build
 import android.provider.Settings
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -62,12 +64,102 @@ fun KhahishAdvancedSettingsScreen(
     var busy by remember { mutableStateOf(false) }
     var storageText by remember { mutableStateOf("Calculating…") }
     var requestStatus by remember { mutableStateOf("") }
+    var pendingBackupJson by remember { mutableStateOf("") }
 
     val deviceId = remember {
         Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
             ?.takeIf { it.isNotBlank() } ?: "android-device"
     }
     val deviceName = remember { Build.MANUFACTURER + " " + Build.MODEL }
+
+    val backupSaveLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null && pendingBackupJson.isNotBlank()) {
+            try {
+                context.contentResolver.openOutputStream(uri)?.use { it.write(pendingBackupJson.toByteArray(Charsets.UTF_8)) }
+                Toast.makeText(context, "Khahish backup saved.", Toast.LENGTH_LONG).show()
+            } catch (error: Exception) {
+                Toast.makeText(context, "Backup save failed: ${error.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    val backupRestoreLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null && uid.isNotBlank() && !busy) {
+            busy = true
+            try {
+                val jsonText = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                    ?: throw IllegalStateException("Could not read backup file")
+                val root = JSONObject(jsonText)
+                val backupUid = root.optJSONObject("profile")?.optString("uid").orEmpty()
+                if (backupUid != uid) {
+                    busy = false
+                    Toast.makeText(context, "This backup belongs to a different Khahish account.", Toast.LENGTH_LONG).show()
+                } else {
+                    val chats = root.optJSONArray("chats") ?: JSONArray()
+                    val writeTasks = mutableListOf<com.google.android.gms.tasks.Task<*>>()
+                    for (index in 0 until chats.length()) {
+                        val chatJson = chats.optJSONObject(index) ?: continue
+                        val chatId = chatJson.optString("chatId")
+                        val memberArray = chatJson.optJSONArray("members") ?: JSONArray()
+                        val members = (0 until memberArray.length()).mapNotNull { memberArray.optString(it).takeIf(String::isNotBlank) }
+                        if (chatId.isBlank() || uid !in members) continue
+                        val chatRef = db.collection("chats").document(chatId)
+                        val chatData = hashMapOf<String, Any>(
+                            "members" to members,
+                            "lastMessage" to chatJson.optString("lastMessage"),
+                            "lastMessageAt" to chatJson.optLong("lastMessageAt"),
+                            "updatedAt" to System.currentTimeMillis()
+                        )
+                        if (chatJson.has("isGroup")) chatData["isGroup"] = chatJson.optBoolean("isGroup")
+                        if (chatJson.has("groupName")) chatData["groupName"] = chatJson.optString("groupName")
+                        writeTasks.add(chatRef.set(chatData, com.google.firebase.firestore.SetOptions.merge()))
+                        val messageArray = chatJson.optJSONArray("messages") ?: JSONArray()
+                        var batch = db.batch()
+                        var batchCount = 0
+                        for (messageIndex in 0 until messageArray.length()) {
+                            val message = messageArray.optJSONObject(messageIndex) ?: continue
+                            val sender = message.optString("senderId")
+                            if (sender !in members) continue
+                            val messageData = hashMapOf<String, Any>(
+                                "senderId" to sender,
+                                "text" to message.optString("text"),
+                                "imageUrl" to message.optString("imageUrl"),
+                                "mediaType" to message.optString("mediaType", "text"),
+                                "timestamp" to message.optLong("timestamp"),
+                                "deliveredTo" to emptyList<String>(),
+                                "readBy" to listOf(sender)
+                            )
+                            val messageId = message.optString("id")
+                            val messageRef = if (messageId.isBlank()) chatRef.collection("messages").document() else chatRef.collection("messages").document(messageId)
+                            batch.set(messageRef, messageData, com.google.firebase.firestore.SetOptions.merge())
+                            batchCount++
+                            if (batchCount >= 400) {
+                                writeTasks.add(batch.commit())
+                                batch = db.batch()
+                                batchCount = 0
+                            }
+                        }
+                        if (batchCount > 0) writeTasks.add(batch.commit())
+                    }
+                    com.google.android.gms.tasks.Tasks.whenAllComplete(writeTasks).addOnSuccessListener { completed ->
+                        busy = false
+                        val failed = completed.count { !it.isSuccessful }
+                        Toast.makeText(context, if (failed == 0) "Backup restored. Existing messages were merged." else "Restore finished with $failed failed write batches.", Toast.LENGTH_LONG).show()
+                    }.addOnFailureListener { error ->
+                        busy = false
+                        Toast.makeText(context, "Restore failed: ${error.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            } catch (error: Exception) {
+                busy = false
+                Toast.makeText(context, "Invalid backup file: ${error.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 
     LaunchedEffect(uid) {
         if (uid.isNotBlank()) {
@@ -119,6 +211,58 @@ fun KhahishAdvancedSettingsScreen(
         }.addOnFailureListener {
             busy = false
             Toast.makeText(context, "Request failed: " + (it.message ?: "Unknown error"), Toast.LENGTH_LONG).show()
+        }
+    }
+
+    fun createChatBackup() {
+        if (uid.isBlank() || busy) return
+        busy = true
+        db.collection("users").document(uid).get().addOnSuccessListener { profile ->
+            db.collection("chats").whereArrayContains("members", uid).get().addOnSuccessListener { chats ->
+                val tasks = chats.documents.map { it.reference.collection("messages").get() }
+                com.google.android.gms.tasks.Tasks.whenAllSuccess<com.google.firebase.firestore.QuerySnapshot>(tasks)
+                    .addOnSuccessListener { snapshots ->
+                        val root = JSONObject()
+                        root.put("backupVersion", 1)
+                        root.put("exportedAt", System.currentTimeMillis())
+                        root.put("profile", JSONObject().put("uid", uid).put("email", user?.email ?: "").put("name", profile.getString("name") ?: ""))
+                        val chatArray = JSONArray()
+                        chats.documents.forEachIndexed { index, chatDoc ->
+                            val chatJson = JSONObject()
+                                .put("chatId", chatDoc.id)
+                                .put("members", JSONArray(chatDoc.get("members") as? List<*> ?: emptyList<Any>()))
+                                .put("lastMessage", chatDoc.getString("lastMessage") ?: "")
+                                .put("lastMessageAt", chatDoc.getLong("lastMessageAt") ?: 0L)
+                                .put("isGroup", chatDoc.getBoolean("isGroup") == true)
+                                .put("groupName", chatDoc.getString("groupName") ?: "")
+                            val messageArray = JSONArray()
+                            snapshots.getOrNull(index)?.documents?.forEach { msg ->
+                                messageArray.put(JSONObject()
+                                    .put("id", msg.id)
+                                    .put("senderId", msg.getString("senderId") ?: "")
+                                    .put("text", msg.getString("text") ?: "")
+                                    .put("mediaType", msg.getString("mediaType") ?: "text")
+                                    .put("imageUrl", msg.getString("imageUrl") ?: "")
+                                    .put("timestamp", msg.getLong("timestamp") ?: 0L))
+                            }
+                            chatJson.put("messages", messageArray)
+                            chatArray.put(chatJson)
+                        }
+                        root.put("chats", chatArray)
+                        pendingBackupJson = root.toString(2)
+                        busy = false
+                        backupSaveLauncher.launch("Khahish-backup-${System.currentTimeMillis()}.json")
+                    }.addOnFailureListener {
+                        busy = false
+                        Toast.makeText(context, "Backup failed: ${it.message}", Toast.LENGTH_LONG).show()
+                    }
+            }.addOnFailureListener {
+                busy = false
+                Toast.makeText(context, "Could not load chats: ${it.message}", Toast.LENGTH_LONG).show()
+            }
+        }.addOnFailureListener {
+            busy = false
+            Toast.makeText(context, "Could not load profile: ${it.message}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -276,6 +420,10 @@ fun KhahishAdvancedSettingsScreen(
         Spacer(Modifier.height(12.dp))
         AdvancedGroup("YOUR DATA & STORAGE") {
             AdvancedRow("Export my data", "Share a JSON copy of your profile, chats and messages") { exportData() }
+            AdvancedRow("Back up chats", "Save a restorable JSON backup to your device") { createChatBackup() }
+            AdvancedRow("Restore chats", "Merge messages from a backup for this same account") {
+                backupRestoreLauncher.launch(arrayOf("application/json", "text/json", "*/*"))
+            }
             Text(storageText, color = Muted, fontSize = 12.sp)
             AdvancedRow("Refresh storage usage", "Break down cache, files, databases and preferences") {
                 storageText = calculateKhahishStorageBreakdown(context)
