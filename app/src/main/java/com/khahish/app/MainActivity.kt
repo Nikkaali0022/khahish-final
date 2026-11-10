@@ -332,8 +332,6 @@ fun KhahishApp() {
                             auth.signOut()
                             currentUser = null
                             Toast.makeText(appContext, "This device was removed from trusted devices. Please sign in again.", Toast.LENGTH_LONG).show()
-                        } else if (snapshot != null) {
-                            deviceRef.update("lastActiveAt", System.currentTimeMillis())
                         }
                     }
                     FirebaseFirestore.getInstance().collection("users").document(uid)
