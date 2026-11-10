@@ -28,6 +28,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
@@ -327,6 +328,15 @@ fun KhahishApp() {
     var oneHandedMode by remember {
         mutableStateOf(advancedPreferences.getBoolean("one_handed", false))
     }
+    var themeMode by remember {
+        mutableStateOf(uiPreferences.getString("theme_mode", "system") ?: "system")
+    }
+    val systemDark = isSystemInDarkTheme()
+    val useDarkTheme = when (themeMode) {
+        "dark" -> true
+        "light" -> false
+        else -> systemDark
+    }
 
     var currentUser by remember { mutableStateOf(auth.currentUser) }
     var tab by remember { mutableStateOf("Chats") }
@@ -518,7 +528,12 @@ fun KhahishApp() {
     }
 
     MaterialTheme(
-        colorScheme = lightColorScheme(
+        colorScheme = if (useDarkTheme) darkColorScheme(
+            primary = Color(0xFF55D6B4),
+            background = Color(0xFF101918),
+            surface = Color(0xFF1B2725),
+            onSurface = Color(0xFFE6F0ED)
+        ) else lightColorScheme(
             primary = Green,
             background = Pale,
             surface = Color.White,
@@ -746,7 +761,12 @@ fun KhahishApp() {
                                     },
                                     onAnimationsChanged = { animationsEnabled = it },
                                     onSlideTransitionsChanged = { slideTransitionsEnabled = it },
-                                    onOneHandedChanged = { oneHandedMode = it }
+                                    onOneHandedChanged = { oneHandedMode = it },
+                                    themeMode = themeMode,
+                                    onThemeModeChanged = {
+                                        themeMode = it
+                                        uiPreferences.edit().putString("theme_mode", it).apply()
+                                    }
                                 )
                             }
                         }
