@@ -365,6 +365,8 @@ fun KhahishApp() {
     var lockedContactUids by remember(currentUser?.uid) {
         mutableStateOf(KhahishSecretChatLock.lockedUids(appContext, currentUser?.uid.orEmpty()))
     }
+    var secretPasswordHasPassword by remember { mutableStateOf(false) }
+    var secretUnlockExpiresAtMs by remember { mutableStateOf(0L) }
     var showLockedChats by remember { mutableStateOf(false) }
     var showSecretPasswordDialog by remember { mutableStateOf(false) }
     var secretPasswordCreateMode by remember { mutableStateOf(false) }
@@ -392,7 +394,7 @@ fun KhahishApp() {
         brandTapCount += 1
         if (brandTapCount >= 4) {
             brandTapCount = 0
-            secretPasswordCreateMode = !KhahishSecretChatLock.hasPassword(appContext, currentUser?.uid.orEmpty())
+            secretPasswordCreateMode = !secretPasswordHasPassword
             pendingLockedChat = null
             showSecretPasswordDialog = true
         }
@@ -410,6 +412,42 @@ fun KhahishApp() {
         }
         auth.addAuthStateListener(listener)
         onDispose { auth.removeAuthStateListener(listener) }
+    }
+
+    LaunchedEffect(currentUser?.uid) {
+        val uid = currentUser?.uid
+        if (uid.isNullOrBlank()) {
+            lockedContactUids = emptySet()
+            secretPasswordHasPassword = false
+            secretUnlockExpiresAtMs = 0L
+        } else {
+            KhahishSecretChatApi.loadConfig(
+                onSuccess = { config ->
+                    lockedContactUids = config.lockedContactUids
+                    secretPasswordHasPassword = config.hasPassword
+                    KhahishSecretChatLock.saveLockedUids(appContext, uid, config.lockedContactUids)
+                },
+                onError = { message ->
+                    Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
+                }
+            )
+        }
+    }
+
+    LaunchedEffect(secretUnlockExpiresAtMs) {
+        val expiry = secretUnlockExpiresAtMs
+        if (expiry > 0L) {
+            val waitMs = (expiry - System.currentTimeMillis()).coerceAtLeast(0L)
+            kotlinx.coroutines.delay(waitMs)
+            if (secretUnlockExpiresAtMs == expiry) {
+                if (selectedChat?.peerUid in lockedContactUids) selectedChat = null
+                showLockedChats = false
+                openedChatFromLockedChats = false
+                secretUnlockExpiresAtMs = 0L
+                KhahishSecretChatApi.lock()
+                Toast.makeText(appContext, "Locked Chats were secured again.", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     val hostActivity = appContext as? MainActivity
@@ -597,7 +635,11 @@ fun KhahishApp() {
                 if (openedChatFromLockedChats) showLockedChats = true
                 openedChatFromLockedChats = false
             }
-            showLockedChats -> showLockedChats = false
+            showLockedChats -> {
+                showLockedChats = false
+                secretUnlockExpiresAtMs = 0L
+                KhahishSecretChatApi.lock()
+            }
             showNewGroup -> showNewGroup = false
             showNewChat -> showNewChat = false
             tab != "Chats" -> tab = "Chats"
@@ -751,10 +793,23 @@ fun KhahishApp() {
                     LockedChatsHub(
                         currentUid = user.uid,
                         lockedContactUids = lockedContactUids,
-                        onBack = { showLockedChats = false; tab = "Chats" },
-                        onAddContact = { contactUid ->
-                            lockedContactUids = lockedContactUids + contactUid
-                            KhahishSecretChatLock.saveLockedUids(appContext, user.uid, lockedContactUids)
+                        onBack = {
+                            showLockedChats = false
+                            tab = "Chats"
+                            secretUnlockExpiresAtMs = 0L
+                            KhahishSecretChatApi.lock()
+                        },
+                        onAddContact = { contactUid, onResult ->
+                            KhahishSecretChatApi.updateContact(
+                                action = "add",
+                                contactUid = contactUid,
+                                onSuccess = { updated ->
+                                    lockedContactUids = updated
+                                    KhahishSecretChatLock.saveLockedUids(appContext, user.uid, updated)
+                                    onResult(updated, null)
+                                },
+                                onError = { message -> onResult(null, message) }
+                            )
                         },
                         onOpenChat = {
                             openedChatFromLockedChats = true
@@ -971,8 +1026,9 @@ fun KhahishApp() {
                             showSecretPasswordDialog = false
                             pendingLockedChat = null
                         },
-                        onUnlocked = {
+                        onUnlocked = { expiresAt ->
                             showSecretPasswordDialog = false
+                            secretUnlockExpiresAtMs = expiresAt
                             val requestedChat = pendingLockedChat
                             pendingLockedChat = null
                             if (requestedChat != null) {
