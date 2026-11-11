@@ -631,8 +631,14 @@ fun KhahishApp() {
                 incomingCall = false
             }
             selectedChat != null -> {
+                val wasLockedChat = selectedChat?.peerUid in lockedContactUids
                 selectedChat = null
-                if (openedChatFromLockedChats) showLockedChats = true
+                if (openedChatFromLockedChats) {
+                    showLockedChats = true
+                } else if (wasLockedChat) {
+                    secretUnlockExpiresAtMs = 0L
+                    KhahishSecretChatApi.lock()
+                }
                 openedChatFromLockedChats = false
             }
             showLockedChats -> {
@@ -748,8 +754,14 @@ fun KhahishApp() {
                     ConversationScreen(
                         chat = selectedChat!!,
                         onBack = {
+                            val wasLockedChat = selectedChat?.peerUid in lockedContactUids
                             selectedChat = null
-                            if (openedChatFromLockedChats) showLockedChats = true
+                            if (openedChatFromLockedChats) {
+                                showLockedChats = true
+                            } else if (wasLockedChat) {
+                                secretUnlockExpiresAtMs = 0L
+                                KhahishSecretChatApi.lock()
+                            }
                             openedChatFromLockedChats = false
                         },
                         onViewProfile = { profileTargetUid = it },
