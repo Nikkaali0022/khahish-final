@@ -1855,6 +1855,7 @@ fun ConversationScreen(
     var notificationsMuted by remember(chat.id) { mutableStateOf(false) }
     var chatBubbleColorHex by remember(chat.id) { mutableStateOf("#18A889") }
     var chatWallpaperColorHex by remember(chat.id) { mutableStateOf("#F4F8F7") }
+    var chatWallpaperImageUrl by remember(chat.id) { mutableStateOf("") }
 
     val chatSettingsRef = remember(currentUserId, chat.id) {
         db.collection("users").document(currentUserId)
@@ -1874,6 +1875,7 @@ fun ConversationScreen(
             notificationsMuted = snapshot?.getBoolean("notificationsMuted") == true
             chatBubbleColorHex = snapshot?.getString("bubbleColor") ?: "#18A889"
             chatWallpaperColorHex = snapshot?.getString("wallpaperColor") ?: "#F4F8F7"
+            chatWallpaperImageUrl = snapshot?.getString("wallpaperImageUrl").orEmpty()
         }
         onDispose { settingsRegistration.remove() }
     }
@@ -1938,6 +1940,28 @@ fun ConversationScreen(
                     sendChatMessage(
                         chatRef, currentUserId, "", url, "image", context
                     ) { isSending = false }
+                },
+                onError = {
+                    isUploading = false
+                    showToast(context, it)
+                }
+            )
+        }
+    }
+
+    val wallpaperPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            isUploading = true
+            uploadToCloudinary(
+                context, uri, "image",
+                onSuccess = { url ->
+                    isUploading = false
+                    chatWallpaperImageUrl = url
+                    saveChatSetting("wallpaperImageUrl", url)
+                    showChatThemeDialog = false
+                    showToast(context, "Chat wallpaper updated")
                 },
                 onError = {
                     isUploading = false
@@ -2598,11 +2622,22 @@ fun ConversationScreen(
                 .weight(1f)
                 .fillMaxWidth()
         ) {
+            if (chatWallpaperImageUrl.isNotBlank()) {
+                AsyncImage(
+                    model = chatWallpaperImageUrl,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
             LazyColumn(
                 state = messageListState,
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color(android.graphics.Color.parseColor(chatWallpaperColorHex)))
+                    .background(
+                        if (chatWallpaperImageUrl.isBlank()) Color(android.graphics.Color.parseColor(chatWallpaperColorHex))
+                        else Color.Transparent
+                    )
                     .padding(horizontal = 12.dp),
                 contentPadding = PaddingValues(vertical = 12.dp)
             ) {
@@ -3402,6 +3437,23 @@ fun ConversationScreen(
                     Modifier.heightIn(max = 430.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    OutlinedButton(
+                        onClick = { wallpaperPicker.launch("image/*") },
+                        enabled = !isUploading,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Image, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (isUploading) "Uploading wallpaper…" else "Choose photo wallpaper")
+                    }
+                    if (chatWallpaperImageUrl.isNotBlank()) {
+                        TextButton(
+                            onClick = {
+                                chatWallpaperImageUrl = ""
+                                saveChatSetting("wallpaperImageUrl", "")
+                            }
+                        ) { Text("Remove photo wallpaper") }
+                    }
                     themeGroups.forEach { group ->
                         Text(group.first, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                         group.second.forEach { option ->
@@ -3410,8 +3462,10 @@ fun ConversationScreen(
                                     .clickable {
                                         chatBubbleColorHex = option.second
                                         chatWallpaperColorHex = option.third
+                                        chatWallpaperImageUrl = ""
                                         saveChatSetting("bubbleColor", option.second)
                                         saveChatSetting("wallpaperColor", option.third)
+                                        saveChatSetting("wallpaperImageUrl", "")
                                         showChatThemeDialog = false
                                     }
                                     .padding(vertical = 7.dp, horizontal = 4.dp),
@@ -3438,8 +3492,10 @@ fun ConversationScreen(
                 TextButton(onClick = {
                     chatBubbleColorHex = "#18A889"
                     chatWallpaperColorHex = "#F4F8F7"
+                    chatWallpaperImageUrl = ""
                     saveChatSetting("bubbleColor", "#18A889")
                     saveChatSetting("wallpaperColor", "#F4F8F7")
+                    saveChatSetting("wallpaperImageUrl", "")
                     showChatThemeDialog = false
                 }) { Text("Reset default") }
             },
