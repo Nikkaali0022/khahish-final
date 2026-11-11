@@ -249,14 +249,6 @@ class MainActivity : ComponentActivity() {
         }
 
         FirebaseAuth.getInstance().addAuthStateListener(presenceAuthListener)
-        window.statusBarColor = android.graphics.Color.WHITE
-        window.navigationBarColor = android.graphics.Color.WHITE
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            window.decorView.systemUiVisibility =
-                android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or
-                    android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
-        }
 
         setContent {
             KhahishApp()
@@ -548,6 +540,34 @@ fun KhahishApp() {
             onSurface = Ink
         )
     ) {
+        SideEffect {
+            val activityWindow = (appContext as? Activity)?.window
+            activityWindow?.let { systemWindow ->
+                val barColor = if (useDarkTheme) {
+                    android.graphics.Color.rgb(16, 25, 24)
+                } else {
+                    android.graphics.Color.WHITE
+                }
+                systemWindow.statusBarColor = barColor
+                systemWindow.navigationBarColor = barColor
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    var flags = systemWindow.decorView.systemUiVisibility
+                    flags = if (useDarkTheme) {
+                        flags and android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
+                    } else {
+                        flags or android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        flags = if (useDarkTheme) {
+                            flags and android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
+                        } else {
+                            flags or android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+                        }
+                    }
+                    systemWindow.decorView.systemUiVisibility = flags
+                }
+            }
+        }
         AnimatedContent(
             targetState = currentUser != null,
             transitionSpec = { fadeIn() togetherWith fadeOut() },
