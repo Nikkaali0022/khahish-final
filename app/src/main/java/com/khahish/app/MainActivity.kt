@@ -1968,13 +1968,13 @@ private fun PeopleSearchDialog(
                         }
                         .addOnFailureListener {
                             searching = false
-                            searchMessage = "Profile lookup failed: \${it.message ?: "Please try again."}"
+                            searchMessage = "Profile lookup failed: ${it.message ?: "Please try again."}"
                         }
                 }
             }
             .addOnFailureListener {
                 searching = false
-                searchMessage = "Username search failed: \${it.message ?: "Please try again."}"
+                searchMessage = "Username search failed: ${it.message ?: "Please try again."}"
             }
     }
 
@@ -2021,7 +2021,7 @@ private fun PeopleSearchDialog(
                                     showToast(context, "Message request sent. Chat opens after acceptance.")
                                     onDismiss()
                                 }.addOnFailureListener {
-                                    showToast(context, "Request failed: \${it.message}")
+                                    showToast(context, "Request failed: ${it.message}")
                                 }
                             }
                             status == "pending" && request.getString("senderUid") == currentUid ->
@@ -2036,11 +2036,11 @@ private fun PeopleSearchDialog(
                         }
                     }
                     .addOnFailureListener {
-                        showToast(context, "Request lookup failed: \${it.message}")
+                        showToast(context, "Request lookup failed: ${it.message}")
                     }
             }
             .addOnFailureListener {
-                showToast(context, "Chat lookup failed: \${it.message}")
+                showToast(context, "Chat lookup failed: ${it.message}")
             }
     }
 
@@ -2158,7 +2158,7 @@ private fun PeopleSearchDialog(
                                 Spacer(Modifier.width(12.dp))
                                 Column(Modifier.weight(1f)) {
                                     Text(found.name.ifBlank { "Khahish User" }, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
-                                    Text("@\${found.username.ifBlank { normalizeKhahishUsername(username) }}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                                    Text("@${found.username.ifBlank { normalizeKhahishUsername(username) }}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                                 }
                                 Icon(Icons.Default.Chat, contentDescription = "Open or request chat", tint = Green)
                             }
