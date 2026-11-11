@@ -34,7 +34,7 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.SetOptions
 import java.util.Locale
 
-private data class KhahishSupportTicket(val id: String, val subject: String, val status: String, val adminReply: String)
+private data class KhahishSupportTicket(val id: String, val subject: String, val status: String, val adminReply: String, val createdAt: Long)
 
 @Composable
 fun KhahishSettingsScreen(
@@ -151,8 +151,8 @@ fun KhahishSettingsScreen(
                 .whereEqualTo("userUid", uid)
                 .addSnapshotListener { snapshot, _ ->
                     supportTickets = snapshot?.documents.orEmpty().map { doc ->
-                        KhahishSupportTicket(doc.id, doc.getString("subject").orEmpty(), doc.getString("status") ?: "pending", doc.getString("adminReply").orEmpty())
-                    }.sortedByDescending { it.first }
+                        KhahishSupportTicket(doc.id, doc.getString("subject").orEmpty(), doc.getString("status") ?: "pending", doc.getString("adminReply").orEmpty(), doc.getLong("createdAt") ?: 0L)
+                    }.sortedByDescending { it.createdAt }
                 }
             onDispose { registration.remove() }
         }
