@@ -381,6 +381,7 @@ fun KhahishSettingsScreen(
                         if (claimed.exists() && claimed.getString("uid") != uid) throw IllegalStateException("That username is already taken.")
                         val now = System.currentTimeMillis()
                         transaction.set(usernameRef, mapOf("uid" to uid, "username" to cleanUsername, "updatedAt" to now))
+                        transaction.set(db.collection("usernamesByUid").document(uid), mapOf("uid" to uid, "username" to cleanUsername, "updatedAt" to now), SetOptions.merge())
                         if (oldRef != null && oldClaim?.getString("uid") == uid) transaction.delete(oldRef)
                         val updates = mapOf<String, Any>("name" to cleanName, "nameLowercase" to cleanName.lowercase(Locale.ROOT),
                             "username" to cleanUsername, "bio" to editBio.trim(), "photoUrl" to profilePhotoUrl, "updatedAt" to now)
