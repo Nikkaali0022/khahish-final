@@ -711,7 +711,7 @@ fun KhahishApp() {
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Image(
-                                        painter = painterResource(R.drawable.khahish_logo),
+                                        painter = painterResource(R.drawable.khahish_launcher),
                                         contentDescription = "Khahish logo",
                                         modifier = Modifier.size(38.dp),
                                         contentScale = ContentScale.Fit
@@ -1915,7 +1915,6 @@ fun ChatList(
     }
 }
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun PeopleSearchDialog(
     currentUid: String,
@@ -2250,6 +2249,7 @@ private fun PeopleSearchDialog(
 }
 
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun ConversationScreen(
     chat: Chat,
@@ -3371,7 +3371,7 @@ fun ConversationScreen(
                                 color = bubbleSecondaryTextColor
                             )
                             if (msg.editedAt > 0L) {
-                                Text(" · edited", fontSize = 9.sp, color = bubbleSecondaryTextColor
+                                Text(" · edited", fontSize = 9.sp, color = bubbleSecondaryTextColor)
                             }
 
 
