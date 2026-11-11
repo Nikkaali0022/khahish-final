@@ -250,7 +250,7 @@ fun KhahishCallHistoryScreen(
                     val person = if (isCaller) call.calleeName else call.callerName
                     val photo = profilePhotos[peerUid].orEmpty()
                     val missed = call.status == "missed"
-                    val directionColor = if (missed) Color(0xFFE05A5A) else if (isCaller) Green else Color(0xFF4B9BE8)
+                    val directionColor = if (missed) MaterialTheme.colorScheme.error else if (isCaller) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary
                     val directionIcon = if (isCaller) Icons.Default.CallMade else Icons.Default.CallReceived
                     val dateText = if (call.createdAt > 0L) {
                         SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date(call.createdAt))

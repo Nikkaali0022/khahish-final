@@ -19,7 +19,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -401,7 +400,7 @@ fun KhahishAdvancedSettingsScreen(
                 accountRequest = "deactivate"
             }
             if (requestStatus == "pending") {
-                Text("You have a pending account request.", color = Color(0xFFB26A00), fontSize = 12.sp)
+                Text("You have a pending account request.", color = MaterialTheme.colorScheme.tertiary, fontSize = 12.sp)
                 TextButton(onClick = {
                     db.collection("accountRequests").document(uid).update(
                         mapOf("status" to "cancelled", "cancelledAt" to System.currentTimeMillis())

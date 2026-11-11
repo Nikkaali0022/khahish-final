@@ -1353,7 +1353,7 @@ fun NewChatScreen(
                             Icon(Icons.Default.Chat, null, tint = Green)
                         }
                     }
-                    HorizontalDivider(color = Color(0xFFEAF0ED))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
             }
         }
@@ -1761,7 +1761,7 @@ fun ChatList(
                     }
 
                     HorizontalDivider(
-                        color = Color(0xFFEAF0ED),
+                        color = MaterialTheme.colorScheme.outlineVariant,
                         modifier = Modifier.padding(start = 82.dp)
                     )
                 }

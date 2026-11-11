@@ -318,7 +318,7 @@ fun KhahishUpdatesScreen(
                     Box(
                         Modifier.align(Alignment.BottomEnd).size(21.dp).background(Green, CircleShape),
                         contentAlignment = Alignment.Center
-                    ) { Icon(Icons.Default.Add, null, tint = Color.White, modifier = Modifier.size(15.dp)) }
+                    ) { Icon(Icons.Default.Add, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(15.dp)) }
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
