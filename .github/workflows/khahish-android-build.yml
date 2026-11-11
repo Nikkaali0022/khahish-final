@@ -1,6 +1,9 @@
 name: Khahish Android Build
 
 on:
+  push:
+    branches:
+      - work/khahish-search-people-popup
   pull_request:
     branches:
       - work/consolidated-nov-2026
