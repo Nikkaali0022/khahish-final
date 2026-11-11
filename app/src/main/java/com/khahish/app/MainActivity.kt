@@ -238,6 +238,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= 27) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
+        }
         pendingNotificationIntent = intent.takeIf {
             it.hasExtra("khahish_chat_id") || it.hasExtra("khahish_call_id")
         }
@@ -351,6 +358,7 @@ fun KhahishApp() {
     var showNewGroup by remember { mutableStateOf(false) }
     var activeCall by remember { mutableStateOf<KhahishCall?>(null) }
     var incomingCall by remember { mutableStateOf(false) }
+    var autoAcceptIncoming by remember { mutableStateOf(false) }
     val latestActiveCall by rememberUpdatedState(activeCall)
 
     DisposableEffect(auth) {
@@ -370,15 +378,25 @@ fun KhahishApp() {
             ?: return@LaunchedEffect
         val callId = notificationIntent.getStringExtra("khahish_call_id").orEmpty()
         if (callId.isNotBlank()) {
+            val callAction = notificationIntent.getStringExtra("khahish_call_action").orEmpty()
+            KhahishMessagingService.cancelIncomingCallNotification(appContext, callId)
             FirebaseFirestore.getInstance().collection("calls").document(callId).get()
                 .addOnSuccessListener { snapshot ->
                     val call = if (snapshot.exists()) KhahishCall.from(snapshot) else null
                     if (call == null || call.calleeUid != uid) {
                         Toast.makeText(appContext, "This incoming call is not available for your account.", Toast.LENGTH_LONG).show()
-                    } else if (call.status != "ringing") {
+                    } else if (callAction == "reject") {
+                        if (call.status == "ringing") {
+                            KhahishCallRepository().rejectCall(callId) { message ->
+                                Toast.makeText(appContext, "Could not reject call: $message", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                        autoAcceptIncoming = false
+                    } else if (call.status != "ringing" && call.status != "accepted") {
                         Toast.makeText(appContext, "This call is no longer ringing.", Toast.LENGTH_LONG).show()
                     } else {
                         incomingCall = true
+                        autoAcceptIncoming = callAction == "accept"
                         activeCall = call
                         tab = "Calls"
                         selectedChat = null
@@ -598,9 +616,11 @@ fun KhahishApp() {
                     KhahishCallScreen(
                         call = activeCall!!,
                         isIncoming = incomingCall,
+                        autoAcceptIncoming = autoAcceptIncoming,
                         onExit = {
                             activeCall = null
                             incomingCall = false
+                            autoAcceptIncoming = false
                         }
                     )
                 } else if (profileTargetUid.isNotBlank()) {
