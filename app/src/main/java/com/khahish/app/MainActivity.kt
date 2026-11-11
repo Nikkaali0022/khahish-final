@@ -1028,6 +1028,7 @@ fun KhahishApp() {
                         },
                         onUnlocked = { expiresAt ->
                             showSecretPasswordDialog = false
+                            secretPasswordHasPassword = true
                             secretUnlockExpiresAtMs = expiresAt
                             val requestedChat = pendingLockedChat
                             pendingLockedChat = null
