@@ -172,8 +172,15 @@ fun KhahishCallScreen(
     }
 
     LaunchedEffect(call.id, autoAcceptIncoming, currentCall.status) {
-        if (autoAcceptIncoming && isIncoming && currentCall.status == "ringing") {
-            repository.acceptCall(call.id) { message -> errorText = message; statusText = "Could not answer" }
+        if (autoAcceptIncoming && isIncoming &&
+            (currentCall.status == "ringing" || currentCall.status == "accepted")
+        ) {
+            if (currentCall.status == "ringing") {
+                repository.acceptCall(call.id) { message ->
+                    errorText = message
+                    statusText = "Could not answer"
+                }
+            }
             connectIfAllowed()
         }
     }
