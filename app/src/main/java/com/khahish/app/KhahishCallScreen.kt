@@ -1,7 +1,12 @@
 package com.khahish.app
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
+import android.os.Build
+import android.os.PowerManager
 import android.view.SurfaceView
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -43,7 +48,8 @@ import io.agora.rtc2.video.VideoCanvas
 fun KhahishCallScreen(
     call: KhahishCall,
     isIncoming: Boolean,
-    onExit: () -> Unit
+    onExit: () -> Unit,
+    autoAcceptIncoming: Boolean = false
 ) {
     val context = LocalContext.current
     val colors = MaterialTheme.colorScheme
@@ -57,7 +63,8 @@ fun KhahishCallScreen(
     var isJoined by remember(call.id) { mutableStateOf(false) }
     var isMuted by remember(call.id) { mutableStateOf(false) }
     var cameraEnabled by remember(call.id) { mutableStateOf(true) }
-    var speakerEnabled by remember(call.id) { mutableStateOf(true) }
+    var selectedAudioRoute by remember(call.id) { mutableStateOf(if (call.isVideo) "speaker" else "earpiece") }
+    var audioRouteMenuExpanded by remember(call.id) { mutableStateOf(false) }
     var credentials by remember(call.id) { mutableStateOf<AgoraRtcCredentials?>(null) }
     var session by remember(call.id) { mutableStateOf<KhahishAgoraSession?>(null) }
     var connectionStarted by remember(call.id) { mutableStateOf(false) }
@@ -68,7 +75,7 @@ fun KhahishCallScreen(
 
     val peerUid = if (isIncoming) currentCall.callerUid else currentCall.calleeUid
     val displayName = if (isIncoming) currentCall.callerName else currentCall.calleeName
-    val isConnected = currentCall.status == "accepted" || isJoined
+    val isConnected = isJoined
 
     val requiredPermissions = remember(call.isVideo) {
         if (call.isVideo) arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA)
@@ -80,7 +87,8 @@ fun KhahishCallScreen(
     }
 
     fun requestCredentialsAndJoin() {
-        statusText = "Connecting…"
+        statusText = "Connecting securely…"
+        errorText = ""
         KhahishAgoraTokenClient.requestToken(
             currentCall.id,
             currentCall.channelName,
@@ -90,15 +98,16 @@ fun KhahishCallScreen(
                     context = context,
                     credentials = token,
                     isVideoCall = currentCall.isVideo,
-                    onJoined = { isJoined = true; statusText = "Connected" },
-                    onRemoteUserJoined = { uid -> remoteUid = uid; statusText = "Connected" },
+                    onJoined = { isJoined = true; statusText = "Connected"; errorText = "" },
+                    onRemoteUserJoined = { uid -> remoteUid = uid; statusText = "Connected"; errorText = "" },
                     onRemoteUserLeft = { statusText = "The other person left the call" },
-                    onFailure = { errorText = it }
+                    onFailure = { message -> statusText = "Connection failed"; errorText = message }
                 )
                 session = rtc
+                rtc.setAudioRoute(selectedAudioRoute)
                 rtc.join()
             },
-            onError = { errorText = it }
+            onError = { message -> statusText = "Connection failed"; errorText = message }
         )
     }
 
@@ -146,14 +155,12 @@ fun KhahishCallScreen(
                 currentCall = updated
                 when (updated.status) {
                     "accepted" -> {
-                        statusText = "Connected"
-                        if (!isIncoming && session == null && !connectionStarted) {
-                            connectIfAllowed()
-                        }
+                        statusText = if (isJoined) "Connected" else "Connecting audio…"
+                        if (!isIncoming && session == null && !connectionStarted) connectIfAllowed()
                     }
-                    "rejected" -> { statusText = "Call declined"; onExit() }
-                    "ended" -> { statusText = "Call ended"; onExit() }
-                    "missed" -> { statusText = "Missed call"; onExit() }
+                    "rejected" -> { errorText = ""; statusText = "Call declined"; onExit() }
+                    "ended" -> { errorText = ""; statusText = "Call ended"; onExit() }
+                    "missed" -> { errorText = ""; statusText = "Missed call"; onExit() }
                     "ringing" -> statusText = if (isIncoming) "Incoming call" else "Ringing…"
                 }
             }
@@ -161,6 +168,31 @@ fun KhahishCallScreen(
         onDispose {
             registration.remove()
             latestSession?.leave()
+        }
+    }
+
+    LaunchedEffect(call.id, autoAcceptIncoming, currentCall.status) {
+        if (autoAcceptIncoming && isIncoming && currentCall.status == "ringing") {
+            repository.acceptCall(call.id) { message -> errorText = message; statusText = "Could not answer" }
+            connectIfAllowed()
+        }
+    }
+
+    DisposableEffect(call.id, selectedAudioRoute, isJoined, call.isVideo) {
+        var proximityLock: PowerManager.WakeLock? = null
+        if (!call.isVideo && isJoined && selectedAudioRoute == "earpiece") {
+            try {
+                val power = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+                if (power.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)) {
+                    proximityLock = power.newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, "Khahish:CallProximity").apply {
+                        setReferenceCounted(false)
+                        acquire()
+                    }
+                }
+            } catch (_: Exception) { proximityLock = null }
+        }
+        onDispose {
+            try { if (proximityLock?.isHeld == true) proximityLock?.release() } catch (_: Exception) { }
         }
     }
 
@@ -181,7 +213,7 @@ fun KhahishCallScreen(
 
     LaunchedEffect(call.id, currentCall.status, currentCall.acceptedAt, currentCall.updatedAt) {
         val connectedAt = currentCall.acceptedAt.takeIf { it > 0L } ?: currentCall.updatedAt
-        if (currentCall.status == "accepted" && connectedAt > 0L) {
+        if (isJoined && currentCall.status == "accepted" && connectedAt > 0L) {
             while (currentCall.status == "accepted") {
                 callElapsedSeconds = ((System.currentTimeMillis() - connectedAt)
                     .coerceAtLeast(0L) / 1000L).toInt()
@@ -325,7 +357,7 @@ fun KhahishCallScreen(
                     colors = ButtonDefaults.buttonColors(containerColor = colors.primary)
                 ) { Text("Accept") }
             }
-        } else if (currentCall.status == "accepted" || isJoined) {
+        } else if (isJoined) {
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
@@ -351,15 +383,40 @@ fun KhahishCallScreen(
                         }
                     )
                 }
-                CallControlButton(
-                    icon = if (speakerEnabled) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
-                    label = "Speaker",
-                    background = colors.surfaceVariant,
-                    onClick = {
-                        speakerEnabled = !speakerEnabled
-                        session?.setSpeakerEnabled(speakerEnabled)
+                Box {
+                    CallControlButton(
+                        icon = when (selectedAudioRoute) {
+                            "speaker" -> Icons.Default.VolumeUp
+                            "bluetooth" -> Icons.Default.Bluetooth
+                            else -> Icons.Default.VolumeOff
+                        },
+                        label = "Audio output",
+                        background = colors.surfaceVariant,
+                        onClick = { audioRouteMenuExpanded = true }
+                    )
+                    DropdownMenu(expanded = audioRouteMenuExpanded, onDismissRequest = { audioRouteMenuExpanded = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Earpiece") },
+                            leadingIcon = { Icon(Icons.Default.PhoneAndroid, null) },
+                            trailingIcon = { if (selectedAudioRoute == "earpiece") Icon(Icons.Default.Check, null, tint = colors.primary) },
+                            onClick = { selectedAudioRoute = "earpiece"; session?.setAudioRoute("earpiece"); audioRouteMenuExpanded = false }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Phone Speaker") },
+                            leadingIcon = { Icon(Icons.Default.VolumeUp, null) },
+                            trailingIcon = { if (selectedAudioRoute == "speaker") Icon(Icons.Default.Check, null, tint = colors.primary) },
+                            onClick = { selectedAudioRoute = "speaker"; session?.setAudioRoute("speaker"); audioRouteMenuExpanded = false }
+                        )
+                        if (hasKhahishBluetoothAudio(context)) {
+                            DropdownMenuItem(
+                                text = { Text("Bluetooth") },
+                                leadingIcon = { Icon(Icons.Default.Bluetooth, null) },
+                                trailingIcon = { if (selectedAudioRoute == "bluetooth") Icon(Icons.Default.Check, null, tint = colors.primary) },
+                                onClick = { selectedAudioRoute = "bluetooth"; session?.setAudioRoute("bluetooth"); audioRouteMenuExpanded = false }
+                            )
+                        }
                     }
-                )
+                }
                 CallControlButton(
                     icon = Icons.Default.CallEnd,
                     label = "End",
@@ -412,6 +469,15 @@ private fun CallControlButton(
         Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
     }
 }
+
+private fun hasKhahishBluetoothAudio(context: Context): Boolean = try {
+    val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { device ->
+        device.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+            device.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+            (Build.VERSION.SDK_INT >= 31 && device.type == AudioDeviceInfo.TYPE_BLE_HEADSET)
+    }
+} catch (_: Exception) { false }
 
 private fun formatKhahishCallDuration(totalSeconds: Int): String {
     val hours = totalSeconds / 3600
