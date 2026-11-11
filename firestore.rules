@@ -329,7 +329,7 @@ service cloud.firestore {
               'members', 'memberNames', 'groupAdmins', 'groupName', 'updatedAt'
             ])
             && request.resource.data.members is list
-            && request.resource.data.members.size() >= 2
+            && request.resource.data.members.size() >= 3
             && request.resource.data.groupAdmins is list
             && request.auth.uid in request.resource.data.groupAdmins
             && request.resource.data.members.hasAll(request.resource.data.groupAdmins)
@@ -346,6 +346,7 @@ service cloud.firestore {
             && !(request.auth.uid in request.resource.data.members)
             && resource.data.members.hasAll(request.resource.data.members)
             && request.resource.data.members.size() == resource.data.members.size() - 1
+            && request.resource.data.members.size() >= 3
             && !(request.auth.uid in resource.data.get('groupAdmins', []))
             && request.resource.data.groupAdmins == resource.data.get('groupAdmins', [])
             && request.resource.data.memberNames == resource.data.memberNames
