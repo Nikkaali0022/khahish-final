@@ -45,6 +45,7 @@ class KhahishAgoraSession(
 
         override fun onTokenPrivilegeWillExpire(token: String?) {
             KhahishAgoraTokenClient.requestToken(
+                credentials.callId,
                 credentials.channelName,
                 onSuccess = { renewed ->
                     if (!released) {

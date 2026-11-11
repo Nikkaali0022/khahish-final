@@ -82,6 +82,7 @@ fun KhahishCallScreen(
     fun requestCredentialsAndJoin() {
         statusText = "Connecting…"
         KhahishAgoraTokenClient.requestToken(
+            currentCall.id,
             currentCall.channelName,
             onSuccess = { token ->
                 credentials = token
@@ -363,7 +364,7 @@ fun KhahishCallScreen(
                     icon = Icons.Default.CallEnd,
                     label = "End",
                     background = colors.error,
-                    iconTint = Color.White,
+                    iconTint = colors.onError,
                     onClick = {
                         repository.endCall(call.id) { errorText = it }
                         session?.leave()
