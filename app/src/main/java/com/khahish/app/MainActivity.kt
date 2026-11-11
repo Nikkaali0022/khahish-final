@@ -705,7 +705,11 @@ fun KhahishApp() {
                 } else if (selectedChat != null) {
                     ConversationScreen(
                         chat = selectedChat!!,
-                        onBack = { selectedChat = null },
+                        onBack = {
+                            selectedChat = null
+                            if (openedChatFromLockedChats) showLockedChats = true
+                            openedChatFromLockedChats = false
+                        },
                         onViewProfile = { profileTargetUid = it },
                         onStartCall = { isVideo ->
                             KhahishCallRepository().createOutgoingCall(
