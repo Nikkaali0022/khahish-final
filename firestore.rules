@@ -390,8 +390,7 @@ service cloud.firestore {
           )
         );
 
-      allow update: if signedIn()
-        && request.auth.uid in resource.data.members
+      allow update: if canAccessChatContent(chatId)
         && (
           // Ordinary chat activity, pinning and disappearing-message setting.
           (
@@ -453,7 +452,7 @@ service cloud.firestore {
           )
         );
 
-      allow delete: if signedIn()
+      allow delete: if canAccessChatContent(chatId)
         && request.auth.uid == resource.data.createdBy;
 
       // Messages are visible to current chat members only.
