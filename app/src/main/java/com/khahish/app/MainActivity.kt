@@ -1519,7 +1519,7 @@ fun ChatList(
     var hasMoreMessageSearchPages by remember { mutableStateOf(false) }
     var isLoadingMoreMessageSearch by remember { mutableStateOf(false) }
 
-    DisposableEffect(currentUid) {
+    DisposableEffect(currentUid, lockedContactUids.joinToString("|"), showOnlyLockedChats) {
         val registration = db.collection("chats")
             .whereArrayContains("members", currentUid)
             .addSnapshotListener { snapshot, error ->
