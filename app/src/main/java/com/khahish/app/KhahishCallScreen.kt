@@ -101,7 +101,20 @@ fun KhahishCallScreen(
                     onJoined = { isJoined = true; statusText = "Connected"; errorText = "" },
                     onRemoteUserJoined = { uid -> remoteUid = uid; statusText = "Connected"; errorText = "" },
                     onRemoteUserLeft = { statusText = "The other person left the call" },
-                    onFailure = { message -> statusText = "Connection failed"; errorText = message }
+                    onFailure = { message -> statusText = "Connection failed"; errorText = message },
+                    onTokenRenewalFailure = { message ->
+                        if (isJoined) {
+                            statusText = "Connected"
+                            errorText = if (message.contains("server configuration", ignoreCase = true)) {
+                                "Your call is still connected, but the server could not renew its calling credentials. Check the Cloudflare Worker configuration to support longer calls."
+                            } else {
+                                "Your call is still connected, but its calling credentials could not be renewed: ${message}"
+                            }
+                        } else {
+                            statusText = "Connection failed"
+                            errorText = message
+                        }
+                    }
                 )
                 session = rtc
                 rtc.setAudioRoute(selectedAudioRoute)
