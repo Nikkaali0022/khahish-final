@@ -125,6 +125,15 @@ fun KhahishCallScreen(
         }
     }
 
+    val bluetoothPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            selectedAudioRoute = "bluetooth"
+            session?.setAudioRoute("bluetooth")
+        }
+    }
+
     fun connectIfAllowed() {
         if (connectionStarted) return
         connectionStarted = true
@@ -420,7 +429,17 @@ fun KhahishCallScreen(
                                 text = { Text("Bluetooth") },
                                 leadingIcon = { Icon(Icons.Default.Bluetooth, null) },
                                 trailingIcon = { if (selectedAudioRoute == "bluetooth") Icon(Icons.Default.Check, null, tint = colors.primary) },
-                                onClick = { selectedAudioRoute = "bluetooth"; session?.setAudioRoute("bluetooth"); audioRouteMenuExpanded = false }
+                                onClick = {
+                                audioRouteMenuExpanded = false
+                                if (Build.VERSION.SDK_INT >= 31 &&
+                                    ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
+                                ) {
+                                    bluetoothPermissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT)
+                                } else {
+                                    selectedAudioRoute = "bluetooth"
+                                    session?.setAudioRoute("bluetooth")
+                                }
+                            }
                             )
                         }
                     }
