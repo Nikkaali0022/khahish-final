@@ -1255,17 +1255,14 @@ fun NewChatScreen(
                                 val members = listOf(currentUid, user.uid).sorted()
                                 val now = System.currentTimeMillis()
 
-                                db.collection("chats")
-                                    .whereEqualTo(
-                                        com.google.firebase.firestore.FieldPath.documentId(),
-                                        chatId
-                                    )
-                                    .whereArrayContains("members", currentUid)
-                                    .limit(1)
-                                    .get()
-                                    .addOnSuccessListener { matches ->
-                                        val existing = matches.documents.firstOrNull()
-                                        if (existing != null) {
+                                // Read the deterministic conversation document directly.
+                                // A collection query is unnecessary here and can be rejected
+                                // by Firestore list rules before a chat exists.
+                                chatRef.get()
+                                    .addOnSuccessListener { existing ->
+                                        val existingIsMemberChat = existing.exists() &&
+                                            (existing.get("members") as? List<*>)?.contains(currentUid) == true
+                                        if (existingIsMemberChat) {
                                             creatingUid = ""
                                             onChatCreated(
                                                 Chat(
