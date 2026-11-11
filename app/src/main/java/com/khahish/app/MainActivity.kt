@@ -1761,7 +1761,7 @@ fun ChatList(
                     }
 
                     HorizontalDivider(
-                        color = Color(0xFFEAF0ED),
+                        color = MaterialTheme.colorScheme.outlineVariant,
                         modifier = Modifier.padding(start = 82.dp)
                     )
                 }
