@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.SetOptions
 import java.util.Locale
@@ -150,9 +151,17 @@ fun KhahishSettingsScreen(
             val registration = db.collection("supportTickets")
                 .whereEqualTo("userUid", uid)
                 .addSnapshotListener { snapshot, _ ->
-                    supportTickets = snapshot?.documents.orEmpty().map { doc ->
-                        KhahishSupportTicket(doc.id, doc.getString("subject").orEmpty(), doc.getString("status") ?: "pending", doc.getString("adminReply").orEmpty(), doc.getLong("createdAt") ?: 0L)
-                    }.sortedByDescending { it.createdAt }
+                    val ticketDocuments: List<DocumentSnapshot> = snapshot?.documents ?: emptyList()
+                    val parsedTickets: List<KhahishSupportTicket> = ticketDocuments.map { doc: DocumentSnapshot ->
+                        KhahishSupportTicket(
+                            id = doc.id,
+                            subject = doc.getString("subject").orEmpty(),
+                            status = doc.getString("status") ?: "pending",
+                            adminReply = doc.getString("adminReply").orEmpty(),
+                            createdAt = doc.getLong("createdAt") ?: 0L
+                        )
+                    }
+                    supportTickets = parsedTickets.sortedByDescending { ticket: KhahishSupportTicket -> ticket.createdAt }
                 }
             onDispose { registration.remove() }
         }
