@@ -2652,6 +2652,26 @@ fun ConversationScreen(
                 }
                 items(displayedMessages, key = { it.id }) { msg ->
                 val isMe = msg.senderId == currentUserId
+                val outgoingBubbleColor = remember(chatBubbleColorHex) {
+                    runCatching {
+                        Color(android.graphics.Color.parseColor(chatBubbleColorHex))
+                    }.getOrElse { Green }
+                }
+                val outgoingBubbleTextColor = remember(outgoingBubbleColor) {
+                    fun linearize(channel: Float): Float =
+                        if (channel <= 0.04045f) channel / 12.92f
+                        else kotlin.math.pow((channel + 0.055f) / 1.055f, 2.4f)
+                    val luminance =
+                        0.2126f * linearize(outgoingBubbleColor.red) +
+                        0.7152f * linearize(outgoingBubbleColor.green) +
+                        0.0722f * linearize(outgoingBubbleColor.blue)
+                    if (luminance > 0.179f) Color.Black else Color.White
+                }
+                val bubbleBackgroundColor = if (isMe) outgoingBubbleColor else MaterialTheme.colorScheme.surface
+                val bubbleTextColor = if (isMe) outgoingBubbleTextColor else MaterialTheme.colorScheme.onSurface
+                val bubbleSecondaryTextColor = if (isMe) {
+                    if (outgoingBubbleTextColor == Color.White) Color(0xFFDCEFEA) else Color(0xFF34433F)
+                } else MaterialTheme.colorScheme.onSurfaceVariant
 
                 val isSelected = msg.id in selectedMessageIds
                 val swipeOffset = remember(msg.id) { Animatable(0f) }
@@ -2705,7 +2725,7 @@ fun ConversationScreen(
                             )
                             .border(2.dp, if (isSelected) Green else Color.Transparent, RoundedCornerShape(16.dp))
                             .background(
-                                if (isSelected) MaterialTheme.colorScheme.surfaceVariant else if (isMe) Color(android.graphics.Color.parseColor(chatBubbleColorHex)) else MaterialTheme.colorScheme.surface,
+                                if (isSelected) MaterialTheme.colorScheme.surfaceVariant else bubbleBackgroundColor,
                                 RoundedCornerShape(
                                     topStart = 16.dp,
                                     topEnd = 16.dp,
@@ -2831,7 +2851,7 @@ fun ConversationScreen(
                             Spacer(Modifier.height(5.dp))
                         }
                         if (msg.text.isNotBlank() && msg.mediaType != "location" && msg.mediaType != "contact") {
-                            Text(msg.text, color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp)
+                            Text(msg.text, color = if (isSelected) MaterialTheme.colorScheme.onSurface else bubbleTextColor, fontSize = 15.sp)
                         }
                         if (msg.restoredFromBackup) {
                             Text("Imported backup • sender not verified", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp)
@@ -2861,10 +2881,10 @@ fun ConversationScreen(
                                     Locale.getDefault()
                                 ).format(java.util.Date(msg.timestamp)),
                                 fontSize = 10.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = bubbleSecondaryTextColor
                             )
                             if (msg.editedAt > 0L) {
-                                Text(" · edited", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(" · edited", fontSize = 9.sp, color = bubbleSecondaryTextColor
                             }
 
 
