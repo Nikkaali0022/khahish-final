@@ -3457,38 +3457,147 @@ fun ConversationScreen(
     }
 
     if (reactionTarget != null) {
-        Dialog(onDismissRequest = { reactionTarget = null }) {
+        val target = reactionTarget!!
+        Dialog(onDismissRequest = { reactionTarget = null; reactionMenuExpanded = false }) {
             Surface(
-                shape = RoundedCornerShape(28.dp),
+                shape = RoundedCornerShape(24.dp),
                 color = MaterialTheme.colorScheme.surface,
-                shadowElevation = 12.dp
+                shadowElevation = 16.dp
             ) {
-                Row(
-                    Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Column(
+                    Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    horizontalAlignment = Alignment.End
                 ) {
-                    listOf("❤️", "😂", "😮", "😢", "👍", "🙏").forEach { emoji ->
-                        TextButton(onClick = {
-                            val target = reactionTarget ?: return@TextButton
-                            val messageRef = chatRef.collection("messages").document(target.id)
-                            val updateTask = if (target.reactions[currentUserId] == emoji) {
-                                messageRef.update("reactions.$currentUserId", FieldValue.delete())
-                            } else {
-                                messageRef.update("reactions.$currentUserId", emoji)
-                            }
-                            updateTask.addOnSuccessListener { reactionTarget = null }
-                                .addOnFailureListener {
-                                    showToast(context, "Reaction failed: ${it.message}")
+                    Box {
+                        IconButton(onClick = { reactionMenuExpanded = true }) {
+                            Icon(Icons.Default.MoreVert, "More message actions")
+                        }
+                        DropdownMenu(
+                            expanded = reactionMenuExpanded,
+                            onDismissRequest = { reactionMenuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Forward") },
+                                leadingIcon = { Icon(Icons.Default.Forward, null) },
+                                onClick = {
+                                    selectedMessageIds = setOf(target.id)
                                     reactionTarget = null
+                                    reactionMenuExpanded = false
+                                    showForwardDialog = true
                                 }
-                        }) {
-                            Text(emoji, fontSize = 25.sp)
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Delete") },
+                                leadingIcon = { Icon(Icons.Default.DeleteOutline, null) },
+                                onClick = {
+                                    selectedMessageIds = setOf(target.id)
+                                    reactionTarget = null
+                                    reactionMenuExpanded = false
+                                    showDeleteOptions = true
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Copy") },
+                                leadingIcon = { Icon(Icons.Default.ContentCopy, null) },
+                                onClick = {
+                                    val value = target.text.ifBlank { target.imageUrl }
+                                    if (value.isNotBlank()) {
+                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Khahish message", value))
+                                        showToast(context, "Copied")
+                                    }
+                                    reactionTarget = null
+                                    reactionMenuExpanded = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Pin") },
+                                leadingIcon = { Icon(Icons.Default.PushPin, null) },
+                                onClick = {
+                                    chatRef.update(mapOf(
+                                        "pinnedMessageId" to target.id,
+                                        "pinnedMessageText" to target.text.ifBlank { target.mediaType.replaceFirstChar { ch -> ch.uppercase() } },
+                                        "pinnedBy" to currentUserId,
+                                        "pinnedAt" to System.currentTimeMillis()
+                                    )).addOnSuccessListener { showToast(context, "Message pinned") }
+                                        .addOnFailureListener { showToast(context, "Could not pin message: ${it.message}") }
+                                    reactionTarget = null
+                                    reactionMenuExpanded = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Translate") },
+                                leadingIcon = { Icon(Icons.Default.Translate, null) },
+                                enabled = target.text.isNotBlank(),
+                                onClick = {
+                                    if (target.text.isNotBlank()) openSharedUrl(
+                                        context,
+                                        "https://translate.google.com/?sl=auto&text=" + Uri.encode(target.text)
+                                    )
+                                    reactionTarget = null
+                                    reactionMenuExpanded = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Verify security code") },
+                                leadingIcon = { Icon(Icons.Default.VerifiedUser, null) },
+                                onClick = {
+                                    showSecurityCodeInfo = true
+                                    reactionTarget = null
+                                    reactionMenuExpanded = false
+                                }
+                            )
+                        }
+                    }
+                    Row(
+                        Modifier.padding(bottom = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(1.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        listOf("❤️", "😂", "😮", "😢", "👍", "🙏").forEach { emoji ->
+                            TextButton(onClick = {
+                                val messageRef = chatRef.collection("messages").document(target.id)
+                                val updateTask = if (target.reactions[currentUserId] == emoji) {
+                                    messageRef.update("reactions.$currentUserId", FieldValue.delete())
+                                } else {
+                                    messageRef.update("reactions.$currentUserId", emoji)
+                                }
+                                updateTask.addOnSuccessListener { reactionTarget = null }
+                                    .addOnFailureListener {
+                                        showToast(context, "Reaction failed: ${it.message}")
+                                        reactionTarget = null
+                                    }
+                            }) { Text(emoji, fontSize = 24.sp) }
                         }
                     }
                 }
             }
         }
+    }
+
+    if (messageInfoTarget != null) {
+        val item = messageInfoTarget!!
+        AlertDialog(
+            onDismissRequest = { messageInfoTarget = null },
+            title = { Text("Message info") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Sent: " + java.text.SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(java.util.Date(item.timestamp)))
+                    Text("Delivered to: ${item.deliveredTo.size}")
+                    Text("Read by: ${item.readBy.size}")
+                }
+            },
+            confirmButton = { TextButton(onClick = { messageInfoTarget = null }) { Text("Close") } }
+        )
+    }
+
+    if (showSecurityCodeInfo) {
+        AlertDialog(
+            onDismissRequest = { showSecurityCodeInfo = false },
+            title = { Text("Verify security code") },
+            text = { Text("Security-code verification will become available when end-to-end encryption is enabled for Khahish chats. No unverified code is shown here.") },
+            confirmButton = { TextButton(onClick = { showSecurityCodeInfo = false }) { Text("OK") } }
+        )
     }
     if (showPeerPicture && peerPhotoUrl.isNotBlank()) Dialog(onDismissRequest = { showPeerPicture = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Box(Modifier.fillMaxWidth().fillMaxHeight(.82f).background(Color.Black, RoundedCornerShape(18.dp)), contentAlignment = Alignment.Center) {
