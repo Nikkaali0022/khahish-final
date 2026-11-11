@@ -29,7 +29,6 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.CropRotate
 import androidx.compose.material.icons.filled.EmojiEmotions
-import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
@@ -49,6 +48,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextAlign
@@ -111,6 +111,7 @@ fun KhahishUpdatesScreen(
     var audienceMembers by remember { mutableStateOf(emptyList<Pair<String, String>>()) }
     var audienceListLoading by remember { mutableStateOf(false) }
     var audienceAdding by remember { mutableStateOf(false) }
+    var editorAudienceMenu by remember { mutableStateOf(false) }
     var viewerStoryId by remember { mutableStateOf("") }
     var storyViewers by remember { mutableStateOf(emptyList<String>()) }
     var showSearch by remember { mutableStateOf(false) }
@@ -916,16 +917,23 @@ fun KhahishUpdatesScreen(
                         Icon(Icons.Default.Close, "Close editor", tint = Color.White)
                     }
                     Text("Edit story", color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { audienceMenu = true }) {
-                        Text(
-                            when (storyAudience) {
-                                "close_friends" -> "Close Friends"
-                                "my_contacts" -> "My Contacts"
-                                "my_friends" -> "My Friends"
-                                else -> "Everyone"
-                            },
-                            color = Color(0xFF70D7B8)
-                        )
+                    Box {
+                        TextButton(onClick = { editorAudienceMenu = true }) {
+                            Text(
+                                when (storyAudience) {
+                                    "close_friends" -> "Close Friends"
+                                    "my_contacts" -> "My Contacts"
+                                    "my_friends" -> "My Friends"
+                                    else -> "Everyone"
+                                },
+                                color = Color(0xFF70D7B8)
+                            )
+                        }
+                        DropdownMenu(expanded = editorAudienceMenu, onDismissRequest = { editorAudienceMenu = false }) {
+                            listOf("close_friends" to "Close Friends", "my_contacts" to "My Contacts", "my_friends" to "My Friends", "everyone" to "Everyone").forEach { (value, label) ->
+                                DropdownMenuItem(text = { Text(label) }, onClick = { storyAudience = value; editorAudienceMenu = false })
+                            }
+                        }
                     }
                 }
                 Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -1017,6 +1025,38 @@ fun KhahishUpdatesScreen(
                         }
                     } else {
                         Text("Recording saved on this device until you publish.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                        OutlinedButton(
+                            onClick = {
+                                val file = voicePreviewFile
+                                if (file != null) {
+                                    if (voiceStoryPlaying) {
+                                        voiceStoryPlayer?.pause()
+                                        voiceStoryPlaying = false
+                                    } else {
+                                        try {
+                                            if (voiceStoryPlayer == null) {
+                                                voiceStoryPlayer = MediaPlayer().apply {
+                                                    setDataSource(file.absolutePath)
+                                                    setOnPreparedListener { player -> player.start(); voiceStoryPlaying = true }
+                                                    setOnCompletionListener { voiceStoryPlaying = false }
+                                                    prepareAsync()
+                                                }
+                                            } else {
+                                                voiceStoryPlayer?.start()
+                                                voiceStoryPlaying = true
+                                            }
+                                        } catch (error: Exception) {
+                                            Toast.makeText(context, "Preview failed: ${error.message}", Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(if (voiceStoryPlaying) Icons.Default.Pause else Icons.Default.PlayCircle, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(if (voiceStoryPlaying) "Pause preview" else "Preview recording")
+                        }
                         Button(onClick = { publishVoiceStory() }, enabled = !uploading, modifier = Modifier.fillMaxWidth()) {
                             Icon(Icons.Default.Send, null); Spacer(Modifier.width(8.dp)); Text("Publish voice story")
                         }
