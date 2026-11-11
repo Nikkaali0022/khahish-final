@@ -1,5 +1,9 @@
 name: Build Khahish APK
 
+concurrency:
+  group: khahish-android-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
   push:
@@ -174,6 +178,11 @@ jobs:
           grep -q 'io.coil-kt:coil-compose' app/build.gradle.kts
           echo "Using the project's committed Android, Kotlin and Firebase versions without rewriting them."
 
+      - name: Build Khahish APK
+        run: |
+          cd "$PROJECT_DIR"
+          gradle assembleDebug
+
       - name: Run Android Keystore instrumentation tests
         timeout-minutes: 25
         uses: reactivecircus/android-emulator-runner@v2
@@ -195,10 +204,6 @@ jobs:
             ${{ env.PROJECT_DIR }}/app/build/reports/androidTests/connected/debug/
           if-no-files-found: ignore
 
-      - name: Build Khahish APK
-        run: |
-          cd "$PROJECT_DIR"
-          gradle assembleDebug
 
       # NEW STEP: Print SHA-1 and SHA-256 fingerprints
       - name: Show Android SHA fingerprints

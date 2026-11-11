@@ -784,6 +784,47 @@ service cloud.firestore {
     }
 
     // -----------------------------------------------------
+    // User support tickets; only admins can read all tickets or reply
+    // -----------------------------------------------------
+
+    match /supportTickets/{ticketId} {
+      allow create: if signedIn()
+        && request.resource.data.userUid == request.auth.uid
+        && request.resource.data.userEmail is string
+        && request.resource.data.subject is string
+        && request.resource.data.subject.size() >= 3
+        && request.resource.data.subject.size() <= 100
+        && request.resource.data.message is string
+        && request.resource.data.message.size() >= 10
+        && request.resource.data.message.size() <= 2000
+        && request.resource.data.status == 'pending'
+        && request.resource.data.adminReply == ''
+        && request.resource.data.createdAt is int
+        && request.resource.data.updatedAt is int
+        && request.resource.data.keys().hasOnly([
+          'userUid', 'userEmail', 'subject', 'message', 'status',
+          'adminReply', 'createdAt', 'updatedAt'
+        ]);
+
+      allow get, list: if signedIn()
+        && (
+          resource.data.get('userUid', '') == request.auth.uid
+          || request.auth.token.get('admin', false) == true
+        );
+
+      allow update: if signedIn()
+        && request.auth.token.get('admin', false) == true
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'adminReply', 'updatedAt'])
+        && request.resource.data.status in ['pending', 'in_progress', 'resolved', 'closed']
+        && request.resource.data.adminReply is string
+        && request.resource.data.adminReply.size() <= 2000
+        && request.resource.data.updatedAt is int;
+
+      allow delete: if signedIn() && request.auth.token.get('admin', false) == true;
+    }
+
+    // -----------------------------------------------------
     // Default deny
     // -----------------------------------------------------
 
