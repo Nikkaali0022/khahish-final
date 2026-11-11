@@ -1058,6 +1058,7 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                                     "updatedAt" to now
                                 )
                                 transaction.set(usernameRef, mapOf("uid" to newUid, "username" to cleanUsername, "updatedAt" to now))
+                                transaction.set(db.collection("usernamesByUid").document(newUid), mapOf("uid" to newUid, "username" to cleanUsername, "updatedAt" to now), SetOptions.merge())
                                 transaction.set(db.collection("users").document(newUid), profileData, SetOptions.merge())
                                 val publicProfileData = mapOf(
                                     "uid" to newUid,
