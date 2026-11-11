@@ -1929,7 +1929,8 @@ private fun PeopleSearchDialog(
     var result by remember { mutableStateOf<AppUser?>(null) }
     var searching by remember { mutableStateOf(false) }
     var searchMessage by remember { mutableStateOf("Search by an exact username to find someone on Khahish.") }
-    var recentSearches by remember { mutableStateOf(emptyList<String>()) }
+    val searchPrefs = remember { context.getSharedPreferences("khahish_people_search", Context.MODE_PRIVATE) }
+    var recentSearches by remember { mutableStateOf(searchPrefs.getStringSet("recent_usernames", emptySet())?.toList().orEmpty()) }
 
     val filteredContacts = remember(existingContacts, contactQuery) {
         existingContacts.filter {
@@ -1961,7 +1962,9 @@ private fun PeopleSearchDialog(
                             if (profile.exists() && found != null && found.uid == targetUid) {
                                 result = found
                                 searchMessage = ""
-                                recentSearches = (listOf(term) + recentSearches.filterNot { it == term }).take(6)
+                                val updatedRecent = (listOf(term) + recentSearches.filterNot { it == term }).take(6)
+                                recentSearches = updatedRecent
+                                searchPrefs.edit().putStringSet("recent_usernames", updatedRecent.toSet()).apply()
                             } else {
                                 searchMessage = "This profile is not available."
                             }
