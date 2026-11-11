@@ -219,6 +219,14 @@ internal fun LockChatPasswordSettingsDialog(uid: String, onDismiss: () -> Unit) 
     var confirmPassword by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var hasPassword by remember { mutableStateOf(false) }
+
+    LaunchedEffect(uid) {
+        KhahishSecretChatApi.loadConfig(
+            onSuccess = { hasPassword = it.hasPassword },
+            onError = { message = it }
+        )
+    }
 
     AlertDialog(
         onDismissRequest = { if (!busy) onDismiss() },
@@ -226,14 +234,14 @@ internal fun LockChatPasswordSettingsDialog(uid: String, onDismiss: () -> Unit) 
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
                 Text(
-                    if (KhahishSecretChatLock.hasPassword(context, uid))
+                    if (hasPassword)
                         "Change the password used to open your Locked Chats."
                     else
                         "No secret password has been created yet. Tap the Khahish logo or name four times on the main page to create it.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 13.sp
                 )
-                if (KhahishSecretChatLock.hasPassword(context, uid)) {
+                if (hasPassword) {
                     OutlinedTextField(
                         value = currentPassword,
                         onValueChange = { currentPassword = it; message = "" },
@@ -263,7 +271,7 @@ internal fun LockChatPasswordSettingsDialog(uid: String, onDismiss: () -> Unit) 
             }
         },
         confirmButton = {
-            if (KhahishSecretChatLock.hasPassword(context, uid)) {
+            if (hasPassword) {
                 Button(
                     enabled = !busy && currentPassword.isNotBlank() && newPassword.isNotBlank() && confirmPassword.isNotBlank(),
                     onClick = {
