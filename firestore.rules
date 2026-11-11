@@ -33,6 +33,47 @@ service cloud.firestore {
           get(/databases/$(database)/documents/chats/$(chatId)).data.members;
     }
 
+    // Secret Locked Chats security is server-authorized by the Cloudflare
+    // Worker. Clients cannot write the password hash or unlock session docs.
+    function isSecretLockedMembers(members) {
+      return signedIn()
+        && members is list
+        && members.size() == 2
+        && exists(
+          /databases/$(database)/documents/users/$(request.auth.uid)/secretChatLock/config
+        )
+        && members.hasAny(
+          get(/databases/$(database)/documents/users/$(request.auth.uid)/secretChatLock/config)
+            .data.get('lockedContactUids', [])
+        );
+    }
+
+    function isSecretLockedChat(chatId) {
+      return exists(/databases/$(database)/documents/chats/$(chatId))
+        && isSecretLockedMembers(
+          get(/databases/$(database)/documents/chats/$(chatId)).data.members
+        )
+        && get(/databases/$(database)/documents/chats/$(chatId)).data.get('isGroup', false) != true;
+    }
+
+    function hasActiveSecretChatUnlock() {
+      return signedIn()
+        && exists(
+          /databases/$(database)/documents/users/$(request.auth.uid)/secretChatLock/sessions/current
+        )
+        && get(
+          /databases/$(database)/documents/users/$(request.auth.uid)/secretChatLock/sessions/current
+        ).data.get('expiresAt', null) is timestamp
+        && get(
+          /databases/$(database)/documents/users/$(request.auth.uid)/secretChatLock/sessions/current
+        ).data.expiresAt > request.time;
+    }
+
+    function canAccessChatContent(chatId) {
+      return isChatMember(chatId)
+        && (!isSecretLockedChat(chatId) || hasActiveSecretChatUnlock());
+    }
+
     function isGroupAdmin(chatId) {
       return isChatMember(chatId)
         && get(/databases/$(database)/documents/chats/$(chatId)).data.get('isGroup', false) == true
@@ -155,6 +196,16 @@ service cloud.firestore {
 
       match /fcmTokens/{tokenId} {
         allow read, create, update, delete: if isOwner(uid);
+      }
+
+      // Password hashes and unlock sessions are written only by the trusted
+      // Secret Locked Chats Worker using its server credentials.
+      match /secretChatLock/{lockDocument} {
+        allow read, write: if false;
+
+        match /sessions/{sessionId} {
+          allow read, write: if false;
+        }
       }
     }
 
@@ -301,7 +352,10 @@ service cloud.firestore {
       allow get: if signedIn()
         && (
           !exists(/databases/$(database)/documents/chats/$(chatId))
-          || request.auth.uid in resource.data.members
+          || (
+            request.auth.uid in resource.data.members
+            && (!isSecretLockedChat(chatId) || hasActiveSecretChatUnlock())
+          )
         );
       allow list: if signedIn() && request.auth.uid in resource.data.members;
 
@@ -329,6 +383,10 @@ service cloud.firestore {
             && request.resource.data.createdBy == request.auth.uid
             && requestParticipantsMatchChat(chatId, request.resource.data.members)
             && privateChatIsUnblocked(request.resource.data.members)
+            && (
+              !isSecretLockedMembers(request.resource.data.members)
+              || hasActiveSecretChatUnlock()
+            )
           )
         );
 
@@ -400,9 +458,9 @@ service cloud.firestore {
 
       // Messages are visible to current chat members only.
       match /messages/{messageId} {
-        allow get, list: if isChatMember(chatId);
+        allow get, list: if canAccessChatContent(chatId);
 
-        allow create: if isChatMember(chatId)
+        allow create: if canAccessChatContent(chatId)
           && privateChatIsUnblocked(
             get(/databases/$(database)/documents/chats/$(chatId)).data.members
           )
@@ -447,7 +505,7 @@ service cloud.firestore {
             || request.resource.data.replyToText is string
           );
 
-        allow update: if isChatMember(chatId)
+        allow update: if canAccessChatContent(chatId)
           && request.resource.data.senderId == resource.data.senderId
           && (
             // Only the original sender can edit message text.
@@ -586,7 +644,7 @@ service cloud.firestore {
           );
 
         // Messages may be deleted by their sender, or by a chat member after expiry.
-        allow delete: if isChatMember(chatId)
+        allow delete: if canAccessChatContent(chatId)
           && (
             resource.data.senderId == request.auth.uid
             || (
@@ -598,17 +656,17 @@ service cloud.firestore {
       }
 
       match /typing/{typingUid} {
-        allow get, list: if isChatMember(chatId);
-        allow create, update: if isChatMember(chatId)
+        allow get, list: if canAccessChatContent(chatId);
+        allow create, update: if canAccessChatContent(chatId)
           && request.auth.uid == typingUid
           && request.resource.data.isTyping is bool;
-        allow delete: if isChatMember(chatId)
+        allow delete: if canAccessChatContent(chatId)
           && request.auth.uid == typingUid;
       }
 
       match /liveLocations/{uid} {
-        allow get, list: if isChatMember(chatId);
-        allow create, update: if isChatMember(chatId)
+        allow get, list: if canAccessChatContent(chatId);
+        allow create, update: if canAccessChatContent(chatId)
           && request.auth.uid == uid
           && request.resource.data.uid == request.auth.uid
           && request.resource.data.latitude is number
@@ -616,7 +674,7 @@ service cloud.firestore {
           && request.resource.data.updatedAt is int
           && request.resource.data.expiresAt is int
           && request.resource.data.isActive is bool;
-        allow delete: if isChatMember(chatId) && request.auth.uid == uid;
+        allow delete: if canAccessChatContent(chatId) && request.auth.uid == uid;
       }
     }
 
