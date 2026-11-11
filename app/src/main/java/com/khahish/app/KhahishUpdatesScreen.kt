@@ -3,6 +3,7 @@ package com.khahish.app
 import android.Manifest
 import android.content.pm.PackageManager
 import android.media.MediaRecorder
+import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import java.io.File
@@ -13,6 +14,7 @@ import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -48,6 +50,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.text.font.FontWeight
@@ -93,6 +97,11 @@ fun KhahishUpdatesScreen(
     var voiceRecordingFile by remember { mutableStateOf<File?>(null) }
     var voicePreviewFile by remember { mutableStateOf<File?>(null) }
     var isRecordingVoice by remember { mutableStateOf(false) }
+    var viewerOwnerUid by remember { mutableStateOf("") }
+    var viewerStoryIndex by remember { mutableIntStateOf(0) }
+    var viewerPaused by remember { mutableStateOf(false) }
+    var voiceStoryPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
+    var voiceStoryPlaying by remember { mutableStateOf(false) }
     var videoPlayerUrl by remember { mutableStateOf("") }
     var storyAudience by remember { mutableStateOf("everyone") }
     var audienceMenu by remember { mutableStateOf(false) }
@@ -304,6 +313,44 @@ fun KhahishUpdatesScreen(
         })
     }
 
+    fun openStoryViewer(ownerUid: String) {
+        if (stories.none { it.ownerUid == ownerUid }) return
+        viewerOwnerUid = ownerUid
+        viewerStoryIndex = 0
+        viewerPaused = false
+    }
+
+    fun moveStoryViewer(direction: Int) {
+        val groups = stories.groupBy { it.ownerUid }
+            .values.map { group -> group.sortedBy { it.createdAt } }
+            .sortedByDescending { it.lastOrNull()?.createdAt ?: 0L }
+        val groupIndex = groups.indexOfFirst { it.firstOrNull()?.ownerUid == viewerOwnerUid }
+        if (groupIndex < 0) { viewerOwnerUid = ""; return }
+        val currentGroup = groups[groupIndex]
+        if (direction > 0) {
+            if (viewerStoryIndex < currentGroup.lastIndex) {
+                viewerStoryIndex += 1
+            } else if (groupIndex < groups.lastIndex) {
+                viewerOwnerUid = groups[groupIndex + 1].first().ownerUid
+                viewerStoryIndex = 0
+            } else {
+                viewerOwnerUid = ""
+                viewerStoryIndex = 0
+            }
+        } else {
+            if (viewerStoryIndex > 0) {
+                viewerStoryIndex -= 1
+            } else if (groupIndex > 0) {
+                val previous = groups[groupIndex - 1]
+                viewerOwnerUid = previous.first().ownerUid
+                viewerStoryIndex = previous.lastIndex
+            }
+        }
+        voiceStoryPlayer?.release()
+        voiceStoryPlayer = null
+        voiceStoryPlaying = false
+    }
+
     DisposableEffect(currentUid) {
         val registration = db.collection("publicProfiles").document(currentUid)
             .addSnapshotListener { snapshot, _ ->
@@ -484,8 +531,11 @@ fun KhahishUpdatesScreen(
         val recentStories = stories.filter { it.ownerUid != currentUid }.filter { story ->
             searchQuery.isBlank() || story.ownerName.contains(searchQuery, true) || story.text.contains(searchQuery, true)
         }
+        val recentGroups = recentStories.groupBy { it.ownerUid }.values
+            .map { it.sortedByDescending { story -> story.createdAt } }
+            .sortedByDescending { it.firstOrNull()?.createdAt ?: 0L }
         Card(
-            Modifier.fillMaxWidth().clickable { showStoryChooser = true },
+            Modifier.fillMaxWidth().clickable { if (ownStories.isEmpty()) showStoryChooser = true else openStoryViewer(currentUid) },
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             shape = RoundedCornerShape(16.dp)
         ) {
@@ -547,94 +597,189 @@ fun KhahishUpdatesScreen(
                 }
             }
             else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(recentStories, key = { it.id }) { story ->
+                items(recentGroups, key = { group -> group.first().ownerUid }) { group ->
+                    val latest = group.first()
                     Card(
+                        modifier = Modifier.fillMaxWidth().clickable { openStoryViewer(latest.ownerUid) },
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         shape = RoundedCornerShape(18.dp)
                     ) {
-                        Column(Modifier.fillMaxWidth().padding(14.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    Modifier.size(44.dp)
-                                        .border(
-                                            2.dp,
-                                            if (story.id in viewedStoryIds) MaterialTheme.colorScheme.outline else Green,
-                                            CircleShape
-                                        )
-                                        .padding(3.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.primaryContainer),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    val ownerPhoto = ownerPhotos[story.ownerUid].orEmpty()
-                                    if (ownerPhoto.isNotBlank()) {
-                                        AsyncImage(
-                                            model = ownerPhoto,
-                                            contentDescription = "${story.ownerName} profile picture",
-                                            modifier = Modifier.fillMaxSize().clip(CircleShape)
-                                        )
-                                    } else {
-                                        Text(story.ownerName.take(1).uppercase(Locale.getDefault()), color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold)
-                                    }
-                                }
-                                Spacer(Modifier.width(10.dp))
-                                Column(Modifier.weight(1f).clickable {
-                                    if (story.ownerUid != currentUid) {
-                                        db.collection("stories").document(story.id).collection("views").document(currentUid)
-                                            .set(mapOf("uid" to currentUid, "name" to currentName, "viewedAt" to System.currentTimeMillis()))
-                                    }
-                                }) {
-                                    Text(if (story.ownerUid == currentUid) "Your story" else story.ownerName, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
-                                    Text(
-                                        if (story.ownerUid == currentUid) "Audience: ${if (story.audience == "everyone") "Everyone" else "Only me"}" else relativeStoryTime(story.createdAt),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp
-                                    )
-                                }
-                                if (story.ownerUid == currentUid) {
-                                    IconButton(onClick = {
-                                        db.collection("stories").document(story.id).collection("views").get()
-                                            .addOnSuccessListener { snapshot ->
-                                                storyViewers = snapshot.documents.map { doc ->
-                                                    doc.getString("name") ?: doc.getString("uid") ?: "Khahish user"
-                                                }
-                                                viewerStoryId = story.id
-                                            }
-                                            .addOnFailureListener { Toast.makeText(context, "Could not load viewers: ${it.message}", Toast.LENGTH_LONG).show() }
-                                    }) { Icon(Icons.Default.Visibility, "View story viewers", tint = Green) }
-
-                                    IconButton(onClick = {
-                                        db.collection("stories").document(story.id).delete()
-                                            .addOnFailureListener { Toast.makeText(context, it.message, Toast.LENGTH_LONG).show() }
-                                    }) { Icon(Icons.Default.DeleteOutline, "Delete story", tint = Muted) }
-                                }
-                            }
-                            if (story.mediaUrl.isNotBlank()) {
-                                Spacer(Modifier.height(10.dp))
-                                if (story.mediaType == "image") {
-                                    AsyncImage(
-                                        model = story.mediaUrl,
-                                        contentDescription = "Story image",
-                                        modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp).clip(RoundedCornerShape(14.dp))
-                                    )
+                        Row(
+                            Modifier.fillMaxWidth().padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                Modifier.size(54.dp).border(
+                                    2.dp,
+                                    if (group.all { it.id in viewedStoryIds }) MaterialTheme.colorScheme.outline else Green,
+                                    CircleShape
+                                ).padding(3.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                val photo = ownerPhotos[latest.ownerUid].orEmpty()
+                                if (photo.isNotBlank()) {
+                                    AsyncImage(model = photo, contentDescription = "${latest.ownerName} profile picture", modifier = Modifier.fillMaxSize().clip(CircleShape))
                                 } else {
-                                    Row(
-                                        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                                            .background(MaterialTheme.colorScheme.surfaceVariant).clickable { videoPlayerUrl = story.mediaUrl }
-                                            .padding(16.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(if (story.mediaType == "voice") Icons.Default.Mic else Icons.Default.PlayCircle, null, tint = Green, modifier = Modifier.size(32.dp))
-                                        Spacer(Modifier.width(10.dp))
-                                        Text(if (story.mediaType == "voice") "Play voice story" else "Play video story", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
-                                    }
+                                    Text(latest.ownerName.take(1).uppercase(Locale.getDefault()), color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold)
                                 }
                             }
-                            if (story.text.isNotBlank()) {
-                                Spacer(Modifier.height(10.dp))
-                                Text(story.text, color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp)
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(latest.ownerName, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    "${group.size} stories · ${relativeStoryTime(latest.createdAt)}",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 11.sp
+                                )
                             }
+                            Icon(Icons.Default.PlayCircle, "Open stories", tint = Green, modifier = Modifier.size(26.dp))
                         }
                     }
+                }
+            }        }
+    }
+
+    val viewerStories = stories.filter { it.ownerUid == viewerOwnerUid }.sortedBy { it.createdAt }
+    val currentViewerStory = viewerStories.getOrNull(viewerStoryIndex)
+
+    LaunchedEffect(viewerOwnerUid, viewerStoryIndex, viewerPaused) {
+        val story = currentViewerStory
+        if (viewerOwnerUid.isNotBlank() && story != null && !viewerPaused) {
+            if (story.ownerUid != currentUid) {
+                db.collection("stories").document(story.id).collection("views").document(currentUid)
+                    .set(mapOf("uid" to currentUid, "name" to currentName, "viewedAt" to System.currentTimeMillis()))
+            }
+            val duration = when (story.mediaType) {
+                "video" -> 15_000L
+                "voice" -> 30_000L
+                else -> 6_000L
+            }
+            kotlinx.coroutines.delay(duration)
+            if (!viewerPaused) moveStoryViewer(1)
+        }
+    }
+
+    DisposableEffect(viewerOwnerUid, currentViewerStory?.id) {
+        onDispose {
+            try { voiceStoryPlayer?.stop() } catch (_: Exception) { }
+            voiceStoryPlayer?.release()
+            voiceStoryPlayer = null
+            voiceStoryPlaying = false
+        }
+    }
+
+    if (viewerOwnerUid.isNotBlank() && currentViewerStory != null) {
+        val story = currentViewerStory
+        val ownerName = story.ownerName
+        Dialog(
+            onDismissRequest = { viewerOwnerUid = ""; viewerPaused = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(Modifier.fillMaxSize().background(Color.Black)) {
+                Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 16.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        viewerStories.forEachIndexed { index, _ ->
+                            Box(
+                                Modifier.weight(1f).height(3.dp).clip(RoundedCornerShape(4.dp))
+                                    .background(if (index <= viewerStoryIndex) Color.White else Color.White.copy(alpha = 0.35f))
+                            )
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(ownerName, color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        if (story.ownerUid == currentUid) {
+                            IconButton(onClick = {
+                                db.collection("stories").document(story.id).delete()
+                                if (viewerStories.size <= 1) viewerOwnerUid = "" else moveStoryViewer(1)
+                            }) { Icon(Icons.Default.DeleteOutline, "Delete story", tint = Color.White) }
+                        }
+                        IconButton(onClick = { viewerOwnerUid = ""; viewerPaused = false }) {
+                            Icon(Icons.Default.Close, "Close story", tint = Color.White)
+                        }
+                    }
+                    Box(
+                        Modifier.weight(1f).fillMaxWidth()
+                            .pointerInput(viewerOwnerUid, viewerStoryIndex) {
+                                detectTapGestures(
+                                    onPress = {
+                                        viewerPaused = true
+                                        tryAwaitRelease()
+                                        viewerPaused = false
+                                    },
+                                    onTap = { offset ->
+                                        if (offset.x >= size.width / 2f) moveStoryViewer(1)
+                                        else moveStoryViewer(-1)
+                                    }
+                                )
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        when {
+                            story.mediaType == "image" && story.mediaUrl.isNotBlank() -> AsyncImage(
+                                model = story.mediaUrl,
+                                contentDescription = "Story photo",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                            )
+                            story.mediaType == "video" && story.mediaUrl.isNotBlank() -> KhahishVideoPlayer(
+                                url = story.mediaUrl,
+                                modifier = Modifier.fillMaxWidth().fillMaxHeight()
+                            )
+                            story.mediaType == "voice" && story.mediaUrl.isNotBlank() -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Default.Mic, null, tint = Color.White, modifier = Modifier.size(64.dp))
+                                Spacer(Modifier.height(12.dp))
+                                Button(onClick = {
+                                    if (voiceStoryPlaying) {
+                                        voiceStoryPlayer?.pause()
+                                        voiceStoryPlaying = false
+                                    } else {
+                                        try {
+                                            if (voiceStoryPlayer == null) {
+                                                voiceStoryPlayer = MediaPlayer().apply {
+                                                    setDataSource(story.mediaUrl)
+                                                    setOnPreparedListener { player -> player.start(); voiceStoryPlaying = true }
+                                                    setOnCompletionListener { voiceStoryPlaying = false }
+                                                    prepareAsync()
+                                                }
+                                            } else {
+                                                voiceStoryPlayer?.start()
+                                                voiceStoryPlaying = true
+                                            }
+                                        } catch (error: Exception) {
+                                            Toast.makeText(context, "Could not play voice story: ${error.message}", Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                }) {
+                                    Icon(if (voiceStoryPlaying) Icons.Default.Pause else Icons.Default.PlayCircle, null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(if (voiceStoryPlaying) "Pause voice story" else "Play voice story")
+                                }
+                            }
+                            story.text.isNotBlank() -> Box(
+                                Modifier.fillMaxSize().background(
+                                    Brush.linearGradient(listOf(Color(0xFF153D35), Color(0xFF14242D)))
+                                ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(story.text, color = Color.White, fontSize = 26.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(28.dp))
+                            }
+                        }
+                        if (story.text.isNotBlank() && story.mediaUrl.isNotBlank()) {
+                            Text(
+                                story.text,
+                                color = Color.White,
+                                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                                    .background(Color.Black.copy(alpha = 0.42f)).padding(14.dp),
+                                textAlign = TextAlign.Start
+                            )
+                        }
+                    }
+                    Text(
+                        relativeStoryTime(story.createdAt),
+                        color = Color.White.copy(alpha = 0.75f),
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
                 }
             }
         }
