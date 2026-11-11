@@ -237,12 +237,12 @@ fun KhahishUpdatesScreen(
                 }
                 DropdownMenu(expanded = updatesMenu, onDismissRequest = { updatesMenu = false }) {
                     DropdownMenuItem(
-                        text = { Text("Audience: ${if (storyAudience == "everyone") "Everyone" else "Only me"}") },
+                        text = { Text(if (storyAudience == "everyone") "✓ Everyone" else "Everyone") },
                         leadingIcon = { Icon(Icons.Default.Lock, null) },
                         onClick = { storyAudience = "everyone"; updatesMenu = false }
                     )
                     DropdownMenuItem(
-                        text = { Text("Audience: Only me") },
+                        text = { Text(if (storyAudience == "only_me") "✓ Only me" else "Only me") },
                         leadingIcon = { Icon(Icons.Default.Lock, null) },
                         onClick = { storyAudience = "only_me"; updatesMenu = false }
                     )
