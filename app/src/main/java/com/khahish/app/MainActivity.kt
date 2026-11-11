@@ -3453,15 +3453,12 @@ fun ConversationScreen(
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 10.dp, vertical = 8.dp)
+                .padding(bottom = 6.dp)
                 .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(30.dp))
                 .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(30.dp))
                 .padding(horizontal = 5.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = { text += "😊" }) {
-                Icon(Icons.Default.EmojiEmotions, "Insert emoji", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-
             Box {
                 IconButton(onClick = { attachmentMenu = true }) {
                     Icon(Icons.Default.AttachFile, "Attachments", tint = Green)
