@@ -34,6 +34,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -217,6 +218,7 @@ private fun saveUserToFirestore(
         .set(publicData, SetOptions.merge())
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 class MainActivity : ComponentActivity() {
     var pendingNotificationIntent by mutableStateOf<Intent?>(null)
         private set
@@ -715,10 +717,12 @@ fun KhahishApp() {
                 AuthScreen { currentUser = auth.currentUser }
             } else {
                 val user = currentUser
-
                 if (user == null) {
                     AuthScreen { currentUser = auth.currentUser }
-                } else if (activeCall != null) {
+                    return@AnimatedContent
+                }
+
+                if (activeCall != null) {
                     KhahishCallScreen(
                         call = activeCall!!,
                         isIncoming = incomingCall,
