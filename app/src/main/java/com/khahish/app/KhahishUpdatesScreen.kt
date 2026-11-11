@@ -785,6 +785,14 @@ fun KhahishUpdatesScreen(
                             )
                         }
                     }
+                    if (story.linkUrl.isNotBlank()) {
+                        TextButton(
+                            onClick = { pendingExternalLink = story.linkUrl },
+                            modifier = Modifier.padding(top = 6.dp)
+                        ) {
+                            Text("Open link  ↗", color = Color(0xFF70D7B8), fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                     Text(
                         relativeStoryTime(story.createdAt),
                         color = Color.White.copy(alpha = 0.75f),
@@ -993,9 +1001,43 @@ fun KhahishUpdatesScreen(
                         onClick = { pendingMediaUri?.let { uploadStory(it, pendingMediaType, storyCaption) } }
                     ) { Icon(Icons.Default.Send, "Publish story", tint = Color(0xFF70D7B8)) }
                 }
+                OutlinedTextField(
+                    value = storyLinkUrl,
+                    onValueChange = { storyLinkUrl = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Add a website link (optional)") },
+                    singleLine = true,
+                    leadingIcon = { Text("↗") }
+                )
                 if (uploading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Green)
             }
         }
+    }
+
+    if (pendingExternalLink.isNotBlank()) {
+        AlertDialog(
+            onDismissRequest = { pendingExternalLink = "" },
+            title = { Text("Open external link?") },
+            text = { Text(pendingExternalLink) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val safeUri = runCatching {
+                        val parsed = Uri.parse(pendingExternalLink.trim())
+                        require(parsed.scheme == "https" || parsed.scheme == "http")
+                        require(!parsed.host.isNullOrBlank())
+                        parsed
+                    }.getOrNull()
+                    if (safeUri != null) {
+                        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, safeUri)) }
+                            .onFailure { Toast.makeText(context, "Could not open this link.", Toast.LENGTH_LONG).show() }
+                    } else {
+                        Toast.makeText(context, "This link is not valid.", Toast.LENGTH_LONG).show()
+                    }
+                    pendingExternalLink = ""
+                }) { Text("Open") }
+            },
+            dismissButton = { TextButton(onClick = { pendingExternalLink = "" }) { Text("Cancel") } }
+        )
     }
 
     if (showVoiceEditor) {
