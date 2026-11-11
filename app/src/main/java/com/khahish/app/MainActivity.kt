@@ -1883,6 +1883,8 @@ fun ConversationScreen(
     }
     var attachmentMenu by remember { mutableStateOf(false) }
     var isRecordingVoice by remember { mutableStateOf(false) }
+    var voiceDragOffset by remember { mutableFloatStateOf(0f) }
+    var voiceCancelGesture by remember { mutableStateOf(false) }
     var voiceRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
     var voiceRecordingFile by remember { mutableStateOf<File?>(null) }
     var selectedMessageIds by remember { mutableStateOf(setOf<String>()) }
@@ -2149,6 +2151,21 @@ fun ConversationScreen(
             voiceRecorder = null
             isRecordingVoice = false
             showToast(context, "Could not start recording: ${error.message}")
+        }
+    }
+
+    fun cancelVoiceRecording() {
+        try {
+            voiceRecorder?.stop()
+        } catch (_: Exception) {
+        } finally {
+            voiceRecorder?.release()
+            voiceRecorder = null
+            voiceRecordingFile?.delete()
+            voiceRecordingFile = null
+            isRecordingVoice = false
+            voiceDragOffset = 0f
+            voiceCancelGesture = false
         }
     }
 
@@ -3064,52 +3081,86 @@ fun ConversationScreen(
                 )
             )
 
-            IconButton(
-                enabled = !isUploading && !isSending,
+            Box(
                 modifier = Modifier
                     .padding(start = 4.dp)
                     .size(54.dp)
+                    .graphicsLayer { translationX = voiceDragOffset }
                     .shadow(8.dp, CircleShape)
-                    .background(Green, CircleShape),
-                onClick = {
-                    val message = text.trim()
-                    when {
-                        isRecordingVoice -> stopVoiceRecordingAndSend()
-                        message.isNotBlank() -> {
-                            text = ""
-                            updateTyping(false)
-                            isSending = true
-                            sendChatMessage(
-                                chatRef,
-                                currentUserId,
-                                message,
-                                "",
-                                "text",
-                                context,
-                                replyToMessageId = replyTarget?.id.orEmpty(),
-                                replyToText = replyTarget?.text?.ifBlank { replyTarget?.mediaType ?: "Media" }.orEmpty()
-                            ) {
-                                isSending = false
-                                replyTarget = null
+                    .background(
+                        if (voiceCancelGesture) MaterialTheme.colorScheme.error else Green,
+                        CircleShape
+                    )
+                    .pointerInput(isUploading, isSending, text, isRecordingVoice) {
+                        if (!isUploading && !isSending) {
+                            detectDragGestures(
+                                onDragStart = {
+                                    if (text.isBlank() &&
+                                        ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                                    ) {
+                                        voiceDragOffset = 0f
+                                        voiceCancelGesture = false
+                                        startVoiceRecording()
+                                    }
+                                },
+                                onDrag = { change, dragAmount ->
+                                    if (isRecordingVoice) {
+                                        change.consume()
+                                        voiceDragOffset = (voiceDragOffset + dragAmount.x).coerceIn(-140f, 20f)
+                                        voiceCancelGesture = voiceDragOffset <= -85f
+                                    }
+                                },
+                                onDragEnd = {
+                                    if (isRecordingVoice) {
+                                        if (voiceCancelGesture) cancelVoiceRecording()
+                                        else stopVoiceRecordingAndSend()
+                                    }
+                                    voiceDragOffset = 0f
+                                    voiceCancelGesture = false
+                                },
+                                onDragCancel = {
+                                    if (isRecordingVoice) cancelVoiceRecording()
+                                    voiceDragOffset = 0f
+                                    voiceCancelGesture = false
+                                }
+                            )
+                        }
+                    }
+                    .pointerInput(isUploading, isSending, text) {
+                        detectTapGestures {
+                            if (isUploading || isSending) return@detectTapGestures
+                            if (text.isNotBlank()) {
+                                val message = text.trim()
+                                text = ""
+                                updateTyping(false)
+                                isSending = true
+                                sendChatMessage(
+                                    chatRef,
+                                    currentUserId,
+                                    message,
+                                    "",
+                                    "text",
+                                    context,
+                                    replyToMessageId = replyTarget?.id.orEmpty(),
+                                    replyToText = replyTarget?.text?.ifBlank { replyTarget?.mediaType ?: "Media" }.orEmpty()
+                                ) {
+                                    isSending = false
+                                    replyTarget = null
+                                }
+                            } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                                voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                             }
                         }
-                        ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED ->
-                            startVoiceRecording()
-                        else -> voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                    }
-                }
+                    },
+                contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    when {
-                        isRecordingVoice -> Icons.Default.Stop
-                        text.isNotBlank() -> Icons.Default.Send
-                        else -> Icons.Default.Mic
-                    },
-                    when {
-                        isRecordingVoice -> "Stop and send voice message"
-                        text.isNotBlank() -> "Send message"
-                        else -> "Record voice message"
-                    },
+                    if (voiceCancelGesture) Icons.Default.Close
+                    else if (text.isNotBlank()) Icons.Default.Send
+                    else Icons.Default.Mic,
+                    if (voiceCancelGesture) "Release to cancel voice message"
+                    else if (text.isNotBlank()) "Send message"
+                    else "Hold to record, release to send",
                     tint = Color.White,
                     modifier = Modifier.size(23.dp)
                 )
