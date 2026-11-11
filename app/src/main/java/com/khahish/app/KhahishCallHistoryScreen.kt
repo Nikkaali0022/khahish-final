@@ -176,7 +176,7 @@ fun KhahishCallHistoryScreen(
                         Box(
                             Modifier.size(52.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFFDCEFE9)),
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
                             contentAlignment = Alignment.Center
                         ) {
                             if (photo.isNotBlank()) {
@@ -243,7 +243,7 @@ fun KhahishCallHistoryScreen(
         onClick = { showNewCallDialog = true },
         modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
         containerColor = Green,
-        contentColor = Color.White
+        contentColor = MaterialTheme.colorScheme.onPrimary
     ) {
         Icon(Icons.Default.Call, contentDescription = "New call")
     }
