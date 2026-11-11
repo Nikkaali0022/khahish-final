@@ -36,6 +36,8 @@ import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Lock
@@ -621,9 +623,9 @@ fun KhahishUpdatesScreen(
                                             .padding(16.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Icon(Icons.Default.PlayCircle, null, tint = Green, modifier = Modifier.size(32.dp))
+                                        Icon(if (story.mediaType == "voice") Icons.Default.Mic else Icons.Default.PlayCircle, null, tint = Green, modifier = Modifier.size(32.dp))
                                         Spacer(Modifier.width(10.dp))
-                                        Text("Play video story", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                                        Text(if (story.mediaType == "voice") "Play voice story" else "Play video story", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
                                     }
                                 }
                             }
@@ -790,7 +792,10 @@ fun KhahishUpdatesScreen(
                             contentScale = androidx.compose.ui.layout.ContentScale.Fit
                         )
                     } else {
-                        Text("Video preview selected", color = Color.White)
+                        KhahishVideoPlayer(
+                            url = pendingMediaUri.toString(),
+                            modifier = Modifier.fillMaxWidth().fillMaxHeight()
+                        )
                     }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
@@ -807,7 +812,7 @@ fun KhahishUpdatesScreen(
                         Icon(Icons.Default.TextFields, null, tint = Color.White); Text("Text", color = Color.White)
                     }
                     TextButton(onClick = { Toast.makeText(context, "Drawing tool selected", Toast.LENGTH_SHORT).show() }) {
-                        Icon(Icons.Default.Draw, null, tint = Color.White); Text("Draw", color = Color.White)
+                        Icon(Icons.Default.Brush, null, tint = Color.White); Text("Draw", color = Color.White)
                     }
                 }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
