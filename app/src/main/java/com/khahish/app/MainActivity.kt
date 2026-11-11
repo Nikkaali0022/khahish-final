@@ -132,7 +132,7 @@ data class LiveLocationPoint(
     val expiresAt: Long
 )
 
-data class MessageRequestItem(val id: String, val senderUid: String, val senderName: String, val senderUsername: String, val createdAt: Long)
+data class MessageRequestItem(val id: String, val senderUid: String, val senderName: String, val senderUsername: String, val createdAt: Long, val status: String = "pending")
 
 internal fun normalizeKhahishUsername(value: String): String = value.trim().removePrefix("@").lowercase(Locale.ROOT)
 internal fun isValidKhahishUsername(value: String): Boolean = Regex("^[a-z0-9_]{3,20}$").matches(normalizeKhahishUsername(value))
@@ -1393,6 +1393,9 @@ fun ChatList(
 
     var chats by remember { mutableStateOf(listOf<Chat>()) }
     var incomingRequests by remember { mutableStateOf(listOf<MessageRequestItem>()) }
+    var outgoingRequests by remember { mutableStateOf(listOf<MessageRequestItem>()) }
+    var showRequestsScreen by remember { mutableStateOf(false) }
+    var requestsTab by remember { mutableStateOf("Received") }
     var unreadCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     var loading by remember { mutableStateOf(true) }
     var search by remember { mutableStateOf("") }
@@ -1455,6 +1458,24 @@ fun ChatList(
                 if (error != null || snapshot == null) return@addSnapshotListener
                 incomingRequests = snapshot.documents.map { doc ->
                     MessageRequestItem(doc.id, doc.getString("senderUid").orEmpty(), doc.getString("senderName").orEmpty().ifBlank { "Khahish User" }, doc.getString("senderUsername").orEmpty(), doc.getLong("createdAt") ?: 0L)
+                }.sortedByDescending { it.createdAt }
+            }
+        onDispose { registration.remove() }
+    }
+
+    DisposableEffect(currentUid) {
+        val registration = db.collection("messageRequests").whereEqualTo("senderUid", currentUid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+                outgoingRequests = snapshot.documents.map { doc ->
+                    MessageRequestItem(
+                        doc.id,
+                        doc.getString("receiverUid").orEmpty(),
+                        doc.getString("receiverName").orEmpty().ifBlank { "Khahish User" },
+                        doc.getString("receiverUsername").orEmpty(),
+                        doc.getLong("createdAt") ?: 0L,
+                        doc.getString("status").orEmpty().ifBlank { "pending" }
+                    )
                 }.sortedByDescending { it.createdAt }
             }
         onDispose { registration.remove() }
@@ -1619,7 +1640,83 @@ fun ChatList(
             IconButton(onClick = { selectedPictureUrl = "" }, modifier = Modifier.align(Alignment.TopEnd)) { Icon(Icons.Default.Close, "Close", tint = Color.White) }
         }
     }
+    if (showRequestsScreen) {
+        Column(modifier.fillMaxSize()) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { showRequestsScreen = false }) { Icon(Icons.Default.ArrowBack, "Back") }
+                Text("Message Requests", color = MaterialTheme.colorScheme.onSurface, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                listOf("Received", "Sent").forEach { label ->
+                    TextButton(onClick = { requestsTab = label }) {
+                        Text(label, color = if (requestsTab == label) Green else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = if (requestsTab == label) FontWeight.Bold else FontWeight.Normal)
+                    }
+                }
+            }
+            if (requestsTab == "Received") {
+                if (incomingRequests.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("No incoming requests", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                else LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
+                    items(incomingRequests, key = { "received-${it.id}" }) { request ->
+                        Card(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                            Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                                Text(request.senderName, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                                Text(if (request.senderUsername.isNotBlank()) "@${request.senderUsername} wants to chat" else "Wants to start a conversation", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                    TextButton(onClick = {
+                                        db.collection("messageRequests").document(request.id).update(mapOf("status" to "rejected", "handledBy" to currentUid, "rejectedAt" to System.currentTimeMillis()))
+                                            .addOnSuccessListener { showToast(context, "Message request rejected.") }
+                                            .addOnFailureListener { showToast(context, "Could not reject request: ${it.message}") }
+                                    }) { Text("Reject", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                                    Button(onClick = {
+                                        val reqRef = db.collection("messageRequests").document(request.id)
+                                        val chatRef = db.collection("chats").document(request.id)
+                                        val now = System.currentTimeMillis()
+                                        val members = listOf(currentUid, request.senderUid).sorted()
+                                        val batch = db.batch()
+                                        batch.update(reqRef, mapOf("status" to "accepted", "acceptedBy" to currentUid, "handledBy" to currentUid, "acceptedAt" to now))
+                                        batch.set(chatRef, mapOf("members" to members, "memberNames" to mapOf(currentUid to (FirebaseAuth.getInstance().currentUser?.displayName ?: "You"), request.senderUid to request.senderName), "lastMessage" to "", "lastMessageAt" to 0L, "updatedAt" to now, "createdAt" to now, "createdBy" to currentUid, "disappearingDurationMs" to 0L))
+                                        batch.commit().addOnSuccessListener {
+                                            showToast(context, "Request accepted. Chat is ready.")
+                                            showRequestsScreen = false
+                                            onOpen(Chat(request.id, request.senderUid, request.senderName, "", "", request.senderName.firstOrNull()?.uppercase() ?: "K"))
+                                        }.addOnFailureListener { showToast(context, "Could not accept request: ${it.message}") }
+                                    }, colors = ButtonDefaults.buttonColors(containerColor = Green)) { Text("Accept", color = Color.White) }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                if (outgoingRequests.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("No sent requests", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                else LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
+                    items(outgoingRequests, key = { "sent-${it.id}" }) { request ->
+                        Card(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                            Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(request.senderName, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                                    Text("Status: ${request.status.replaceFirstChar { it.uppercase() }}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                                }
+                                if (request.status == "pending") TextButton(onClick = {
+                                    db.collection("messageRequests").document(request.id).update(mapOf("status" to "cancelled", "cancelledAt" to System.currentTimeMillis()))
+                                        .addOnSuccessListener { showToast(context, "Request cancelled.") }
+                                        .addOnFailureListener { showToast(context, "Could not cancel request: ${it.message}") }
+                                }) { Text("Cancel Request", color = MaterialTheme.colorScheme.error) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else {
     Column(modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 12.dp, top = 8.dp, bottom = 0.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Chats", modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            if (incomingRequests.isNotEmpty()) {
+                Box(Modifier.clip(RoundedCornerShape(50)).background(Green.copy(alpha = 0.12f)).clickable { requestsTab = "Received"; showRequestsScreen = true }.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                    Text("Requests ${incomingRequests.size}", color = Green, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
         OutlinedTextField(
             value = search,
             onValueChange = { search = it },
@@ -1671,38 +1768,6 @@ fun ChatList(
             else -> LazyColumn(
                 contentPadding = PaddingValues(bottom = 90.dp)
             ) {
-                if (incomingRequests.isNotEmpty()) {
-                    item { Text("MESSAGE REQUESTS", modifier = Modifier.fillMaxWidth().padding(start = 18.dp, top = 10.dp, bottom = 4.dp), color = Green, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
-                    items(incomingRequests, key = { "request-${it.id}" }) { request ->
-                        Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                            Column(Modifier.fillMaxWidth().padding(14.dp)) {
-                                Text(request.senderName, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
-                                Text("wants to start a conversation", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                    TextButton(onClick = {
-                                        db.collection("messageRequests").document(request.id).update(mapOf("status" to "rejected", "handledBy" to currentUid, "rejectedAt" to System.currentTimeMillis()))
-                                            .addOnSuccessListener { showToast(context, "Message request rejected.") }
-                                            .addOnFailureListener { showToast(context, "Could not reject request: ${it.message}") }
-                                    }) { Text("Reject", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                                    Spacer(Modifier.width(8.dp))
-                                    Button(onClick = {
-                                        val reqRef = db.collection("messageRequests").document(request.id)
-                                        val chatRef = db.collection("chats").document(request.id)
-                                        val now = System.currentTimeMillis()
-                                        val members = listOf(currentUid, request.senderUid).sorted()
-                                        val batch = db.batch()
-                                        batch.update(reqRef, mapOf("status" to "accepted", "acceptedBy" to currentUid, "handledBy" to currentUid, "acceptedAt" to now))
-                                        batch.set(chatRef, mapOf("members" to members, "memberNames" to mapOf(currentUid to (FirebaseAuth.getInstance().currentUser?.displayName ?: "You"), request.senderUid to request.senderName), "lastMessage" to "", "lastMessageAt" to 0L, "updatedAt" to now, "createdAt" to now, "createdBy" to currentUid, "disappearingDurationMs" to 0L))
-                                        batch.commit().addOnSuccessListener {
-                                            showToast(context, "Request accepted. Chat is ready.")
-                                            onOpen(Chat(request.id, request.senderUid, request.senderName, "", "", request.senderName.firstOrNull()?.uppercase() ?: "K"))
-                                        }.addOnFailureListener { showToast(context, "Could not accept request: ${it.message}") }
-                                    }, colors = ButtonDefaults.buttonColors(containerColor = Green)) { Text("Accept", color = Color.White) }
-                                }
-                            }
-                        }
-                    }
-                }
                 items(filtered, key = { it.id }) { chat ->
                     Row(
                         Modifier
@@ -1829,6 +1894,7 @@ fun ChatList(
                 }
             }
         }
+    }
     }
 }
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
