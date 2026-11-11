@@ -553,7 +553,7 @@ test("only group admins can add members, while ordinary members can leave", asyn
     updatedAt: Date.now()
   }));
 
-  await assertFails(updateDoc(doc("carol"), "chats/group-admin-test"), {
+  await assertFails(updateDoc(doc(db("carol"), "chats/group-admin-test"), {
     members: ["alice", "dave"],
     updatedAt: Date.now()
   }));
