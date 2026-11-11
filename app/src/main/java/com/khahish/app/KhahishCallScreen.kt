@@ -38,9 +38,6 @@ import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.delay
 import io.agora.rtc2.video.VideoCanvas
 
-private val CallScreenBackground = Color(0xFF0B1513)
-private val CallScreenGreen = Color(0xFF18A889)
-private val CallScreenMuted = Color(0xFF9BAEAA)
 
 @Composable
 fun KhahishCallScreen(
@@ -49,6 +46,7 @@ fun KhahishCallScreen(
     onExit: () -> Unit
 ) {
     val context = LocalContext.current
+    val colors = MaterialTheme.colorScheme
     val repository = remember { KhahishCallRepository() }
 
     var currentCall by remember(call.id) { mutableStateOf(call) }
@@ -196,7 +194,7 @@ fun KhahishCallScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(CallScreenBackground)
+            .background(colors.background)
             .statusBarsPadding()
             .navigationBarsPadding()
             .padding(horizontal = 24.dp, vertical = 18.dp),
@@ -204,7 +202,7 @@ fun KhahishCallScreen(
     ) {
         Text(
             if (currentCall.isVideo) "KHAHISH  •  VIDEO CALL" else "KHAHISH  •  VOICE CALL",
-            color = CallScreenMuted,
+            color = colors.onSurfaceVariant,
             fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
             letterSpacing = 2.sp
@@ -215,10 +213,10 @@ fun KhahishCallScreen(
         Box(
             modifier = Modifier
                 .size(226.dp)
-                .border(4.dp, CallScreenGreen, CircleShape)
+                .border(4.dp, colors.primary, CircleShape)
                 .padding(7.dp)
                 .clip(CircleShape)
-                .background(Color(0xFF1B302B)),
+                .background(colors.surfaceVariant),
             contentAlignment = Alignment.Center
         ) {
             if (peerPhotoUrl.isNotBlank()) {
@@ -231,7 +229,7 @@ fun KhahishCallScreen(
             } else {
                 Text(
                     displayName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
-                    color = Color.White,
+                    color = colors.onSurface,
                     fontSize = 76.sp,
                     fontWeight = FontWeight.Medium
                 )
@@ -242,7 +240,7 @@ fun KhahishCallScreen(
 
         Text(
             displayName.ifBlank { "Khahish user" },
-            color = Color.White,
+            color = colors.onBackground,
             fontSize = 27.sp,
             fontWeight = FontWeight.SemiBold,
             textAlign = TextAlign.Center,
@@ -254,14 +252,14 @@ fun KhahishCallScreen(
         if (isConnected) {
             Text(
                 formatKhahishCallDuration(callElapsedSeconds),
-                color = Color(0xFFB8C9C4),
+                color = colors.onSurfaceVariant,
                 fontSize = 19.sp,
                 fontWeight = FontWeight.Medium
             )
             Spacer(Modifier.height(6.dp))
-            Text("Connected", color = CallScreenGreen, fontSize = 13.sp)
+            Text("Connected", color = colors.primary, fontSize = 13.sp)
         } else {
-            Text(statusText, color = CallScreenMuted, fontSize = 15.sp)
+            Text(statusText, color = colors.onSurfaceVariant, fontSize = 15.sp)
         }
 
         if (call.isVideo && credentials != null) {
@@ -295,7 +293,7 @@ fun KhahishCallScreen(
             Spacer(Modifier.height(12.dp))
             Text(
                 errorText,
-                color = Color(0xFFFFB4AB),
+                color = colors.error,
                 fontSize = 12.sp,
                 textAlign = TextAlign.Center
             )
@@ -315,7 +313,7 @@ fun KhahishCallScreen(
                         onExit()
                     },
                     modifier = Modifier.weight(1f).height(54.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB3261E))
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.error)
                 ) { Text("Decline") }
                 Button(
                     onClick = {
@@ -323,7 +321,7 @@ fun KhahishCallScreen(
                         connectIfAllowed()
                     },
                     modifier = Modifier.weight(1f).height(54.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = CallScreenGreen)
+                    colors = ButtonDefaults.buttonColors(containerColor = colors.primary)
                 ) { Text("Accept") }
             }
         } else if (currentCall.status == "accepted" || isJoined) {
@@ -335,7 +333,7 @@ fun KhahishCallScreen(
                 CallControlButton(
                     icon = if (isMuted) Icons.Default.MicOff else Icons.Default.Mic,
                     label = if (isMuted) "Unmute" else "Mute",
-                    background = Color(0xFF263A35),
+                    background = colors.surfaceVariant,
                     onClick = {
                         isMuted = !isMuted
                         session?.setMicrophoneMuted(isMuted)
@@ -345,7 +343,7 @@ fun KhahishCallScreen(
                     CallControlButton(
                         icon = if (cameraEnabled) Icons.Default.Videocam else Icons.Default.VideocamOff,
                         label = "Camera",
-                        background = Color(0xFF263A35),
+                        background = colors.surfaceVariant,
                         onClick = {
                             cameraEnabled = !cameraEnabled
                             session?.setCameraEnabled(cameraEnabled)
@@ -355,7 +353,7 @@ fun KhahishCallScreen(
                 CallControlButton(
                     icon = if (speakerEnabled) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
                     label = "Speaker",
-                    background = Color(0xFF263A35),
+                    background = colors.surfaceVariant,
                     onClick = {
                         speakerEnabled = !speakerEnabled
                         session?.setSpeakerEnabled(speakerEnabled)
@@ -364,7 +362,7 @@ fun KhahishCallScreen(
                 CallControlButton(
                     icon = Icons.Default.CallEnd,
                     label = "End",
-                    background = Color(0xFFB3261E),
+                    background = colors.error,
                     iconTint = Color.White,
                     onClick = {
                         repository.endCall(call.id) { errorText = it }
@@ -374,9 +372,9 @@ fun KhahishCallScreen(
                 )
             }
         } else {
-            CircularProgressIndicator(color = CallScreenGreen)
+            CircularProgressIndicator(color = colors.primary)
             Spacer(Modifier.height(16.dp))
-            Text(statusText, color = CallScreenMuted, fontSize = 13.sp)
+            Text(statusText, color = colors.onSurfaceVariant, fontSize = 13.sp)
             Spacer(Modifier.height(16.dp))
             Button(
                 onClick = {
@@ -384,7 +382,7 @@ fun KhahishCallScreen(
                     session?.leave()
                     onExit()
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB3261E))
+                colors = ButtonDefaults.buttonColors(containerColor = colors.error)
             ) { Text("Cancel call") }
         }
     }
@@ -395,7 +393,7 @@ private fun CallControlButton(
     icon: ImageVector,
     label: String,
     background: Color,
-    iconTint: Color = Color.White,
+    iconTint: Color = MaterialTheme.colorScheme.onSurface,
     onClick: () -> Unit
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -410,7 +408,7 @@ private fun CallControlButton(
             }
         }
         Spacer(Modifier.height(8.dp))
-        Text(label, color = CallScreenMuted, fontSize = 11.sp)
+        Text(label, color = colors.onSurfaceVariant, fontSize = 11.sp)
     }
 }
 
