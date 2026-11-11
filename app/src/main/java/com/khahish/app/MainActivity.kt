@@ -340,7 +340,7 @@ fun KhahishApp() {
 
     var currentUser by remember { mutableStateOf(auth.currentUser) }
     var tab by remember { mutableStateOf("Chats") }
-    val tabOrder = listOf("Chats", "Updates", "Calls", "Settings")
+    val tabOrder = listOf("Chats", "Contacts", "Updates", "Calls", "Settings")
     var selectedChat by remember { mutableStateOf<Chat?>(null) }
     var profileTargetUid by remember { mutableStateOf("") }
     var showNewChat by remember { mutableStateOf(false) }
@@ -731,6 +731,7 @@ fun KhahishApp() {
                             NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                                 listOf(
                                     "Chats" to Icons.Default.Chat,
+                                    "Contacts" to Icons.Default.People,
                                     "Updates" to Icons.Default.DonutLarge,
                                     "Calls" to Icons.Default.Call,
                                     "Settings" to Icons.Default.Settings
@@ -791,6 +792,13 @@ fun KhahishApp() {
                                     modifier = Modifier.padding(padding),
                                     currentUid = user.uid,
                                     onOpen = { selectedChat = it },
+                                    onViewProfile = { profileTargetUid = it }
+                                )
+
+                                "Contacts" -> KhahishContactsScreen(
+                                    currentUid = user.uid,
+                                    modifier = Modifier.padding(padding),
+                                    onOpenChat = { selectedChat = it },
                                     onViewProfile = { profileTargetUid = it }
                                 )
 
