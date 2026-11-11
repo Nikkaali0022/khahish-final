@@ -23,6 +23,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -67,6 +70,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -2472,7 +2476,17 @@ fun ConversationScreen(
                 }
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(if (chat.isGroup) displayGroupName else chat.name, modifier = Modifier.clickable { if (!chat.isGroup) onViewProfile(chat.peerUid) else showGroupInfo = true }, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                    Text(
+                        if (chat.isGroup) displayGroupName else chat.name,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { if (!chat.isGroup) onViewProfile(chat.peerUid) else showGroupInfo = true },
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
+                    )
                     val peerStatusText = when {
                         chat.isGroup -> "Group · ${chat.memberUids.size} members"
                         peerTyping -> "typing..."
@@ -2487,12 +2501,6 @@ fun ConversationScreen(
                     }
                     Text(peerStatusText, color = if (peerTyping || peerStatusText == "Online") Green else MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
                     if (peerBio.isNotBlank()) Text(peerBio, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp, maxLines = 1)
-                }
-                IconButton(onClick = {
-                    chatSearchVisible = !chatSearchVisible
-                    chatSearchQuery = ""
-                }) {
-                    Icon(Icons.Default.Search, "Search chat history", tint = Green)
                 }
                 if (!chat.isGroup) {
                     IconButton(onClick = { onStartCall(false) }) { Icon(Icons.Default.Call, "Voice call", tint = Green) }
@@ -2646,6 +2654,8 @@ fun ConversationScreen(
                 val isMe = msg.senderId == currentUserId
 
                 val isSelected = msg.id in selectedMessageIds
+                val swipeOffset = remember(msg.id) { Animatable(0f) }
+                val swipeScope = rememberCoroutineScope()
                 Row(
                     Modifier.fillMaxWidth().padding(vertical = 4.dp),
                     horizontalArrangement = if (isMe) Arrangement.End else Arrangement.Start
@@ -2653,13 +2663,35 @@ fun ConversationScreen(
                     Column(
                         Modifier
                             .widthIn(max = 285.dp)
+                            .graphicsLayer { translationX = swipeOffset.value }
                             .pointerInput(msg.id) {
-                                var horizontalDrag = 0f
                                 detectHorizontalDragGestures(
-                                    onHorizontalDrag = { _, amount -> horizontalDrag += amount },
+                                    onHorizontalDrag = { _, amount ->
+                                        swipeScope.launch {
+                                            swipeOffset.snapTo(
+                                                (swipeOffset.value + amount).coerceIn(-150f, 150f)
+                                            )
+                                        }
+                                    },
                                     onDragEnd = {
-                                        if (kotlin.math.abs(horizontalDrag) > 70f) replyTarget = msg
-                                        horizontalDrag = 0f
+                                        if (kotlin.math.abs(swipeOffset.value) > 70f) replyTarget = msg
+                                        swipeScope.launch {
+                                            swipeOffset.animateTo(
+                                                0f,
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                    stiffness = Spring.StiffnessMedium
+                                                )
+                                            )
+                                        }
+                                    },
+                                    onDragCancel = {
+                                        swipeScope.launch {
+                                            swipeOffset.animateTo(
+                                                0f,
+                                                animationSpec = spring(stiffness = Spring.StiffnessMedium)
+                                            )
+                                        }
                                     }
                                 )
                             }
