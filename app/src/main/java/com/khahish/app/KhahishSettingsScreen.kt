@@ -22,7 +22,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -342,7 +341,7 @@ fun KhahishSettingsScreen(
         Button(
             onClick = onLogout,
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE54848))
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
         ) {
             Icon(Icons.Default.Logout, null)
             Spacer(Modifier.width(8.dp))
@@ -442,7 +441,7 @@ fun KhahishSettingsScreen(
                                 modifier = Modifier.size(88.dp).clip(CircleShape), contentScale = ContentScale.Crop)
                         } else {
                             Box(Modifier.size(88.dp).clip(CircleShape).background(Green), contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.Person, null, tint = Color.White, modifier = Modifier.size(42.dp))
+                                Icon(Icons.Default.Person, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(42.dp))
                             }
                         }
                     }
