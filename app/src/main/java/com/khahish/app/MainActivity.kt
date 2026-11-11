@@ -907,7 +907,7 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Image(
-            painter = painterResource(R.drawable.khahish_logo),
+            painter = painterResource(R.drawable.khahish_launcher),
             contentDescription = "Khahish logo",
             modifier = Modifier.size(88.dp),
             contentScale = ContentScale.Fit
