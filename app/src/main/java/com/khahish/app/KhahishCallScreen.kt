@@ -155,12 +155,13 @@ fun KhahishCallScreen(
                 currentCall = updated
                 when (updated.status) {
                     "accepted" -> {
+                        KhahishMessagingService.cancelIncomingCallNotification(context, call.id)
                         statusText = if (isJoined) "Connected" else "Connecting audio…"
                         if (!isIncoming && session == null && !connectionStarted) connectIfAllowed()
                     }
-                    "rejected" -> { errorText = ""; statusText = "Call declined"; onExit() }
-                    "ended" -> { errorText = ""; statusText = "Call ended"; onExit() }
-                    "missed" -> { errorText = ""; statusText = "Missed call"; onExit() }
+                    "rejected" -> { KhahishMessagingService.cancelIncomingCallNotification(context, call.id); errorText = ""; statusText = "Call declined"; onExit() }
+                    "ended" -> { KhahishMessagingService.cancelIncomingCallNotification(context, call.id); errorText = ""; statusText = "Call ended"; onExit() }
+                    "missed" -> { KhahishMessagingService.cancelIncomingCallNotification(context, call.id); errorText = ""; statusText = "Missed call"; onExit() }
                     "ringing" -> statusText = if (isIncoming) "Incoming call" else "Ringing…"
                 }
             }
@@ -218,7 +219,7 @@ fun KhahishCallScreen(
         }
     }
 
-    LaunchedEffect(call.id, currentCall.status, currentCall.acceptedAt, currentCall.updatedAt) {
+    LaunchedEffect(call.id, currentCall.status, currentCall.acceptedAt, currentCall.updatedAt, isJoined) {
         val connectedAt = currentCall.acceptedAt.takeIf { it > 0L } ?: currentCall.updatedAt
         if (isJoined && currentCall.status == "accepted" && connectedAt > 0L) {
             while (currentCall.status == "accepted") {
