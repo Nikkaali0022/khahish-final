@@ -104,7 +104,16 @@ fun KhahishCallScreen(
                     onJoined = { isJoined = true; statusText = "Connected"; errorText = "" },
                     onRemoteUserJoined = { uid -> remoteUid = uid; statusText = "Connected"; errorText = "" },
                     onRemoteUserLeft = { statusText = "The other person left the call" },
-                    onFailure = { message -> statusText = "Connection failed"; errorText = message }
+                    onFailure = { message -> statusText = "Connection failed"; errorText = message },
+                    onTokenRenewalFailure = { message ->
+                        if (isJoined) {
+                            statusText = "Connected"
+                            errorText = "Your call is still connected, but its calling credentials could not be renewed. Check the calling server configuration for longer calls."
+                        } else {
+                            statusText = "Connection failed"
+                            errorText = message
+                        }
+                    }
                 )
                 session = rtc
                 rtc.setAudioRoute(selectedAudioRoute)
@@ -374,7 +383,6 @@ fun KhahishCallScreen(
                                     session?.setupRemoteVideo(surface, remoteUid!!)
                                 }
                             },
-                            update = { surface -> session?.setupRemoteVideo(surface, remoteUid!!) }
                         )
                     }
                 } else {
@@ -398,7 +406,6 @@ fun KhahishCallScreen(
                         factory = { viewContext ->
                             SurfaceView(viewContext).also { surface -> session?.setupLocalVideo(surface) }
                         },
-                        update = { surface -> session?.setupLocalVideo(surface) }
                     )
                 }
             }
