@@ -94,6 +94,12 @@ fun KhahishUpdatesScreen(
     var videoPlayerUrl by remember { mutableStateOf("") }
     var storyAudience by remember { mutableStateOf("everyone") }
     var audienceMenu by remember { mutableStateOf(false) }
+    var showAudienceListDialog by remember { mutableStateOf(false) }
+    var audienceListType by remember { mutableStateOf("closeFriends") }
+    var audienceUsername by remember { mutableStateOf("") }
+    var audienceMembers by remember { mutableStateOf(emptyList<Pair<String, String>>()) }
+    var audienceListLoading by remember { mutableStateOf(false) }
+    var audienceAdding by remember { mutableStateOf(false) }
     var viewerStoryId by remember { mutableStateOf("") }
     var storyViewers by remember { mutableStateOf(emptyList<String>()) }
     var showSearch by remember { mutableStateOf(false) }
@@ -102,6 +108,54 @@ fun KhahishUpdatesScreen(
     var viewedStoryIds by remember { mutableStateOf(setOf<String>()) }
     var currentPhotoUrl by remember(currentUid) { mutableStateOf("") }
     var ownerPhotos by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+
+    fun loadAudienceList() {
+        audienceListLoading = true
+        db.collection("users").document(currentUid).collection(audienceListType).get()
+            .addOnSuccessListener { snapshot ->
+                audienceMembers = snapshot.documents.map { doc ->
+                    doc.id to (doc.getString("name") ?: doc.getString("username") ?: "Khahish user")
+                }
+                audienceListLoading = false
+            }
+            .addOnFailureListener { audienceListLoading = false; Toast.makeText(context, "Could not load list: ${it.message}", Toast.LENGTH_LONG).show() }
+    }
+
+    fun openAudienceList(type: String) {
+        audienceListType = type
+        audienceUsername = ""
+        audienceMembers = emptyList()
+        showAudienceListDialog = true
+        loadAudienceList()
+    }
+
+    fun addAudienceMember() {
+        val username = normalizeKhahishUsername(audienceUsername)
+        if (!isValidKhahishUsername(username)) {
+            Toast.makeText(context, "Enter a valid username.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        audienceAdding = true
+        db.collection("usernames").document(username).get().addOnSuccessListener { claim ->
+            val targetUid = claim.getString("uid").orEmpty()
+            if (!claim.exists() || targetUid.isBlank() || targetUid == currentUid) {
+                audienceAdding = false
+                Toast.makeText(context, "This username is not available.", Toast.LENGTH_SHORT).show()
+                return@addOnSuccessListener
+            }
+            db.collection("publicProfiles").document(targetUid).get().addOnSuccessListener { profile ->
+                val name = profile.getString("name") ?: "Khahish user"
+                db.collection("users").document(currentUid).collection(audienceListType).document(targetUid)
+                    .set(mapOf("uid" to targetUid, "name" to name, "username" to username, "addedAt" to System.currentTimeMillis()))
+                    .addOnSuccessListener {
+                        audienceAdding = false
+                        audienceUsername = ""
+                        loadAudienceList()
+                    }
+                    .addOnFailureListener { audienceAdding = false; Toast.makeText(context, "Could not add person: ${it.message}", Toast.LENGTH_LONG).show() }
+            }.addOnFailureListener { audienceAdding = false; Toast.makeText(context, "Could not load profile: ${it.message}", Toast.LENGTH_LONG).show() }
+        }.addOnFailureListener { audienceAdding = false; Toast.makeText(context, "Username lookup failed: ${it.message}", Toast.LENGTH_LONG).show() }
+    }
 
     fun publishStory(text: String, mediaUrl: String = "", mediaType: String = "text") {
         val now = System.currentTimeMillis()
@@ -372,6 +426,16 @@ fun KhahishUpdatesScreen(
                         leadingIcon = { Icon(Icons.Default.People, null) },
                         onClick = { audienceMenu = true; updatesMenu = false }
                     )
+                    DropdownMenuItem(
+                        text = { Text("Manage Close Friends") },
+                        leadingIcon = { Icon(Icons.Default.People, null) },
+                        onClick = { updatesMenu = false; openAudienceList("closeFriends") }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Manage My Friends") },
+                        leadingIcon = { Icon(Icons.Default.Person, null) },
+                        onClick = { updatesMenu = false; openAudienceList("friends") }
+                    )
                 }
             }
         }
@@ -597,6 +661,47 @@ fun KhahishUpdatesScreen(
                 KhahishVideoPlayer(url = videoPlayerUrl, modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f))
             }
         }
+    }
+
+    if (showAudienceListDialog) {
+        AlertDialog(
+            onDismissRequest = { showAudienceListDialog = false },
+            title = { Text(if (audienceListType == "closeFriends") "Close Friends" else "My Friends") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = audienceUsername,
+                        onValueChange = { audienceUsername = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Add by username") },
+                        placeholder = { Text("@username") },
+                        singleLine = true
+                    )
+                    Button(onClick = { addAudienceMember() }, enabled = !audienceAdding, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (audienceAdding) "Adding…" else "Add person")
+                    }
+                    if (audienceListLoading) {
+                        CircularProgressIndicator(color = Green)
+                    } else if (audienceMembers.isEmpty()) {
+                        Text("This list is empty. Add people by username.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                    } else {
+                        Column(Modifier.heightIn(max = 220.dp).verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+                            audienceMembers.forEach { (uid, name) ->
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(name, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
+                                    IconButton(onClick = {
+                                        db.collection("users").document(currentUid).collection(audienceListType).document(uid).delete()
+                                            .addOnSuccessListener { loadAudienceList() }
+                                            .addOnFailureListener { Toast.makeText(context, "Could not remove person: ${it.message}", Toast.LENGTH_LONG).show() }
+                                    }) { Icon(Icons.Default.DeleteOutline, "Remove person", tint = MaterialTheme.colorScheme.error) }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showAudienceListDialog = false }) { Text("Done") } }
+        )
     }
 
     if (showStoryChooser) {
