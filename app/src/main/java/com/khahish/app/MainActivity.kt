@@ -2660,7 +2660,7 @@ fun ConversationScreen(
                 val outgoingBubbleTextColor = remember(outgoingBubbleColor) {
                     fun linearize(channel: Float): Float =
                         if (channel <= 0.04045f) channel / 12.92f
-                        else kotlin.math.pow((channel + 0.055f) / 1.055f, 2.4f)
+                        else Math.pow(((channel + 0.055f) / 1.055f).toDouble(), 2.4).toFloat()
                     val luminance =
                         0.2126f * linearize(outgoingBubbleColor.red) +
                         0.7152f * linearize(outgoingBubbleColor.green) +
