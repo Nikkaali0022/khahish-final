@@ -109,6 +109,25 @@ service cloud.firestore {
         allow create, update, delete: if isOwner(uid);
       }
 
+      // Close Friends and My Friends are separate owner-managed story audiences.
+      match /closeFriends/{friendUid} {
+        allow get, list: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && friendUid != uid
+          && request.resource.data.uid == friendUid
+          && request.resource.data.keys().hasOnly(['uid', 'name', 'username', 'addedAt']);
+        allow delete: if isOwner(uid);
+      }
+
+      match /friends/{friendUid} {
+        allow get, list: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && friendUid != uid
+          && request.resource.data.uid == friendUid
+          && request.resource.data.keys().hasOnly(['uid', 'name', 'username', 'addedAt']);
+        allow delete: if isOwner(uid);
+      }
+
       match /trustedDevices/{deviceId} {
         allow read, create, update, delete: if isOwner(uid);
       }
@@ -708,7 +727,15 @@ service cloud.firestore {
         && request.resource.data.createdAt is int
         && request.resource.data.expiresAt is int
         && request.resource.data.expiresAt > request.resource.data.createdAt
-        && request.resource.data.audience in ['everyone', 'only_me'];
+        && request.resource.data.audience in ['everyone', 'close_friends', 'my_contacts', 'my_friends']
+        && request.resource.data.get('allowedUids', []) is list
+        && request.resource.data.get('allowedUids', []).size() <= 500
+        && (
+          (request.resource.data.audience == 'everyone'
+            && request.resource.data.get('allowedUids', []).size() == 0)
+          || (request.resource.data.audience != 'everyone'
+            && request.resource.data.get('allowedUids', []).size() > 0)
+        );
 
       allow update: if false;
       allow delete: if signedIn()
