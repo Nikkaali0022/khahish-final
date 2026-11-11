@@ -2,6 +2,7 @@ package com.khahish.app
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.content.Intent
 import android.media.MediaRecorder
 import android.media.MediaPlayer
 import android.net.Uri
@@ -71,7 +72,8 @@ private data class KhahishStory(
     val mediaType: String,
     val createdAt: Long,
     val expiresAt: Long,
-    val audience: String = "everyone"
+    val audience: String = "everyone",
+    val linkUrl: String = ""
 )
 
 @Composable
@@ -91,6 +93,8 @@ fun KhahishUpdatesScreen(
     var pendingMediaUri by remember { mutableStateOf<Uri?>(null) }
     var pendingMediaType by remember { mutableStateOf("image") }
     var storyCaption by remember { mutableStateOf("") }
+    var storyLinkUrl by remember { mutableStateOf("") }
+    var pendingExternalLink by remember { mutableStateOf("") }
     var storyText by remember { mutableStateOf("") }
     var uploading by remember { mutableStateOf(false) }
     var voiceRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
@@ -169,7 +173,7 @@ fun KhahishUpdatesScreen(
         }.addOnFailureListener { audienceAdding = false; Toast.makeText(context, "Username lookup failed: ${it.message}", Toast.LENGTH_LONG).show() }
     }
 
-    fun publishStory(text: String, mediaUrl: String = "", mediaType: String = "text") {
+    fun publishStory(text: String, mediaUrl: String = "", mediaType: String = "text", linkUrl: String = storyLinkUrl) {
         val now = System.currentTimeMillis()
         val data = hashMapOf<String, Any>(
             "ownerUid" to currentUid,
@@ -181,6 +185,10 @@ fun KhahishUpdatesScreen(
             "expiresAt" to now + 24L * 60L * 60L * 1000L,
             "audience" to storyAudience
         )
+        val normalizedLink = linkUrl.trim().let { value ->
+            if (value.isBlank()) "" else if (value.startsWith("http://", true) || value.startsWith("https://", true)) value else "https://$value"
+        }
+        if (normalizedLink.isNotBlank()) data["linkUrl"] = normalizedLink
 
         fun saveForAudience(uids: List<String>) {
             val allowed = uids.filter { it.isNotBlank() && it != currentUid }.distinct().take(500)
@@ -228,6 +236,7 @@ fun KhahishUpdatesScreen(
                 uploading = false
                 publishStory(caption, url, type)
                 storyCaption = ""
+                storyLinkUrl = ""
                 pendingMediaUri = null
                 showMediaEditor = false
             },
@@ -409,7 +418,8 @@ fun KhahishUpdatesScreen(
                         mediaType = doc.getString("mediaType") ?: "text",
                         createdAt = doc.getLong("createdAt") ?: 0L,
                         expiresAt = expires,
-                        audience = audience
+                        audience = audience,
+                        linkUrl = doc.getString("linkUrl").orEmpty()
                     )
                 }.sortedByDescending { it.createdAt }
             loading = false
