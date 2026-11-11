@@ -83,6 +83,8 @@ class KhahishAgoraSession(
 
             if (isVideoCall) {
                 rtc.enableVideo()
+                rtc.enableLocalVideo(true)
+                rtc.muteLocalVideoStream(false)
             } else {
                 rtc.disableVideo()
             }
@@ -112,7 +114,9 @@ class KhahishAgoraSession(
     }
 
     fun setupLocalVideo(surfaceView: SurfaceView) {
-        if (!isVideoCall) return
+        if (!isVideoCall || released) return
+        engine?.enableVideo()
+        engine?.enableLocalVideo(true)
         engine?.setupLocalVideo(
             VideoCanvas(surfaceView, VideoCanvas.RENDER_MODE_HIDDEN, credentials.uid)
         )
@@ -131,8 +135,17 @@ class KhahishAgoraSession(
     }
 
     fun setCameraEnabled(enabled: Boolean) {
-        if (isVideoCall) {
-            engine?.enableLocalVideo(enabled)
+        if (isVideoCall && !released) {
+            if (enabled) {
+                engine?.enableVideo()
+                engine?.enableLocalVideo(true)
+                engine?.muteLocalVideoStream(false)
+                engine?.startPreview()
+            } else {
+                engine?.muteLocalVideoStream(true)
+                engine?.enableLocalVideo(false)
+                engine?.stopPreview()
+            }
         }
     }
 
