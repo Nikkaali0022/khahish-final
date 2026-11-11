@@ -1307,7 +1307,7 @@ fun NewChatScreen(
                             AsyncImage(model = user.photoUrl, contentDescription = "Profile picture",
                                 modifier = Modifier.size(48.dp).clip(CircleShape), contentScale = ContentScale.Crop)
                         } else {
-                            Box(Modifier.size(48.dp).background(Color(0xFFDCEFE9), CircleShape),
+                            Box(Modifier.size(48.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape),
                                 contentAlignment = Alignment.Center) {
                                 Text(user.name.firstOrNull()?.uppercase() ?: "K", color = Green, fontWeight = FontWeight.Bold)
                             }
@@ -1683,7 +1683,7 @@ fun ChatList(
                     ) {
                         if (chat.isGroup) {
                             Box(
-                                Modifier.size(52.dp).background(Color(0xFFDCEFE9), CircleShape),
+                                Modifier.size(52.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) { Icon(Icons.Default.Groups, "Group chat", tint = Green, modifier = Modifier.size(28.dp)) }
                         } else {
@@ -1694,7 +1694,7 @@ fun ChatList(
                                         modifier = Modifier.size(52.dp).clip(CircleShape).clickable { expandedProfileMenu = chat.id },
                                         contentScale = ContentScale.Crop)
                                 } else {
-                                    Box(Modifier.size(52.dp).background(Color(0xFFDCEFE9), CircleShape)
+                                    Box(Modifier.size(52.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
                                         .clickable { expandedProfileMenu = chat.id }, contentAlignment = Alignment.Center) {
                                         Text(chat.initials, color = Green, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                                     }
@@ -2421,7 +2421,7 @@ fun ConversationScreen(
             } else {
                 if (chat.isGroup) {
                     Box(
-                        Modifier.size(40.dp).background(Color(0xFFDCEFE9), CircleShape).clickable { showGroupInfo = true },
+                        Modifier.size(40.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape).clickable { showGroupInfo = true },
                         contentAlignment = Alignment.Center
                     ) { Icon(Icons.Default.Groups, "Group info", tint = Green) }
                 } else {
@@ -2430,7 +2430,7 @@ fun ConversationScreen(
                             AsyncImage(model = peerPhotoUrl, contentDescription = "Profile picture",
                                 modifier = Modifier.size(40.dp).clip(CircleShape).clickable { onViewProfile(chat.peerUid) }, contentScale = ContentScale.Crop)
                         } else {
-                            Box(Modifier.size(40.dp).background(Color(0xFFDCEFE9), CircleShape).clickable { onViewProfile(chat.peerUid) }, contentAlignment = Alignment.Center) {
+                            Box(Modifier.size(40.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape).clickable { onViewProfile(chat.peerUid) }, contentAlignment = Alignment.Center) {
                                 Text(chat.initials, color = Green, fontWeight = FontWeight.Bold)
                             }
                         }
