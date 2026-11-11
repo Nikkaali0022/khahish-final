@@ -212,6 +212,20 @@ test("private chat is created only in the same batch that accepts its request", 
   }));
 });
 
+test("signed-in users may check an absent deterministic chat ID but cannot read another user's existing chat", async () => {
+  const aliceDb = db("alice");
+  await assertSucceeds(getDoc(doc(aliceDb, "chats/alice_bob")));
+
+  await seed("chats/alice_carol", {
+    members: ["alice", "carol"],
+    lastMessage: "",
+    lastMessageAt: 0,
+    updatedAt: Date.now()
+  });
+  await assertSucceeds(getDoc(doc(aliceDb, "chats/alice_carol")));
+  await assertFails(getDoc(doc(db("bob"), "chats/alice_carol")));
+});
+
 test("messages cannot be created while impersonating another chat member", async () => {
   await seed("chats/alice_bob", {
     members: ["alice", "bob"],
