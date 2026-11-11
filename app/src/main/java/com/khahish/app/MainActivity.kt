@@ -2283,6 +2283,9 @@ fun ConversationScreen(
         }
     }
     var isUploading by remember { mutableStateOf(false) }
+    var pendingChatMediaUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingChatMediaType by remember { mutableStateOf("") }
+    var pendingChatMediaCaption by remember { mutableStateOf("") }
     var isSending by remember { mutableStateOf(false) }
     var peerTyping by remember { mutableStateOf(false) }
     var peerOnline by remember { mutableStateOf(false) }
@@ -2377,21 +2380,9 @@ fun ConversationScreen(
         ActivityResultContracts.GetContent()
     ) { uri ->
         if (uri != null) {
-            isUploading = true
-            uploadToCloudinary(
-                context, uri, "image",
-                onSuccess = { url ->
-                    isUploading = false
-                    isSending = true
-                    sendChatMessage(
-                        chatRef, currentUserId, "", url, "image", context
-                    ) { isSending = false }
-                },
-                onError = {
-                    isUploading = false
-                    showToast(context, it)
-                }
-            )
+            pendingChatMediaUri = uri
+            pendingChatMediaType = "image"
+            pendingChatMediaCaption = ""
         }
     }
 
@@ -2421,21 +2412,9 @@ fun ConversationScreen(
         ActivityResultContracts.GetContent()
     ) { uri ->
         if (uri != null) {
-            isUploading = true
-            uploadToCloudinary(
-                context, uri, "video",
-                onSuccess = { url ->
-                    isUploading = false
-                    isSending = true
-                    sendChatMessage(
-                        chatRef, currentUserId, "", url, "video", context
-                    ) { isSending = false }
-                },
-                onError = {
-                    isUploading = false
-                    showToast(context, it)
-                }
-            )
+            pendingChatMediaUri = uri
+            pendingChatMediaType = "video"
+            pendingChatMediaCaption = ""
         }
     }
 
@@ -4152,6 +4131,121 @@ fun ConversationScreen(
             ) { Icon(Icons.Default.Close, "Close photo", tint = Color.White) }
         }
     }
+    if (pendingChatMediaUri != null) {
+        Dialog(
+            onDismissRequest = {
+                if (!isUploading) {
+                    pendingChatMediaUri = null
+                    pendingChatMediaType = ""
+                    pendingChatMediaCaption = ""
+                }
+            },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (pendingChatMediaType == "video") "Preview video" else "Preview photo",
+                        modifier = Modifier.weight(1f),
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 18.sp
+                    )
+                    IconButton(
+                        enabled = !isUploading,
+                        onClick = {
+                            pendingChatMediaUri = null
+                            pendingChatMediaType = ""
+                            pendingChatMediaCaption = ""
+                        }
+                    ) { Icon(Icons.Default.Close, "Cancel media") }
+                }
+                if (pendingChatMediaType == "video") {
+                    KhahishVideoPlayer(
+                        url = pendingChatMediaUri.toString(),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 220.dp, max = 420.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                    )
+                } else {
+                    AsyncImage(
+                        model = pendingChatMediaUri,
+                        contentDescription = "Selected photo preview",
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 220.dp, max = 420.dp)
+                            .clip(RoundedCornerShape(14.dp)),
+                        contentScale = ContentScale.Fit
+                    )
+                }
+                OutlinedTextField(
+                    value = pendingChatMediaCaption,
+                    onValueChange = { pendingChatMediaCaption = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Add a caption...") },
+                    maxLines = 3,
+                    enabled = !isUploading
+                )
+                if (isUploading) {
+                    LinearProgressIndicator(Modifier.fillMaxWidth(), color = Green)
+                    Text("Uploading media…", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        modifier = Modifier.weight(1f),
+                        enabled = !isUploading,
+                        onClick = {
+                            pendingChatMediaUri = null
+                            pendingChatMediaType = ""
+                            pendingChatMediaCaption = ""
+                        }
+                    ) { Text("Cancel") }
+                    Button(
+                        modifier = Modifier.weight(1f),
+                        enabled = !isUploading && !isSending,
+                        onClick = {
+                            val uri = pendingChatMediaUri ?: return@Button
+                            val type = pendingChatMediaType
+                            val caption = pendingChatMediaCaption.trim()
+                            isUploading = true
+                            uploadToCloudinary(
+                                context,
+                                uri,
+                                if (type == "video") "video" else "image",
+                                onSuccess = { url ->
+                                    isUploading = false
+                                    isSending = true
+                                    pendingChatMediaUri = null
+                                    pendingChatMediaType = ""
+                                    pendingChatMediaCaption = ""
+                                    sendChatMessage(
+                                        chatRef, currentUserId, caption, url, type, context
+                                    ) { isSending = false }
+                                },
+                                onError = {
+                                    isUploading = false
+                                    showToast(context, it)
+                                }
+                            )
+                        }
+                    ) {
+                        Icon(Icons.Default.Send, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Send")
+                    }
+                }
+            }
+        }
+    }
+
     if (videoToPlay.isNotBlank()) Dialog(
         onDismissRequest = { videoToPlay = "" },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
