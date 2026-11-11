@@ -30,6 +30,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.togetherWith
@@ -240,6 +241,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
+        // Request the display's high refresh rate when the device supports it. Android may
+        // still choose a lower rate based on device policy, battery saver, or display settings.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            window.attributes = window.attributes.apply { preferredRefreshRate = 120f }
+        }
         if (Build.VERSION.SDK_INT >= 27) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
@@ -604,7 +610,10 @@ fun KhahishApp() {
         }
         AnimatedContent(
             targetState = currentUser != null,
-            transitionSpec = { fadeIn() togetherWith fadeOut() },
+            transitionSpec = {
+                fadeIn(animationSpec = tween(durationMillis = 130)) togetherWith
+                    fadeOut(animationSpec = tween(durationMillis = 110))
+            },
             label = "authentication_transition"
         ) { loggedIn ->
             if (!loggedIn) {
@@ -804,10 +813,13 @@ fun KhahishApp() {
                                 when {
                                     animationsEnabled && slideTransitionsEnabled -> {
                                         val movingForward = tabOrder.indexOf(targetState) > tabOrder.indexOf(initialState)
-                                        (slideInHorizontally { width -> if (movingForward) width / 3 else -width / 3 } + fadeIn()) togetherWith
-                                            (slideOutHorizontally { width -> if (movingForward) -width / 3 else width / 3 } + fadeOut())
+                                        (slideInHorizontally(animationSpec = tween(durationMillis = 160)) { width -> if (movingForward) width / 3 else -width / 3 } +
+                                            fadeIn(animationSpec = tween(durationMillis = 130))) togetherWith
+                                            (slideOutHorizontally(animationSpec = tween(durationMillis = 140)) { width -> if (movingForward) -width / 3 else width / 3 } +
+                                                fadeOut(animationSpec = tween(durationMillis = 110)))
                                     }
-                                    animationsEnabled -> fadeIn() togetherWith fadeOut()
+                                    animationsEnabled -> fadeIn(animationSpec = tween(durationMillis = 130)) togetherWith
+                                        fadeOut(animationSpec = tween(durationMillis = 110))
                                     else -> EnterTransition.None togetherWith ExitTransition.None
                                 }
                             },
