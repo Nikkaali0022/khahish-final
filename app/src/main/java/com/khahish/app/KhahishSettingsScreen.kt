@@ -70,6 +70,7 @@ fun KhahishSettingsScreen(
     var savingProfile by remember { mutableStateOf(false) }
     var showBlocked by remember { mutableStateOf(false) }
     var showPrivacy by remember { mutableStateOf(false) }
+    var showLockChatPasswordDialog by remember { mutableStateOf(false) }
     var showAppearance by remember { mutableStateOf(false) }
     var showStorage by remember { mutableStateOf(false) }
     var showSupport by remember { mutableStateOf(false) }
@@ -300,6 +301,9 @@ fun KhahishSettingsScreen(
             KhahishSettingsItem(Icons.Default.Security, "Privacy controls", "Manage privacy preferences") {
                 showPrivacy = !showPrivacy
             }
+            KhahishSettingsItem(Icons.Default.Lock, "Lock Chat Passwords", "Create or change your secret Locked Chats password") {
+                showLockChatPasswordDialog = true
+            }
             if (showPrivacy) {
                 KhahishSettingsSwitch(
                     "Show online status",
@@ -509,6 +513,10 @@ fun KhahishSettingsScreen(
         }
         Spacer(Modifier.height(28.dp))
         }
+    }
+
+    if (showLockChatPasswordDialog) {
+        LockChatPasswordSettingsDialog(uid) { showLockChatPasswordDialog = false }
     }
 
     if (showSupport) {
