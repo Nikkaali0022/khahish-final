@@ -1138,12 +1138,20 @@ fun KhahishUpdatesScreen(
                     placeholder = { Text("What's on your mind?") },
                     minLines = 3
                 )
+                OutlinedTextField(
+                    value = storyLinkUrl,
+                    onValueChange = { storyLinkUrl = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Add a website link (optional)") },
+                    singleLine = true
+                )
             },
             confirmButton = {
                 TextButton(onClick = {
                     if (storyText.isNotBlank()) {
                         publishStory(storyText)
                         storyText = ""
+                        storyLinkUrl = ""
                         showTextDialog = false
                     }
                 }) { Text("Share") }
