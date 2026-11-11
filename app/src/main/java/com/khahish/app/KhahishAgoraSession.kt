@@ -23,7 +23,8 @@ class KhahishAgoraSession(
     private val onJoined: () -> Unit,
     private val onRemoteUserJoined: (Int) -> Unit,
     private val onRemoteUserLeft: (Int) -> Unit,
-    private val onFailure: (String) -> Unit
+    private val onFailure: (String) -> Unit,
+    private val onTokenRenewalFailure: (String) -> Unit = onFailure
 ) {
     private val appContext = context.applicationContext
     private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -56,7 +57,10 @@ class KhahishAgoraSession(
                         engine?.renewToken(renewed.token)
                     }
                 },
-                onError = { message -> onFailure(message) }
+                onError = { message ->
+                    android.util.Log.e("KhahishAgoraSession", "RTC token renewal failed: $message")
+                    onTokenRenewalFailure(message)
+                }
             )
         }
     }
