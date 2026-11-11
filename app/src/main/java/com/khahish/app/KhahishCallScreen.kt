@@ -393,7 +393,7 @@ private fun CallControlButton(
     icon: ImageVector,
     label: String,
     background: Color,
-    iconTint: Color = MaterialTheme.colorScheme.onSurface,
+    iconTint: Color? = null,
     onClick: () -> Unit
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -404,11 +404,11 @@ private fun CallControlButton(
             onClick = onClick
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(icon, contentDescription = label, tint = iconTint, modifier = Modifier.size(27.dp))
+                Icon(icon, contentDescription = label, tint = iconTint ?: MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(27.dp))
             }
         }
         Spacer(Modifier.height(8.dp))
-        Text(label, color = colors.onSurfaceVariant, fontSize = 11.sp)
+        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
     }
 }
 
