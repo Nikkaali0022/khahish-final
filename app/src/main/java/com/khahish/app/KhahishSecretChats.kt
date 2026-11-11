@@ -105,7 +105,7 @@ internal fun SecretChatPasswordDialog(
     uid: String,
     createMode: Boolean,
     onDismiss: () -> Unit,
-    onUnlocked: () -> Unit
+    onUnlocked: (Long) -> Unit
 ) {
     val context = LocalContext.current
     var password by remember { mutableStateOf("") }
@@ -172,19 +172,33 @@ internal fun SecretChatPasswordDialog(
                             KhahishSecretChatLock.hasPassword(context, uid) -> error = "A password already exists. Use Change Password in Settings."
                             else -> {
                                 busy = true
-                                val saved = KhahishSecretChatLock.setPassword(context, uid, password)
-                                busy = false
-                                if (saved) {
-                                    Toast.makeText(context, "Secret password created.", Toast.LENGTH_SHORT).show()
-                                    onUnlocked()
-                                } else error = "Could not save the password. Please try again."
+                                KhahishSecretChatApi.createPassword(
+                                    password,
+                                    onSuccess = { expiresAt ->
+                                        busy = false
+                                        Toast.makeText(context, "Secret password created.", Toast.LENGTH_SHORT).show()
+                                        onUnlocked(expiresAt)
+                                    },
+                                    onError = { message ->
+                                        busy = false
+                                        error = message
+                                    }
+                                )
                             }
                         }
                     } else {
                         busy = true
-                        val valid = KhahishSecretChatLock.verifyPassword(context, uid, password)
-                        busy = false
-                        if (valid) onUnlocked() else error = "Incorrect password. Try again."
+                        KhahishSecretChatApi.unlock(
+                            password,
+                            onSuccess = { expiresAt ->
+                                busy = false
+                                onUnlocked(expiresAt)
+                            },
+                            onError = { message ->
+                                busy = false
+                                error = message
+                            }
+                        )
                     }
                 }
             ) {
@@ -254,18 +268,23 @@ internal fun LockChatPasswordSettingsDialog(uid: String, onDismiss: () -> Unit) 
                     enabled = !busy && currentPassword.isNotBlank() && newPassword.isNotBlank() && confirmPassword.isNotBlank(),
                     onClick = {
                         when {
-                            !KhahishSecretChatLock.verifyPassword(context, uid, currentPassword) ->
-                                message = "Current password is incorrect."
                             newPassword.length < 8 -> message = "New password must be at least 8 characters."
                             newPassword != confirmPassword -> message = "New passwords do not match."
                             else -> {
                                 busy = true
-                                val saved = KhahishSecretChatLock.setPassword(context, uid, newPassword)
-                                busy = false
-                                if (saved) {
-                                    Toast.makeText(context, "Password changed successfully.", Toast.LENGTH_SHORT).show()
-                                    onDismiss()
-                                } else message = "Password could not be changed."
+                                KhahishSecretChatApi.changePassword(
+                                    currentPassword,
+                                    newPassword,
+                                    onSuccess = {
+                                        busy = false
+                                        Toast.makeText(context, "Password changed successfully.", Toast.LENGTH_SHORT).show()
+                                        onDismiss()
+                                    },
+                                    onError = { error ->
+                                        busy = false
+                                        message = error
+                                    }
+                                )
                             }
                         }
                     }
@@ -282,7 +301,7 @@ internal fun LockedChatsHub(
     currentUid: String,
     lockedContactUids: Set<String>,
     onBack: () -> Unit,
-    onAddContact: (String) -> Unit,
+    onAddContact: (String, (Set<String>?, String?) -> Unit) -> Unit,
     onOpenChat: (Chat) -> Unit,
     onChangePassword: () -> Unit
 ) {
@@ -352,9 +371,14 @@ internal fun LockedChatsHub(
             currentUid = currentUid,
             existingLockedUids = lockedContactUids,
             onDismiss = { showAddContact = false },
-            onAdd = { targetUid ->
-                onAddContact(targetUid)
-                showAddContact = false
+            onAdd = { targetUid, onResult ->
+                onAddContact(targetUid) { updated, error ->
+                    if (updated != null) {
+                        showAddContact = false
+                    } else {
+                        onResult(error ?: "Could not add this contact.")
+                    }
+                }
             }
         )
     }
@@ -365,7 +389,7 @@ private fun AddLockedContactDialog(
     currentUid: String,
     existingLockedUids: Set<String>,
     onDismiss: () -> Unit,
-    onAdd: (String) -> Unit
+    onAdd: (String, (String) -> Unit) -> Unit
 ) {
     val context = LocalContext.current
     val db = remember { FirebaseFirestore.getInstance() }
@@ -429,7 +453,14 @@ private fun AddLockedContactDialog(
             Row {
                 TextButton(onClick = onDismiss) { Text("Cancel") }
                 if (targetUid.isNotBlank()) {
-                    TextButton(onClick = { onAdd(targetUid) }) { Text("Add") }
+                    TextButton(onClick = {
+                        loading = true
+                        onAdd(targetUid) { resultError ->
+                            loading = false
+                            if (resultError.isBlank()) onDismiss()
+                            else error = resultError
+                        }
+                    }) { Text(if (loading) "Adding…" else "Add") }
                 }
             }
         }
