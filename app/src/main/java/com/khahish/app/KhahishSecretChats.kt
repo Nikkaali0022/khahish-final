@@ -169,7 +169,6 @@ internal fun SecretChatPasswordDialog(
                         when {
                             password.length < 8 -> error = "Password must be at least 8 characters."
                             password != confirmPassword -> error = "Passwords do not match."
-                            KhahishSecretChatLock.hasPassword(context, uid) -> error = "A password already exists. Use Change Password in Settings."
                             else -> {
                                 busy = true
                                 KhahishSecretChatApi.createPassword(
