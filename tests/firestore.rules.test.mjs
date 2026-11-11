@@ -430,7 +430,7 @@ test("support tickets are private to their owner and only admins can moderate", 
   const ticketRef = doc(aliceDb, "supportTickets/ticket-alice");
   await assertSucceeds(setDoc(ticketRef, ticket));
   await assertSucceeds(getDoc(ticketRef));
-  await assertSucceeds(getDocs(collection(aliceDb, "supportTickets")));
+  await assertSucceeds(getDocs(query(collection(aliceDb, "supportTickets"), where("userUid", "==", "alice"))));
 
   await assertFails(getDoc(doc(db("bob"), "supportTickets/ticket-alice")));
   await assertFails(getDocs(collection(db("bob"), "supportTickets")));
