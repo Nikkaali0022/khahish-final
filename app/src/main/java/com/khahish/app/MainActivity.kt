@@ -1934,6 +1934,10 @@ fun ConversationScreen(
     var disappearingDurationMs by remember { mutableStateOf(0L) }
     var replyTarget by remember { mutableStateOf<MessageItem?>(null) }
     var reactionTarget by remember { mutableStateOf<MessageItem?>(null) }
+    var reactionMenuExpanded by remember { mutableStateOf(false) }
+    var selectedMoreExpanded by remember { mutableStateOf(false) }
+    var messageInfoTarget by remember { mutableStateOf<MessageItem?>(null) }
+    var showSecurityCodeInfo by remember { mutableStateOf(false) }
     var showForwardDialog by remember { mutableStateOf(false) }
     var forwardUsers by remember { mutableStateOf(emptyList<AppUser>()) }
     var forwardSearch by remember { mutableStateOf("") }
@@ -2440,9 +2444,14 @@ fun ConversationScreen(
                 if (selectedMessageIds.isNotEmpty()) selectedMessageIds = emptySet() else onBack()
             }) { Icon(Icons.Default.ArrowBack, "Back") }
             if (selectedMessageIds.isNotEmpty()) {
-                Text("${selectedMessageIds.size} selected", modifier = Modifier.weight(1f),
+                Text("${selectedMessageIds.size}", modifier = Modifier.weight(1f),
                     color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
-                TextButton(onClick = {
+                val selectedOne = messages.firstOrNull { it.id == selectedMessageIds.firstOrNull() }
+                IconButton(
+                    enabled = selectedMessageIds.size == 1,
+                    onClick = { selectedOne?.let { replyTarget = it; selectedMessageIds = emptySet() } }
+                ) { Icon(Icons.Default.Reply, "Reply") }
+                IconButton(onClick = {
                     selectedMessageIds.forEach { id ->
                         val item = messages.firstOrNull { it.id == id } ?: return@forEach
                         val ref = chatRef.collection("messages").document(id)
@@ -2450,44 +2459,88 @@ fun ConversationScreen(
                         else ref.update("starredBy", FieldValue.arrayUnion(currentUserId))
                     }
                     selectedMessageIds = emptySet()
-                }) { Icon(Icons.Default.Star, null); Text("Star") }
-                TextButton(
+                }) { Icon(Icons.Default.Star, "Star") }
+                IconButton(
                     enabled = selectedMessageIds.size == 1,
-                    onClick = {
-                        val item = messages.firstOrNull { it.id == selectedMessageIds.firstOrNull() }
-                        if (item != null) {
-                            if (item.senderId != currentUserId || item.mediaType != "text" ||
-                                System.currentTimeMillis() - item.timestamp > 15 * 60 * 1000L) {
-                                showToast(context, "Only your text messages from the last 15 minutes can be edited.")
-                            } else {
-                                editTarget = item
-                                editText = item.text
+                    onClick = { messageInfoTarget = selectedOne }
+                ) { Icon(Icons.Default.Info, "Message info") }
+                IconButton(onClick = { showDeleteOptions = true }) {
+                    Icon(Icons.Default.DeleteOutline, "Delete")
+                }
+                IconButton(onClick = { showForwardDialog = true }) {
+                    Icon(Icons.Default.Forward, "Forward")
+                }
+                Box {
+                    IconButton(onClick = { selectedMoreExpanded = true }) {
+                        Icon(Icons.Default.MoreVert, "More message actions")
+                    }
+                    DropdownMenu(
+                        expanded = selectedMoreExpanded,
+                        onDismissRequest = { selectedMoreExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Pin") },
+                            leadingIcon = { Icon(Icons.Default.PushPin, null) },
+                            enabled = selectedMessageIds.size == 1,
+                            onClick = {
+                                selectedMoreExpanded = false
+                                selectedOne?.let { item ->
+                                    chatRef.update(mapOf(
+                                        "pinnedMessageId" to item.id,
+                                        "pinnedMessageText" to item.text.ifBlank { item.mediaType.replaceFirstChar { ch -> ch.uppercase() } },
+                                        "pinnedBy" to currentUserId,
+                                        "pinnedAt" to System.currentTimeMillis()
+                                    )).addOnSuccessListener {
+                                        showToast(context, "Message pinned")
+                                        selectedMessageIds = emptySet()
+                                    }.addOnFailureListener { showToast(context, "Could not pin message: ${it.message}") }
+                                }
                             }
-                        }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Edit") },
+                            leadingIcon = { Icon(Icons.Default.Edit, null) },
+                            enabled = selectedMessageIds.size == 1 && selectedOne?.senderId == currentUserId &&
+                                selectedOne?.mediaType == "text" &&
+                                (System.currentTimeMillis() - (selectedOne?.timestamp ?: 0L) <= 15 * 60 * 1000L),
+                            onClick = {
+                                selectedMoreExpanded = false
+                                selectedOne?.let { editTarget = it; editText = it.text }
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Copy") },
+                            leadingIcon = { Icon(Icons.Default.ContentCopy, null) },
+                            enabled = selectedMessageIds.size == 1,
+                            onClick = {
+                                selectedMoreExpanded = false
+                                selectedOne?.let { item ->
+                                    val value = item.text.ifBlank { item.imageUrl }
+                                    if (value.isNotBlank()) {
+                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Khahish message", value))
+                                        showToast(context, "Copied")
+                                    }
+                                }
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Translate") },
+                            leadingIcon = { Icon(Icons.Default.Translate, null) },
+                            enabled = selectedMessageIds.size == 1 && selectedOne?.text?.isNotBlank() == true,
+                            onClick = {
+                                selectedMoreExpanded = false
+                                selectedOne?.text?.takeIf { it.isNotBlank() }?.let {
+                                    openSharedUrl(context, "https://translate.google.com/?sl=auto&text=" + Uri.encode(it))
+                                }
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Verify security code") },
+                            leadingIcon = { Icon(Icons.Default.VerifiedUser, null) },
+                            onClick = { selectedMoreExpanded = false; showSecurityCodeInfo = true }
+                        )
                     }
-                ) { Icon(Icons.Default.Edit, null); Text("Edit") }
-                TextButton(
-                    enabled = selectedMessageIds.size == 1,
-                    onClick = {
-                        val item = messages.firstOrNull { it.id == selectedMessageIds.firstOrNull() }
-                        if (item != null) {
-                            chatRef.update(mapOf(
-                                "pinnedMessageId" to item.id,
-                                "pinnedMessageText" to item.text.ifBlank { item.mediaType.replaceFirstChar { ch -> ch.uppercase() } },
-                                "pinnedBy" to currentUserId,
-                                "pinnedAt" to System.currentTimeMillis()
-                            )).addOnSuccessListener {
-                                showToast(context, "Message pinned")
-                                selectedMessageIds = emptySet()
-                            }.addOnFailureListener { showToast(context, "Could not pin message: ${it.message}") }
-                        }
-                    }
-                ) { Icon(Icons.Default.PushPin, null); Text("Pin") }
-                TextButton(onClick = { showForwardDialog = true }) { Icon(Icons.Default.Forward, null); Text("Forward") }
-                TextButton(onClick = { showDeleteOptions = true }) {
-                    Icon(Icons.Default.DeleteOutline, null)
-                    Spacer(Modifier.width(4.dp))
-                    Text("Delete")
                 }
             } else {
                 if (chat.isGroup) {
