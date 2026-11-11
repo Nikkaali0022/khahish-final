@@ -808,12 +808,12 @@ service cloud.firestore {
 
       allow get, list: if signedIn()
         && (
-          resource.data.userUid == request.auth.uid
-          || request.auth.token.admin == true
+          resource.data.get('userUid', '') == request.auth.uid
+          || request.auth.token.get('admin', false) == true
         );
 
       allow update: if signedIn()
-        && request.auth.token.admin == true
+        && request.auth.token.get('admin', false) == true
         && request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(['status', 'adminReply', 'updatedAt'])
         && request.resource.data.status in ['pending', 'in_progress', 'resolved', 'closed']
@@ -821,7 +821,7 @@ service cloud.firestore {
         && request.resource.data.adminReply.size() <= 2000
         && request.resource.data.updatedAt is int;
 
-      allow delete: if signedIn() && request.auth.token.admin == true;
+      allow delete: if signedIn() && request.auth.token.get('admin', false) == true;
     }
 
     // -----------------------------------------------------
