@@ -330,6 +330,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun KhahishApp() {
     val auth = remember { FirebaseAuth.getInstance() }
