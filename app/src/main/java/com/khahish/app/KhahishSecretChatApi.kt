@@ -106,7 +106,11 @@ internal object KhahishSecretChatApi {
     private fun parseExpiry(json: JSONObject): Long {
         val raw = json.optString("expiresAt")
         return try {
-            java.time.Instant.parse(raw).toEpochMilli()
+            val parser = java.text.SimpleDateFormat(
+                "yyyy-MM-dd'T'HH:mm:ss.SSSX",
+                java.util.Locale.US
+            ).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+            parser.parse(raw)?.time ?: (System.currentTimeMillis() + 20 * 60_000L)
         } catch (_: Exception) {
             System.currentTimeMillis() + 20 * 60_000L
         }
