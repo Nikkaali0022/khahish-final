@@ -249,14 +249,6 @@ class MainActivity : ComponentActivity() {
         }
 
         FirebaseAuth.getInstance().addAuthStateListener(presenceAuthListener)
-        window.statusBarColor = android.graphics.Color.WHITE
-        window.navigationBarColor = android.graphics.Color.WHITE
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            window.decorView.systemUiVisibility =
-                android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or
-                    android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
-        }
 
         setContent {
             KhahishApp()
@@ -538,16 +530,54 @@ fun KhahishApp() {
     MaterialTheme(
         colorScheme = if (useDarkTheme) darkColorScheme(
             primary = Color(0xFF55D6B4),
+            onPrimary = Color(0xFF00382D),
             background = Color(0xFF101918),
+            onBackground = Color(0xFFE6F0ED),
             surface = Color(0xFF1B2725),
-            onSurface = Color(0xFFE6F0ED)
+            onSurface = Color(0xFFE6F0ED),
+            surfaceVariant = Color(0xFF263632),
+            onSurfaceVariant = Color(0xFFB6C9C2),
+            outlineVariant = Color(0xFF40534D)
         ) else lightColorScheme(
             primary = Green,
+            onPrimary = Color.White,
             background = Pale,
+            onBackground = Ink,
             surface = Color.White,
-            onSurface = Ink
+            onSurface = Ink,
+            surfaceVariant = Color(0xFFEAF2EF),
+            onSurfaceVariant = Muted,
+            outlineVariant = Color(0xFFD8E5E0)
         )
     ) {
+        SideEffect {
+            val activityWindow = (appContext as? Activity)?.window
+            activityWindow?.let { systemWindow ->
+                val barColor = if (useDarkTheme) {
+                    android.graphics.Color.rgb(16, 25, 24)
+                } else {
+                    android.graphics.Color.WHITE
+                }
+                systemWindow.statusBarColor = barColor
+                systemWindow.navigationBarColor = barColor
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    var flags = systemWindow.decorView.systemUiVisibility
+                    flags = if (useDarkTheme) {
+                        flags and android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
+                    } else {
+                        flags or android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        flags = if (useDarkTheme) {
+                            flags and android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
+                        } else {
+                            flags or android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+                        }
+                    }
+                    systemWindow.decorView.systemUiVisibility = flags
+                }
+            }
+        }
         AnimatedContent(
             targetState = currentUser != null,
             transitionSpec = { fadeIn() togetherWith fadeOut() },
@@ -896,7 +926,7 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
             shape = RoundedCornerShape(16.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = Green,
-                unfocusedBorderColor = Color(0xFFD8E5E0),
+                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
                 focusedContainerColor = MaterialTheme.colorScheme.surface,
                 unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                 cursorColor = Green
@@ -925,9 +955,9 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
             shape = RoundedCornerShape(16.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = Green,
-                unfocusedBorderColor = Color(0xFFD8E5E0),
-                focusedContainerColor = Color.White,
-                unfocusedContainerColor = Color.White,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                focusedContainerColor = MaterialTheme.colorScheme.surface,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                 cursorColor = Green
             )
         )
@@ -944,9 +974,9 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
             shape = RoundedCornerShape(16.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = Green,
-                unfocusedBorderColor = Color(0xFFD8E5E0),
-                focusedContainerColor = Color.White,
-                unfocusedContainerColor = Color.White,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                focusedContainerColor = MaterialTheme.colorScheme.surface,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
                 cursorColor = Green
             )
         )
@@ -1277,7 +1307,7 @@ fun NewChatScreen(
                             AsyncImage(model = user.photoUrl, contentDescription = "Profile picture",
                                 modifier = Modifier.size(48.dp).clip(CircleShape), contentScale = ContentScale.Crop)
                         } else {
-                            Box(Modifier.size(48.dp).background(Color(0xFFDCEFE9), CircleShape),
+                            Box(Modifier.size(48.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape),
                                 contentAlignment = Alignment.Center) {
                                 Text(user.name.firstOrNull()?.uppercase() ?: "K", color = Green, fontWeight = FontWeight.Bold)
                             }
@@ -1653,7 +1683,7 @@ fun ChatList(
                     ) {
                         if (chat.isGroup) {
                             Box(
-                                Modifier.size(52.dp).background(Color(0xFFDCEFE9), CircleShape),
+                                Modifier.size(52.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) { Icon(Icons.Default.Groups, "Group chat", tint = Green, modifier = Modifier.size(28.dp)) }
                         } else {
@@ -1664,7 +1694,7 @@ fun ChatList(
                                         modifier = Modifier.size(52.dp).clip(CircleShape).clickable { expandedProfileMenu = chat.id },
                                         contentScale = ContentScale.Crop)
                                 } else {
-                                    Box(Modifier.size(52.dp).background(Color(0xFFDCEFE9), CircleShape)
+                                    Box(Modifier.size(52.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
                                         .clickable { expandedProfileMenu = chat.id }, contentAlignment = Alignment.Center) {
                                         Text(chat.initials, color = Green, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                                     }
@@ -2391,7 +2421,7 @@ fun ConversationScreen(
             } else {
                 if (chat.isGroup) {
                     Box(
-                        Modifier.size(40.dp).background(Color(0xFFDCEFE9), CircleShape).clickable { showGroupInfo = true },
+                        Modifier.size(40.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape).clickable { showGroupInfo = true },
                         contentAlignment = Alignment.Center
                     ) { Icon(Icons.Default.Groups, "Group info", tint = Green) }
                 } else {
@@ -2400,7 +2430,7 @@ fun ConversationScreen(
                             AsyncImage(model = peerPhotoUrl, contentDescription = "Profile picture",
                                 modifier = Modifier.size(40.dp).clip(CircleShape).clickable { onViewProfile(chat.peerUid) }, contentScale = ContentScale.Crop)
                         } else {
-                            Box(Modifier.size(40.dp).background(Color(0xFFDCEFE9), CircleShape).clickable { onViewProfile(chat.peerUid) }, contentAlignment = Alignment.Center) {
+                            Box(Modifier.size(40.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape).clickable { onViewProfile(chat.peerUid) }, contentAlignment = Alignment.Center) {
                                 Text(chat.initials, color = Green, fontWeight = FontWeight.Bold)
                             }
                         }
@@ -2710,7 +2740,7 @@ fun ConversationScreen(
                                     Text(msg.text, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
                                 }
                             }
-                            "contact" -> Column(Modifier.fillMaxWidth().background(Color(0xFFEAF4F0), RoundedCornerShape(10.dp)).padding(10.dp)) {
+                            "contact" -> Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(10.dp)).padding(10.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.ContactPage, null, tint = Green)
                                     Spacer(Modifier.width(7.dp))
@@ -2721,14 +2751,14 @@ fun ConversationScreen(
                         }
 
                         if (msg.replyToMessageId.isNotBlank()) {
-                            Column(Modifier.fillMaxWidth().background(Color(0xFFEAF4F0), RoundedCornerShape(8.dp)).padding(7.dp)) {
+                            Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)).padding(7.dp)) {
                                 Text("Reply", color = Green, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                 Text(msg.replyToText, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, maxLines = 2)
                             }
                             Spacer(Modifier.height(5.dp))
                         }
                         if (msg.text.isNotBlank() && msg.mediaType != "location" && msg.mediaType != "contact") {
-                            Text(msg.text, color = if (isSelected) Color.Black else MaterialTheme.colorScheme.onSurface, fontSize = 15.sp)
+                            Text(msg.text, color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp)
                         }
                         if (msg.restoredFromBackup) {
                             Text("Imported backup • sender not verified", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp)
@@ -2737,7 +2767,7 @@ fun ConversationScreen(
                             Row(
                                 Modifier.align(Alignment.End)
                                     .padding(top = 2.dp)
-                                    .background(Color(0xFFF4F8F7), RoundedCornerShape(12.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
                                     .padding(horizontal = 6.dp, vertical = 2.dp),
                                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                                 verticalAlignment = Alignment.CenterVertically
@@ -2819,7 +2849,7 @@ fun ConversationScreen(
         }
 
         if (replyTarget != null) {
-            Row(Modifier.fillMaxWidth().background(Color(0xFFE8F5F0)).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Replying to message", color = Green, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     Text(replyTarget!!.text.ifBlank { replyTarget!!.mediaType }, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, fontSize = 12.sp)
@@ -3513,13 +3543,13 @@ private fun AudioMessagePlayer(url: String) {
 
     Row(
         Modifier.widthIn(max = 248.dp)
-            .background(Color(0xFF102B2A), RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(14.dp))
             .padding(horizontal = 9.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             Modifier.size(38.dp)
-                .background(Brush.linearGradient(listOf(Color(0xFF00E6A0), Color(0xFF00A98B))), CircleShape)
+                .background(MaterialTheme.colorScheme.primary, CircleShape)
                 .clickable(enabled = !loading) {
                     if (playing) {
                         player?.pause()
@@ -3578,7 +3608,7 @@ private fun AudioMessagePlayer(url: String) {
                         val barHeight = 7f + kotlin.math.abs(kotlin.math.sin(index * 0.79)).toFloat() * 19f
                         Box(
                             Modifier.weight(1f).height(barHeight.dp).clip(RoundedCornerShape(3.dp))
-                                .background(if (index.toFloat() / (bars - 1) <= progress) Color(0xFF00E6A0) else Color(0xFF66827D))
+                                .background(if (index.toFloat() / (bars - 1) <= progress) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant)
                         )
                     }
                 }
@@ -3594,20 +3624,20 @@ private fun AudioMessagePlayer(url: String) {
                     },
                     enabled = durationMs > 0 && !loading,
                     modifier = Modifier.weight(1f).height(17.dp),
-                    colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Color(0xFF00E6A0), inactiveTrackColor = Color(0xFF66827D))
+                    colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.onPrimary, activeTrackColor = MaterialTheme.colorScheme.primary, inactiveTrackColor = MaterialTheme.colorScheme.outlineVariant)
                 )
                 Spacer(Modifier.width(4.dp))
-                Text(timeText(durationMs), color = Color.White, fontSize = 10.sp)
+                Text(timeText(durationMs), color = MaterialTheme.colorScheme.onSurface, fontSize = 10.sp)
                 Text(
                     when (playbackSpeed) { 1.5f -> "1.5×"; 2f -> "2×"; else -> "1×" },
-                    color = Color(0xFFB8D9D0),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 10.sp,
                     modifier = Modifier.padding(start = 6.dp).clickable {
                         playbackSpeed = when (playbackSpeed) { 1f -> 1.5f; 1.5f -> 2f; else -> 1f }
                     }
                 )
             }
-            Text(timeText((durationMs * progress).toInt()), color = Color(0xFFB8D9D0), fontSize = 9.sp)
+            Text(timeText((durationMs * progress).toInt()), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp)
         }
     }
 }

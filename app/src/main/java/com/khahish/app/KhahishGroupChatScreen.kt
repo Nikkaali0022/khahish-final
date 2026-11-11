@@ -124,7 +124,7 @@ fun KhahishGroupChatScreen(
                         }.padding(horizontal = 18.dp, vertical = 11.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(Modifier.size(44.dp).clip(CircleShape).background(Color(0xFFDCEFE9)), contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(44.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
                             Text(user.name.firstOrNull()?.uppercase() ?: "K", color = Green, fontWeight = FontWeight.Bold)
                         }
                         Column(Modifier.weight(1f).padding(start = 12.dp)) {
@@ -191,7 +191,7 @@ fun KhahishGroupChatScreen(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Green)
         ) {
-            if (creating) CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+            if (creating) CircularProgressIndicator(Modifier.size(18.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
             else Icon(Icons.Default.GroupAdd, null)
             Spacer(Modifier.width(8.dp))
             Text(if (creating) "Creating group…" else "Create group")
