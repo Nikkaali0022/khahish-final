@@ -115,9 +115,41 @@ fun KhahishUpdatesScreen(
             "expiresAt" to now + 24L * 60L * 60L * 1000L,
             "audience" to storyAudience
         )
-        db.collection("stories").add(data)
-            .addOnSuccessListener { Toast.makeText(context, "Story shared for 24 hours", Toast.LENGTH_SHORT).show() }
-            .addOnFailureListener { Toast.makeText(context, "Story failed: ${it.message}", Toast.LENGTH_LONG).show() }
+
+        fun saveForAudience(uids: List<String>) {
+            val allowed = uids.filter { it.isNotBlank() && it != currentUid }.distinct().take(500)
+            if (storyAudience != "everyone" && allowed.isEmpty()) {
+                Toast.makeText(context, "No people are in this audience list yet. Add people first.", Toast.LENGTH_LONG).show()
+                return
+            }
+            data["allowedUids"] = allowed
+            db.collection("stories").add(data)
+                .addOnSuccessListener { Toast.makeText(context, "Story shared for 24 hours", Toast.LENGTH_SHORT).show() }
+                .addOnFailureListener { Toast.makeText(context, "Story failed: ${it.message}", Toast.LENGTH_LONG).show() }
+        }
+
+        when (storyAudience) {
+            "everyone" -> saveForAudience(emptyList())
+            "close_friends", "my_friends" -> {
+                val listName = if (storyAudience == "close_friends") "closeFriends" else "friends"
+                db.collection("users").document(currentUid).collection(listName).get()
+                    .addOnSuccessListener { snapshot -> saveForAudience(snapshot.documents.map { it.id }) }
+                    .addOnFailureListener { Toast.makeText(context, "Could not load audience: ${it.message}", Toast.LENGTH_LONG).show() }
+            }
+            "my_contacts" -> {
+                db.collection("chats").whereArrayContains("members", currentUid).get()
+                    .addOnSuccessListener { snapshot ->
+                        val recipients = snapshot.documents.flatMap { doc ->
+                            val members = doc.get("members") as? List<*> ?: emptyList<Any>()
+                            if (members.size == 2 && doc.getBoolean("isGroup") != true) {
+                                members.filterIsInstance<String>().filter { it != currentUid }
+                            } else emptyList()
+                        }
+                        saveForAudience(recipients)
+                    }
+                    .addOnFailureListener { Toast.makeText(context, "Could not load contacts: ${it.message}", Toast.LENGTH_LONG).show() }
+            }
+        }
     }
 
     fun uploadStory(uri: Uri, type: String, caption: String = storyCaption) {
