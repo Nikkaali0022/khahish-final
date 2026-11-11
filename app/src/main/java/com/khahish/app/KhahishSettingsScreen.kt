@@ -65,6 +65,11 @@ fun KhahishSettingsScreen(
     var showPrivacy by remember { mutableStateOf(false) }
     var showAppearance by remember { mutableStateOf(false) }
     var showStorage by remember { mutableStateOf(false) }
+    var showSupport by remember { mutableStateOf(false) }
+    var supportSubject by remember { mutableStateOf("") }
+    var supportMessage by remember { mutableStateOf("") }
+    var submittingSupport by remember { mutableStateOf(false) }
+    var supportTickets by remember { mutableStateOf(emptyList<Triple<String, String, String>>()) }
     var blockedUsers by remember { mutableStateOf(emptyList<String>()) }
     var loadingBlocked by remember { mutableStateOf(false) }
     var lastSeenVisible by remember { mutableStateOf(privacyPrefs.getBoolean("last_seen_visible", true)) }
@@ -134,6 +139,21 @@ fun KhahishSettingsScreen(
     if (showStorage) {
         StorageMediaPage(modifier = modifier, onBack = { showStorage = false })
         return
+    }
+
+    DisposableEffect(uid, showSupport) {
+        if (uid.isBlank() || !showSupport) {
+            onDispose { }
+        } else {
+            val registration = db.collection("supportTickets")
+                .whereEqualTo("userUid", uid)
+                .addSnapshotListener { snapshot, _ ->
+                    supportTickets = snapshot?.documents.orEmpty().map { doc ->
+                        Triple(doc.id, doc.getString("subject").orEmpty(), doc.getString("status") ?: "pending")
+                    }.sortedByDescending { it.first }
+                }
+            onDispose { registration.remove() }
+        }
     }
 
     Column(
@@ -300,7 +320,7 @@ fun KhahishSettingsScreen(
 
         KhahishSettingsGroup("HELP & ABOUT") {
             KhahishSettingsItem(Icons.Default.Help, "Help and support", "Contact and support information") {
-                Toast.makeText(context, "Khahish support will be connected in a later update.", Toast.LENGTH_LONG).show()
+                showSupport = true
             }
             KhahishSettingsItem(Icons.Default.Info, "About Khahish", "Khahish Messenger • Version 1.0") {
                 Toast.makeText(context, "Khahish Messenger version 1.0", Toast.LENGTH_SHORT).show()
@@ -327,6 +347,75 @@ fun KhahishSettingsScreen(
             fontWeight = FontWeight.Medium
         )
         Spacer(Modifier.height(28.dp))
+    }
+
+    if (showSupport) {
+        AlertDialog(
+            onDismissRequest = { if (!submittingSupport) showSupport = false },
+            title = { Text("Help and support") },
+            text = {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Send a complaint or question. Your ticket and any support reply will appear here.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = supportSubject,
+                        onValueChange = { if (it.length <= 100) supportSubject = it },
+                        label = { Text("Subject") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = supportMessage,
+                        onValueChange = { if (it.length <= 2000) supportMessage = it },
+                        label = { Text("Describe your issue") },
+                        minLines = 3,
+                        maxLines = 5,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text("Your previous tickets", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                    if (supportTickets.isEmpty()) {
+                        Text("No support tickets yet.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                    } else {
+                        supportTickets.take(5).forEach { ticket ->
+                            Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(10.dp)).padding(10.dp)) {
+                                Text(ticket.second, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+                                Text("Status: ${ticket.third}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !submittingSupport && supportSubject.trim().length >= 3 && supportMessage.trim().length >= 10,
+                    onClick = {
+                        if (uid.isBlank()) return@TextButton
+                        submittingSupport = true
+                        val now = System.currentTimeMillis()
+                        db.collection("supportTickets").add(mapOf(
+                            "userUid" to uid,
+                            "userEmail" to (user?.email ?: ""),
+                            "subject" to supportSubject.trim(),
+                            "message" to supportMessage.trim(),
+                            "status" to "pending",
+                            "adminReply" to "",
+                            "createdAt" to now,
+                            "updatedAt" to now
+                        )).addOnSuccessListener {
+                            submittingSupport = false
+                            supportSubject = ""
+                            supportMessage = ""
+                            Toast.makeText(context, "Support ticket submitted.", Toast.LENGTH_SHORT).show()
+                        }.addOnFailureListener { error ->
+                            submittingSupport = false
+                            Toast.makeText(context, "Ticket could not be submitted: ${error.message}", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                ) { Text(if (submittingSupport) "Sending…" else "Send ticket") }
+            },
+            dismissButton = {
+                TextButton(onClick = { if (!submittingSupport) showSupport = false }) { Text("Close") }
+            }
+        )
     }
 
     if (showEditProfile) {
