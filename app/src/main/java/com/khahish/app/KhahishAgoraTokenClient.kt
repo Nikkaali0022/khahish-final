@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit
  * The Agora App Certificate is never stored in or requested by the Android app.
  */
 data class AgoraRtcCredentials(
+    val callId: String,
     val token: String,
     val appId: String,
     val channelName: String,
@@ -39,12 +40,14 @@ object KhahishAgoraTokenClient {
     }
 
     fun requestToken(
+        callId: String,
         channelName: String,
         onSuccess: (AgoraRtcCredentials) -> Unit,
         onError: (String) -> Unit
     ) {
+        val cleanCallId = callId.trim()
         val cleanChannel = channelName.trim()
-        if (cleanChannel.isEmpty() || cleanChannel.toByteArray(Charsets.UTF_8).size >= 64) {
+        if (cleanCallId.isEmpty() || cleanCallId.length > 200 || cleanChannel.isEmpty() || cleanChannel.toByteArray(Charsets.UTF_8).size >= 64) {
             onError("Invalid call channel.")
             return
         }
@@ -66,6 +69,7 @@ object KhahishAgoraTokenClient {
                 Thread {
                     try {
                         val body = JSONObject()
+                            .put("callId", cleanCallId)
                             .put("channelName", cleanChannel)
                             .toString()
                             .toRequestBody("application/json; charset=utf-8".toMediaType())
@@ -94,6 +98,7 @@ object KhahishAgoraTokenClient {
 
                             val json = JSONObject(responseText)
                             val credentials = AgoraRtcCredentials(
+                                callId = json.getString("callId"),
                                 token = json.getString("token"),
                                 appId = json.getString("appId"),
                                 channelName = json.getString("channelName"),
@@ -102,6 +107,7 @@ object KhahishAgoraTokenClient {
                             )
 
                             if (
+                                credentials.callId != cleanCallId ||
                                 credentials.token.isBlank() ||
                                 credentials.appId.isBlank() ||
                                 credentials.channelName != cleanChannel ||
