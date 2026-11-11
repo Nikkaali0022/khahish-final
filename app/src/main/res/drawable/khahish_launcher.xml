@@ -4,33 +4,44 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Khahish emerald app tile -->
+    <!-- Soft emerald glow halo -->
     <path
-        android:fillColor="#087F68"
-        android:pathData="M0,0h108v108h-108z" />
+        android:fillColor="#B3B8F3D8"
+        android:pathData="M54,2a52,52 0,1 0,0 104a52,52 0,1 0,0 -104" />
+    <path
+        android:fillColor="#6618A889"
+        android:pathData="M54,6a48,48 0,1 0,0 96a48,48 0,1 0,0 -96" />
 
-    <!-- Soft inner green highlight -->
+    <!-- Circular emerald badge with bright outline -->
     <path
         android:fillColor="#18A889"
-        android:pathData="M0,0h108v42c-18,18 -38,28 -61,30C27,75 12,68 0,58z" />
+        android:pathData="M54,10a44,44 0,1 0,0 88a44,44 0,1 0,0 -88" />
+    <path
+        android:fillColor="#075C4E"
+        android:pathData="M54,15a39,39 0,1 0,0 78a39,39 0,1 0,0 -78" />
 
-    <!-- Bold white K mark -->
+    <!-- Subtle upper highlight -->
+    <path
+        android:fillColor="#1837D6A5"
+        android:pathData="M27,27c15,-14 39,-17 56,-5c-9,0 -18,5 -26,13C45,47 33,48 22,45c0,-7 2,-13 5,-18z" />
+
+    <!-- Bold white K centered in the circle -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M23,25h13v25l25,-25h18L49,55l31,29H62L36,60v24H23z" />
+        android:pathData="M29,31h10v20l20,-20h15L51,54l25,24H61L39,58v20H29z" />
 
-    <!-- Chat bubble -->
+    <!-- Chat bubble at the upper-right of the K -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M68,13c0,-5 4,-9 9,-9h19c5,0 9,4 9,9v12c0,5 -4,9 -9,9H84l-9,7v-7c-4,-1 -7,-5 -7,-9z" />
+        android:fillColor="#F4FFF9"
+        android:pathData="M65,20c0,-4 3,-7 7,-7h17c4,0 7,3 7,7v10c0,4 -3,7 -7,7H82l-8,6v-6c-5,-1 -9,-4 -9,-9z" />
 
-    <!-- Three message dots -->
+    <!-- Three emerald message dots -->
     <path
         android:fillColor="#087F68"
-        android:pathData="M78,18a2.2,2.2 0,1 0,0 4.4a2.2,2.2 0,1 0,0 -4.4M86.5,18a2.2,2.2 0,1 0,0 4.4a2.2,2.2 0,1 0,0 -4.4M95,18a2.2,2.2 0,1 0,0 4.4a2.2,2.2 0,1 0,0 -4.4" />
+        android:pathData="M74,23a2,2 0,1 0,0 4a2,2 0,1 0,0 -4M81,23a2,2 0,1 0,0 4a2,2 0,1 0,0 -4M88,23a2,2 0,1 0,0 4a2,2 0,1 0,0 -4" />
 
-    <!-- Motion swoosh -->
+    <!-- Mint motion swoosh -->
     <path
         android:fillColor="#B8F3D8"
-        android:pathData="M15,91c23,5 48,4 75,-4c-19,13 -49,17 -75,4z" />
+        android:pathData="M23,79c19,8 42,8 63,-1c-16,13 -43,17 -63,1z" />
 </vector>
