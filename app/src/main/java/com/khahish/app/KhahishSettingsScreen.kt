@@ -307,13 +307,23 @@ fun KhahishSettingsScreen(
                     onSlideTransitionsChanged(it)
                 }
             }
-            KhahishSettingsItem(Icons.Default.Notifications, "Notifications", "Open Android notification controls") {
+            KhahishSettingsItem(Icons.Default.Notifications, "Notifications & call alerts", "Manage message notifications and full-screen incoming calls") {
                 try {
-                    context.startActivity(Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                        putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
-                    })
+                    val fullScreenIntentAllowed = if (android.os.Build.VERSION.SDK_INT >= 34) {
+                        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+                        manager.canUseFullScreenIntent()
+                    } else true
+                    if (android.os.Build.VERSION.SDK_INT >= 34 && !fullScreenIntentAllowed) {
+                        context.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
+                            data = Uri.parse("package:${context.packageName}")
+                        })
+                    } else {
+                        context.startActivity(Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                            putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+                        })
+                    }
                 } catch (_: Exception) {
-                    Toast.makeText(context, "Unable to open notification settings", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Unable to open notification and call-alert settings", Toast.LENGTH_SHORT).show()
                 }
             }
             KhahishSettingsItem(Icons.Default.Storage, "Storage and media", "Manage downloads and clear temporary cache") {

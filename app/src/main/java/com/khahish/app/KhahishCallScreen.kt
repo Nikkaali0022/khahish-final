@@ -17,6 +17,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Videocam
@@ -65,6 +68,8 @@ fun KhahishCallScreen(
     var cameraEnabled by remember(call.id) { mutableStateOf(true) }
     var selectedAudioRoute by remember(call.id) { mutableStateOf(if (call.isVideo) "speaker" else "earpiece") }
     var audioRouteMenuExpanded by remember(call.id) { mutableStateOf(false) }
+    var callMoreMenuExpanded by remember(call.id) { mutableStateOf(false) }
+    var callInfoDialog by remember(call.id) { mutableStateOf<String?>(null) }
     var credentials by remember(call.id) { mutableStateOf<AgoraRtcCredentials?>(null) }
     var session by remember(call.id) { mutableStateOf<KhahishAgoraSession?>(null) }
     var connectionStarted by remember(call.id) { mutableStateOf(false) }
@@ -101,7 +106,20 @@ fun KhahishCallScreen(
                     onJoined = { isJoined = true; statusText = "Connected"; errorText = "" },
                     onRemoteUserJoined = { uid -> remoteUid = uid; statusText = "Connected"; errorText = "" },
                     onRemoteUserLeft = { statusText = "The other person left the call" },
-                    onFailure = { message -> statusText = "Connection failed"; errorText = message }
+                    onFailure = { message -> statusText = "Connection failed"; errorText = message },
+                    onTokenRenewalFailure = { message ->
+                        if (isJoined) {
+                            statusText = "Connected"
+                            errorText = if (message.contains("server configuration", ignoreCase = true)) {
+                                "Your call is still connected, but the server could not renew its calling credentials. Check the Cloudflare Worker configuration to support longer calls."
+                            } else {
+                                "Your call is still connected, but its calling credentials could not be renewed: ${message}"
+                            }
+                        } else {
+                            statusText = "Connection failed"
+                            errorText = message
+                        }
+                    }
                 )
                 session = rtc
                 rtc.setAudioRoute(selectedAudioRoute)
@@ -250,13 +268,109 @@ fun KhahishCallScreen(
             .padding(horizontal = 24.dp, vertical = 18.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            if (currentCall.isVideo) "KHAHISH  •  VIDEO CALL" else "KHAHISH  •  VOICE CALL",
-            color = colors.onSurfaceVariant,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold,
-            letterSpacing = 2.sp
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (currentCall.isVideo) "KHAHISH  •  VIDEO CALL" else "KHAHISH  •  VOICE CALL",
+                    color = colors.onSurfaceVariant,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 2.sp
+                )
+            }
+            Box {
+                IconButton(onClick = { callMoreMenuExpanded = true }) {
+                    Text("⋮", color = colors.onSurface, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                }
+                DropdownMenu(
+                    expanded = callMoreMenuExpanded,
+                    onDismissRequest = { callMoreMenuExpanded = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Screen Share") },
+                        leadingIcon = { Text("▣", color = colors.primary, fontSize = 18.sp) },
+                        onClick = {
+                            callMoreMenuExpanded = false
+                            callInfoDialog = "Screen Share"
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Add Participant") },
+                        leadingIcon = { Text("＋", color = colors.primary, fontSize = 18.sp) },
+                        onClick = {
+                            callMoreMenuExpanded = false
+                            callInfoDialog = "Add Participant"
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Open Chat") },
+                        leadingIcon = { Text("▤", color = colors.primary, fontSize = 18.sp) },
+                        onClick = {
+                            callMoreMenuExpanded = false
+                            callInfoDialog = "Open Chat"
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Audio Devices") },
+                        leadingIcon = { Text("◖))", color = colors.primary, fontSize = 16.sp) },
+                        onClick = {
+                            callMoreMenuExpanded = false
+                            audioRouteMenuExpanded = true
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Live Captions") },
+                        leadingIcon = { Text("CC", color = colors.primary, fontSize = 14.sp, fontWeight = FontWeight.Bold) },
+                        onClick = {
+                            callMoreMenuExpanded = false
+                            callInfoDialog = "Live Captions"
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Call Security") },
+                        leadingIcon = { Text("◆", color = colors.primary, fontSize = 18.sp) },
+                        onClick = {
+                            callMoreMenuExpanded = false
+                            callInfoDialog = "Call Security"
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Call Settings") },
+                        leadingIcon = { Text("⚙", color = colors.primary, fontSize = 18.sp) },
+                        onClick = {
+                            callMoreMenuExpanded = false
+                            callInfoDialog = "Call Settings"
+                        }
+                    )
+                }
+            }
+        }
+
+        if (callInfoDialog != null) {
+            val selectedOption = callInfoDialog!!
+            AlertDialog(
+                onDismissRequest = { callInfoDialog = null },
+                title = { Text(selectedOption) },
+                text = {
+                    Text(
+                        when (selectedOption) {
+                            "Screen Share" -> "Screen sharing ka option yahan add kar diya gaya hai. Actual screen broadcast ke liye Android screen-capture permission aur Agora screen-track integration abhi required hai."
+                            "Add Participant" -> "Multi-person calling abhi is one-to-one call engine mein enabled nahi hai. Is option ko group-call support ke saath activate karna hoga."
+                            "Open Chat" -> "Call ke dauran chat panel abhi connected nahi hai. Is waqt call ko band kiye baghair chat panel open nahi kiya ja sakta."
+                            "Live Captions" -> "Live captions ke liye speech-to-text service aur language support integration abhi required hai."
+                            "Call Security" -> "Call security details ko verify karne ke liye secure-call verification flow abhi integrate nahi hua."
+                            else -> "Call settings ke advanced controls ko aglay implementation step mein activate kiya jayega. Audio Devices se abhi Earpiece, Phone Speaker aur connected Bluetooth select kar sakte hain."
+                        }
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = { callInfoDialog = null }) { Text("OK") }
+                }
+            )
+        }
 
         Spacer(Modifier.height(42.dp))
 
