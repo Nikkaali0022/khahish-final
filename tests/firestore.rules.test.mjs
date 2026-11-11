@@ -413,6 +413,54 @@ test("caller timeout and incoming-call back navigation can close ringing calls",
   }));
 });
 
+
+test("support tickets are private to their owner and only admins can moderate", async () => {
+  const ticket = {
+    userUid: "alice",
+    userEmail: "alice@example.com",
+    subject: "Cannot receive messages",
+    message: "I cannot receive messages from my contacts after the latest update.",
+    status: "pending",
+    adminReply: "",
+    createdAt: Date.now(),
+    updatedAt: Date.now()
+  };
+
+  const aliceDb = db("alice");
+  const ticketRef = doc(aliceDb, "supportTickets/ticket-alice");
+  await assertSucceeds(setDoc(ticketRef, ticket));
+  await assertSucceeds(getDoc(ticketRef));
+  await assertSucceeds(getDocs(collection(aliceDb, "supportTickets")));
+
+  await assertFails(getDoc(doc(db("bob"), "supportTickets/ticket-alice")));
+  await assertFails(getDocs(collection(db("bob"), "supportTickets")));
+  await assertFails(updateDoc(ticketRef, {
+    status: "resolved",
+    adminReply: "This should be admin-only.",
+    updatedAt: Date.now()
+  }));
+
+  const adminDb = env.authenticatedContext("support-admin", { admin: true }).firestore();
+  const adminTicketRef = doc(adminDb, "supportTickets/ticket-alice");
+  await assertSucceeds(getDoc(adminTicketRef));
+  await assertSucceeds(getDocs(collection(adminDb, "supportTickets")));
+  await assertSucceeds(updateDoc(adminTicketRef, {
+    status: "in_progress",
+    adminReply: "We are investigating this issue.",
+    updatedAt: Date.now()
+  }));
+
+  await assertFails(setDoc(doc(db("bob"), "supportTickets/forged-ticket"), {
+    ...ticket,
+    userUid: "alice"
+  }));
+  await assertFails(setDoc(doc(aliceDb, "supportTickets/short-ticket"), {
+    ...ticket,
+    subject: "Hi",
+    message: "Short"
+  }));
+});
+
 test("reports can only be read by an admin", async () => {
   await seed("reports/report-private", {
     type: "user",
