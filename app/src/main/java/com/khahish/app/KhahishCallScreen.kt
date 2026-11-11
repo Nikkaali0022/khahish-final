@@ -82,6 +82,7 @@ fun KhahishCallScreen(
     fun requestCredentialsAndJoin() {
         statusText = "Connecting…"
         KhahishAgoraTokenClient.requestToken(
+            currentCall.id,
             currentCall.channelName,
             onSuccess = { token ->
                 credentials = token
