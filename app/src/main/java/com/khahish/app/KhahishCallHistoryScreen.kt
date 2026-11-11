@@ -11,6 +11,13 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallReceived
 import androidx.compose.material.icons.filled.CallMade
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.MoreVert
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
+import android.content.Intent
+import android.provider.CalendarContract
+import androidx.compose.ui.platform.LocalContext
+import java.util.Calendar
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -42,12 +49,77 @@ fun KhahishCallHistoryScreen(
     var searchingUser by remember { mutableStateOf(false) }
     var userLookupError by remember { mutableStateOf("") }
     var callTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var hiddenCallIds by remember(uid) { mutableStateOf(setOf<String>()) }
+    var historyMenuExpanded by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val historySettings = remember(uid) {
+        FirebaseFirestore.getInstance().collection("users").document(uid)
+            .collection("appSettings").document("callHistory")
+    }
 
-    val filteredCalls = remember(calls, searchQuery) {
-        if (searchQuery.isBlank()) calls else calls.filter { call ->
-            val person = if (call.callerUid == uid) call.calleeName else call.callerName
-            person.contains(searchQuery, ignoreCase = true)
+    val filteredCalls = remember(calls, searchQuery, hiddenCallIds) {
+        calls.filter { call ->
+            call.id !in hiddenCallIds &&
+                (searchQuery.isBlank() ||
+                    (if (call.callerUid == uid) call.calleeName else call.callerName)
+                        .contains(searchQuery, ignoreCase = true))
         }
+    }
+
+    DisposableEffect(uid) {
+        val registration = historySettings.addSnapshotListener { snapshot, _ ->
+            hiddenCallIds = snapshot?.get("hiddenCallIds")?.let { raw ->
+                (raw as? List<*>)?.filterIsInstance<String>()?.toSet()
+            } ?: emptySet()
+        }
+        onDispose { registration.remove() }
+    }
+
+    fun scheduleCalendarEvent(target: Pair<String, String>) {
+        val now = Calendar.getInstance()
+        DatePickerDialog(
+            context,
+            { _, year, month, day ->
+                val selected = Calendar.getInstance().apply {
+                    set(Calendar.YEAR, year)
+                    set(Calendar.MONTH, month)
+                    set(Calendar.DAY_OF_MONTH, day)
+                }
+                TimePickerDialog(
+                    context,
+                    { _, hour, minute ->
+                        selected.set(Calendar.HOUR_OF_DAY, hour)
+                        selected.set(Calendar.MINUTE, minute)
+                        selected.set(Calendar.SECOND, 0)
+                        selected.set(Calendar.MILLISECOND, 0)
+                        if (selected.timeInMillis <= System.currentTimeMillis()) {
+                            android.widget.Toast.makeText(context, "Please choose a future time.", android.widget.Toast.LENGTH_LONG).show()
+                        } else {
+                            val begin = selected.timeInMillis
+                            val end = begin + 30L * 60L * 1000L
+                            val intent = Intent(Intent.ACTION_INSERT).setData(CalendarContract.Events.CONTENT_URI)
+                                .putExtra(CalendarContract.Events.TITLE, "Khahish call with ${target.second}")
+                                .putExtra(CalendarContract.Events.DESCRIPTION, "Open Khahish and call @${normalizeKhahishUsername(usernameInput)}")
+                                .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, begin)
+                                .putExtra(CalendarContract.EXTRA_EVENT_END_TIME, end)
+                                .putExtra(CalendarContract.Events.HAS_ALARM, true)
+                            try {
+                                context.startActivity(intent)
+                                showNewCallDialog = false
+                            } catch (_: Exception) {
+                                android.widget.Toast.makeText(context, "No calendar app is available.", android.widget.Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    },
+                    now.get(Calendar.HOUR_OF_DAY),
+                    now.get(Calendar.MINUTE),
+                    false
+                ).show()
+            },
+            now.get(Calendar.YEAR),
+            now.get(Calendar.MONTH),
+            now.get(Calendar.DAY_OF_MONTH)
+        ).show()
     }
 
     DisposableEffect(uid) {
@@ -113,12 +185,32 @@ fun KhahishCallHistoryScreen(
     Column(
         Modifier.fillMaxSize().padding(16.dp)
     ) {
-        Text(
-            "Calls",
-            color = MaterialTheme.colorScheme.onBackground,
-            fontSize = 25.sp,
-            fontWeight = FontWeight.Bold
-        )
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Calls",
+                modifier = Modifier.weight(1f),
+                color = MaterialTheme.colorScheme.onBackground,
+                fontSize = 25.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Box {
+                IconButton(onClick = { historyMenuExpanded = true }) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "Call history options", tint = MaterialTheme.colorScheme.onSurface)
+                }
+                DropdownMenu(expanded = historyMenuExpanded, onDismissRequest = { historyMenuExpanded = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Clear call history") },
+                        onClick = {
+                            historyMenuExpanded = false
+                            val ids = (hiddenCallIds + calls.map { it.id }).distinct()
+                            historySettings.set(mapOf("hiddenCallIds" to ids, "updatedAt" to System.currentTimeMillis()))
+                                .addOnSuccessListener { android.widget.Toast.makeText(context, "Call history cleared on this account.", android.widget.Toast.LENGTH_SHORT).show() }
+                                .addOnFailureListener { error -> android.widget.Toast.makeText(context, "Could not clear history: ${error.message}", android.widget.Toast.LENGTH_LONG).show() }
+                        }
+                    )
+                }
+            }
+        }
         Spacer(Modifier.height(12.dp))
         OutlinedTextField(
             value = searchQuery,
@@ -298,6 +390,12 @@ fun KhahishCallHistoryScreen(
                                 Spacer(Modifier.width(4.dp))
                                 Text("Video")
                             }
+                        }
+                        OutlinedButton(
+                            onClick = { scheduleCalendarEvent(target) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Schedule in calendar")
                         }
                     }
                 }
