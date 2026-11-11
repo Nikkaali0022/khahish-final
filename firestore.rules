@@ -252,26 +252,39 @@ service cloud.firestore {
         && !isBlocked(request.resource.data.senderUid, request.resource.data.receiverUid);
 
       allow update: if signedIn()
-        && resource.data.receiverUid == request.auth.uid
-        && resource.data.status == 'pending'
-        && request.resource.data.senderUid == resource.data.senderUid
-        && request.resource.data.receiverUid == resource.data.receiverUid
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'status', 'acceptedBy', 'handledBy', 'acceptedAt', 'rejectedAt'
-        ])
-        && request.resource.data.status in ['accepted', 'rejected']
-        && request.resource.data.handledBy == request.auth.uid
         && (
-          request.resource.data.status != 'rejected'
-          || request.resource.data.rejectedAt is int
-        )
-        && (
-          request.resource.data.status == 'rejected'
+          (
+            request.auth.uid == resource.data.receiverUid
+            && resource.data.status == 'pending'
+            && request.resource.data.senderUid == resource.data.senderUid
+            && request.resource.data.receiverUid == resource.data.receiverUid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'status', 'acceptedBy', 'handledBy', 'acceptedAt', 'rejectedAt'
+            ])
+            && request.resource.data.status in ['accepted', 'rejected']
+            && request.resource.data.handledBy == request.auth.uid
+            && (
+              request.resource.data.status != 'rejected'
+              || request.resource.data.rejectedAt is int
+            )
+            && (
+              request.resource.data.status == 'rejected'
+              || (
+                request.resource.data.acceptedBy == request.auth.uid
+                && request.resource.data.acceptedAt is int
+                && !isBlocked(resource.data.receiverUid, resource.data.senderUid)
+                && !isBlocked(resource.data.senderUid, resource.data.receiverUid)
+              )
+            )
+          )
           || (
-            request.resource.data.acceptedBy == request.auth.uid
-            && request.resource.data.acceptedAt is int
-            && !isBlocked(resource.data.receiverUid, resource.data.senderUid)
-            && !isBlocked(resource.data.senderUid, resource.data.receiverUid)
+            request.auth.uid == resource.data.senderUid
+            && resource.data.status == 'pending'
+            && request.resource.data.senderUid == resource.data.senderUid
+            && request.resource.data.receiverUid == resource.data.receiverUid
+            && request.resource.data.status == 'cancelled'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'cancelledAt'])
+            && request.resource.data.cancelledAt is int
           )
         );
 
