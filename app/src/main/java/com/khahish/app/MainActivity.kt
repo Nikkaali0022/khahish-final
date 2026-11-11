@@ -36,6 +36,8 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.ui.input.pointer.pointerInput
@@ -3389,7 +3391,7 @@ fun ConversationScreen(
                                 color = bubbleSecondaryTextColor
                             )
                             if (msg.editedAt > 0L) {
-                                Text(" · edited", fontSize = 9.sp, color = bubbleSecondaryTextColor
+                                Text(" · edited", fontSize = 9.sp, color = bubbleSecondaryTextColor)
                             }
 
 
