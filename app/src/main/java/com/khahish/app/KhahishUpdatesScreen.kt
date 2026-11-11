@@ -81,6 +81,7 @@ fun KhahishUpdatesScreen(
     var showTextDialog by remember { mutableStateOf(false) }
     var showStoryChooser by remember { mutableStateOf(false) }
     var showMediaEditor by remember { mutableStateOf(false) }
+    var showVoiceEditor by remember { mutableStateOf(false) }
     var pendingMediaUri by remember { mutableStateOf<Uri?>(null) }
     var pendingMediaType by remember { mutableStateOf("image") }
     var storyCaption by remember { mutableStateOf("") }
@@ -128,6 +129,9 @@ fun KhahishUpdatesScreen(
             onSuccess = { url ->
                 uploading = false
                 publishStory(caption, url, type)
+                storyCaption = ""
+                pendingMediaUri = null
+                showMediaEditor = false
             },
             onError = {
                 uploading = false
@@ -146,7 +150,8 @@ fun KhahishUpdatesScreen(
     fun createVoiceRecorder() {
         try {
             val file = File(context.cacheDir, "khahish_story_voice_${System.currentTimeMillis()}.m4a")
-            val recorder = if (Build.VERSION.SDK_INT >= 31) MediaRecorder(context) else @Suppress("DEPRECATION") MediaRecorder()
+            @Suppress("DEPRECATION")
+            val recorder = if (Build.VERSION.SDK_INT >= 31) MediaRecorder(context) else MediaRecorder()
             recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
             recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
@@ -202,6 +207,7 @@ fun KhahishUpdatesScreen(
             uploading = false
             publishStory(storyCaption, url, "voice")
             storyCaption = ""
+            showVoiceEditor = false
             voicePreviewFile?.delete()
             voicePreviewFile = null
         }, onError = { message ->
@@ -559,6 +565,186 @@ fun KhahishUpdatesScreen(
                 KhahishVideoPlayer(url = videoPlayerUrl, modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f))
             }
         }
+    }
+
+    if (showStoryChooser) {
+        Dialog(
+            onDismissRequest = { showStoryChooser = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp),
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surface,
+                shadowElevation = 18.dp
+            ) {
+                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Create a Story", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                    Spacer(Modifier.height(8.dp))
+                    listOf(
+                        Triple(Icons.Default.Image, "Photo", "Add a photo"),
+                        Triple(Icons.Default.Videocam, "Video", "Add a video"),
+                        Triple(Icons.Default.TextFields, "Text", "Create a text story"),
+                        Triple(Icons.Default.Mic, "Voice", "Record a voice story")
+                    ).forEach { (icon, label, description) ->
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+                                .clickable {
+                                    showStoryChooser = false
+                                    when (label) {
+                                        "Photo" -> imagePicker.launch("image/*")
+                                        "Video" -> videoPicker.launch("video/*")
+                                        "Text" -> { storyText = ""; showTextDialog = true }
+                                        "Voice" -> { storyCaption = ""; voicePreviewFile = null; showVoiceEditor = true }
+                                    }
+                                }
+                                .padding(vertical = 9.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                Modifier.size(48.dp).clip(CircleShape).background(Green.copy(alpha = 0.13f)),
+                                contentAlignment = Alignment.Center
+                            ) { Icon(icon, null, tint = Green, modifier = Modifier.size(24.dp)) }
+                            Spacer(Modifier.width(14.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(label, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                                Text(description, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                            }
+                            Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showMediaEditor && pendingMediaUri != null) {
+        Dialog(
+            onDismissRequest = { showMediaEditor = false; pendingMediaUri = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Column(
+                Modifier.fillMaxSize().background(Color(0xFF101010)).padding(14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { showMediaEditor = false; pendingMediaUri = null }) {
+                        Icon(Icons.Default.Close, "Close editor", tint = Color.White)
+                    }
+                    Text("Edit story", color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { audienceMenu = true }) {
+                        Text(
+                            when (storyAudience) {
+                                "close_friends" -> "Close Friends"
+                                "my_contacts" -> "My Contacts"
+                                "my_friends" -> "My Friends"
+                                else -> "Everyone"
+                            },
+                            color = Color(0xFF70D7B8)
+                        )
+                    }
+                }
+                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    if (pendingMediaType == "image") {
+                        AsyncImage(
+                            model = pendingMediaUri,
+                            contentDescription = "Story preview",
+                            modifier = Modifier.fillMaxWidth().fillMaxHeight(),
+                            contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                        )
+                    } else {
+                        Text("Video preview selected", color = Color.White)
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    TextButton(onClick = { Toast.makeText(context, "Music tool selected", Toast.LENGTH_SHORT).show() }) {
+                        Icon(Icons.Default.MusicNote, null, tint = Color.White); Text("Music", color = Color.White)
+                    }
+                    TextButton(onClick = { Toast.makeText(context, "Crop and rotate tool selected", Toast.LENGTH_SHORT).show() }) {
+                        Icon(Icons.Default.CropRotate, null, tint = Color.White); Text("Crop", color = Color.White)
+                    }
+                    TextButton(onClick = { storyCaption += " ❤️" }) {
+                        Icon(Icons.Default.EmojiEmotions, null, tint = Color.White); Text("Sticker", color = Color.White)
+                    }
+                    TextButton(onClick = { storyCaption += " " }) {
+                        Icon(Icons.Default.TextFields, null, tint = Color.White); Text("Text", color = Color.White)
+                    }
+                    TextButton(onClick = { Toast.makeText(context, "Drawing tool selected", Toast.LENGTH_SHORT).show() }) {
+                        Icon(Icons.Default.Draw, null, tint = Color.White); Text("Draw", color = Color.White)
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = storyCaption,
+                        onValueChange = { storyCaption = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("Add a caption...") },
+                        singleLine = false,
+                        maxLines = 3
+                    )
+                    TextButton(onClick = { storyCaption += "@" }) { Text("@", color = Color(0xFF70D7B8), fontSize = 20.sp) }
+                    IconButton(
+                        enabled = !uploading,
+                        onClick = { pendingMediaUri?.let { uploadStory(it, pendingMediaType, storyCaption) } }
+                    ) { Icon(Icons.Default.Send, "Publish story", tint = Color(0xFF70D7B8)) }
+                }
+                if (uploading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Green)
+            }
+        }
+    }
+
+    if (showVoiceEditor) {
+        AlertDialog(
+            onDismissRequest = {
+                if (isRecordingVoice) cancelVoiceRecording()
+                voicePreviewFile?.delete()
+                voicePreviewFile = null
+                showVoiceEditor = false
+            },
+            title = { Text("Voice story") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        when {
+                            isRecordingVoice -> "Recording your voice story…"
+                            voicePreviewFile != null -> "Voice recording is ready to publish."
+                            else -> "Record a voice story, then preview and publish it."
+                        },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = storyCaption,
+                        onValueChange = { storyCaption = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Add a caption...") },
+                        maxLines = 2
+                    )
+                    if (isRecordingVoice) {
+                        LinearProgressIndicator(Modifier.fillMaxWidth(), color = Green)
+                        Button(onClick = { stopVoiceRecording() }, modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Default.Pause, null); Spacer(Modifier.width(8.dp)); Text("Stop recording")
+                        }
+                    } else if (voicePreviewFile == null) {
+                        Button(onClick = { requestVoiceRecording() }, modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Default.Mic, null); Spacer(Modifier.width(8.dp)); Text("Start recording")
+                        }
+                    } else {
+                        Text("Recording saved on this device until you publish.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                        Button(onClick = { publishVoiceStory() }, enabled = !uploading, modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Default.Send, null); Spacer(Modifier.width(8.dp)); Text("Publish voice story")
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (isRecordingVoice) cancelVoiceRecording()
+                    voicePreviewFile?.delete()
+                    voicePreviewFile = null
+                    showVoiceEditor = false
+                }) { Text("Cancel") }
+            }
+        )
     }
 
     if (showTextDialog) {
