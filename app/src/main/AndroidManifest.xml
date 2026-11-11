@@ -29,8 +29,8 @@
     <application
         android:label="Khahish"
         android:allowBackup="true"
-        android:icon="@mipmap/khahish_launcher"
-        android:roundIcon="@mipmap/khahish_launcher_round"
+        android:icon="@drawable/khahish_launcher"
+        android:roundIcon="@drawable/khahish_launcher"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
 
