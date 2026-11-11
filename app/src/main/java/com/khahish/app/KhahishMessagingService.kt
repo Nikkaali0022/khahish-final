@@ -5,6 +5,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -59,30 +61,53 @@ class KhahishMessagingService : FirebaseMessagingService() {
 
         val title = payload["title"] ?: message.notification?.title ?: "Khahish"
         val body = payload["body"] ?: message.notification?.body ?: "You have a new notification."
-        ensureNotificationChannel()
+        val callId = payload["callId"].orEmpty()
+        val isIncomingCall = notificationType == "call" && callId.isNotBlank()
+        ensureNotificationChannels()
 
-        val intent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        fun activityIntent(action: String = "open"): Intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             payload["chatId"]?.let { putExtra("khahish_chat_id", it) }
             payload["callId"]?.let { putExtra("khahish_call_id", it) }
             payload["type"]?.let { putExtra("khahish_notification_type", it) }
+            if (isIncomingCall) putExtra("khahish_call_action", action)
         }
+
+        val requestBase = (payload["chatId"] ?: callId.ifBlank { title }).hashCode()
         val pendingIntent = PendingIntent.getActivity(
-            this,
-            (payload["chatId"] ?: payload["callId"] ?: title).hashCode(),
-            intent,
+            this, requestBase, activityIntent(),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val notificationId = (payload["notificationId"] ?: System.currentTimeMillis().toString()).hashCode()
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+        val channelId = if (isIncomingCall) CALL_CHANNEL_ID else CHANNEL_ID
+        val builder = NotificationCompat.Builder(this, channelId)
             .setSmallIcon(android.R.drawable.sym_action_chat)
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setContentIntent(pendingIntent)
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .build()
+            .setAutoCancel(!isIncomingCall)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+
+        if (isIncomingCall) {
+            val acceptIntent = PendingIntent.getActivity(
+                this, requestBase + 1, activityIntent("accept"),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val rejectIntent = PendingIntent.getActivity(
+                this, requestBase + 2, activityIntent("reject"),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            builder
+                .setCategory(NotificationCompat.CATEGORY_CALL)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setOngoing(true)
+                .setTimeoutAfter(60_000L)
+                .setFullScreenIntent(pendingIntent, true)
+                .addAction(android.R.drawable.ic_menu_call, "Accept", acceptIntent)
+                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Reject", rejectIntent)
+        }
+        val notification = builder.build()
 
         try {
             NotificationManagerCompat.from(this).notify(notificationId, notification)
@@ -91,23 +116,37 @@ class KhahishMessagingService : FirebaseMessagingService() {
         }
     }
 
-    private fun ensureNotificationChannel() {
+    private fun ensureNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Khahish messages and calls",
-                NotificationManager.IMPORTANCE_HIGH
+            val messages = NotificationChannel(
+                CHANNEL_ID, "Khahish messages", NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "New messages, message requests and incoming call alerts"
+                description = "New messages and message requests"
                 enableVibration(true)
             }
-            manager.createNotificationChannel(channel)
+            val calls = NotificationChannel(
+                CALL_CHANNEL_ID, "Khahish incoming calls", NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Full-screen incoming voice and video call alerts"
+                enableVibration(true)
+                lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
+                setSound(
+                    RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
+                    AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE).build()
+                )
+            }
+            manager.createNotificationChannels(listOf(messages, calls))
         }
     }
 
     companion object {
         private const val CHANNEL_ID = "khahish_messages"
+        private const val CALL_CHANNEL_ID = "khahish_incoming_calls_v2"
+
+        fun cancelIncomingCallNotification(context: Context, callId: String) {
+            if (callId.isNotBlank()) NotificationManagerCompat.from(context).cancel(callId.hashCode())
+        }
 
         fun syncCurrentToken(context: Context) {
             FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
