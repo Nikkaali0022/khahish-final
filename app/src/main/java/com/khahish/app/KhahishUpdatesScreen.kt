@@ -1,10 +1,15 @@
 package com.khahish.app
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.media.MediaRecorder
 import android.net.Uri
-
+import android.os.Build
+import java.io.File
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -15,6 +20,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.CropRotate
+import androidx.compose.material.icons.filled.EmojiEmotions
+import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
@@ -66,8 +79,17 @@ fun KhahishUpdatesScreen(
     var stories by remember { mutableStateOf(emptyList<KhahishStory>()) }
     var loading by remember { mutableStateOf(true) }
     var showTextDialog by remember { mutableStateOf(false) }
+    var showStoryChooser by remember { mutableStateOf(false) }
+    var showMediaEditor by remember { mutableStateOf(false) }
+    var pendingMediaUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingMediaType by remember { mutableStateOf("image") }
+    var storyCaption by remember { mutableStateOf("") }
     var storyText by remember { mutableStateOf("") }
     var uploading by remember { mutableStateOf(false) }
+    var voiceRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
+    var voiceRecordingFile by remember { mutableStateOf<File?>(null) }
+    var voicePreviewFile by remember { mutableStateOf<File?>(null) }
+    var isRecordingVoice by remember { mutableStateOf(false) }
     var videoPlayerUrl by remember { mutableStateOf("") }
     var storyAudience by remember { mutableStateOf("everyone") }
     var audienceMenu by remember { mutableStateOf(false) }
@@ -97,7 +119,7 @@ fun KhahishUpdatesScreen(
             .addOnFailureListener { Toast.makeText(context, "Story failed: ${it.message}", Toast.LENGTH_LONG).show() }
     }
 
-    fun uploadStory(uri: Uri, type: String) {
+    fun uploadStory(uri: Uri, type: String, caption: String = storyCaption) {
         uploading = true
         uploadToCloudinary(
             context = context,
@@ -105,7 +127,7 @@ fun KhahishUpdatesScreen(
             resourceType = if (type == "video") "video" else "image",
             onSuccess = { url ->
                 uploading = false
-                publishStory("", url, type)
+                publishStory(caption, url, type)
             },
             onError = {
                 uploading = false
@@ -115,10 +137,77 @@ fun KhahishUpdatesScreen(
     }
 
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) uploadStory(uri, "image")
+        if (uri != null) { pendingMediaUri = uri; pendingMediaType = "image"; storyCaption = ""; showMediaEditor = true }
     }
     val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) uploadStory(uri, "video")
+        if (uri != null) { pendingMediaUri = uri; pendingMediaType = "video"; storyCaption = ""; showMediaEditor = true }
+    }
+
+    fun createVoiceRecorder() {
+        try {
+            val file = File(context.cacheDir, "khahish_story_voice_${System.currentTimeMillis()}.m4a")
+            val recorder = if (Build.VERSION.SDK_INT >= 31) MediaRecorder(context) else @Suppress("DEPRECATION") MediaRecorder()
+            recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
+            recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+            recorder.setAudioEncodingBitRate(96_000)
+            recorder.setAudioSamplingRate(44_100)
+            recorder.setOutputFile(file.absolutePath)
+            recorder.prepare()
+            recorder.start()
+            voiceRecorder = recorder
+            voiceRecordingFile = file
+            isRecordingVoice = true
+        } catch (error: Exception) {
+            voiceRecorder?.release()
+            voiceRecorder = null
+            isRecordingVoice = false
+            Toast.makeText(context, "Could not start voice story: ${error.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    val voicePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) createVoiceRecorder()
+        else Toast.makeText(context, "Microphone permission is required for a voice story.", Toast.LENGTH_LONG).show()
+    }
+
+    fun requestVoiceRecording() {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            createVoiceRecorder()
+        } else voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    fun stopVoiceRecording() {
+        try { voiceRecorder?.stop() } catch (_: Exception) { voiceRecordingFile?.delete() }
+        voiceRecorder?.release()
+        voiceRecorder = null
+        isRecordingVoice = false
+        voicePreviewFile = voiceRecordingFile
+        voiceRecordingFile = null
+    }
+
+    fun cancelVoiceRecording() {
+        try { voiceRecorder?.stop() } catch (_: Exception) { }
+        voiceRecorder?.release()
+        voiceRecorder = null
+        voiceRecordingFile?.delete()
+        voiceRecordingFile = null
+        isRecordingVoice = false
+    }
+
+    fun publishVoiceStory() {
+        val file = voicePreviewFile ?: return
+        uploading = true
+        uploadToCloudinary(context, Uri.fromFile(file), "video", onSuccess = { url ->
+            uploading = false
+            publishStory(storyCaption, url, "voice")
+            storyCaption = ""
+            voicePreviewFile?.delete()
+            voicePreviewFile = null
+        }, onError = { message ->
+            uploading = false
+            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+        })
     }
 
     DisposableEffect(currentUid) {
@@ -233,15 +322,17 @@ fun KhahishUpdatesScreen(
                     Icon(Icons.Default.MoreVert, "Update options", tint = MaterialTheme.colorScheme.onSurface)
                 }
                 DropdownMenu(expanded = updatesMenu, onDismissRequest = { updatesMenu = false }) {
+                    listOf("close_friends" to "Close Friends", "my_contacts" to "My Contacts", "my_friends" to "My Friends", "everyone" to "Everyone").forEach { (value, label) ->
+                        DropdownMenuItem(
+                            text = { Text(if (storyAudience == value) "✓ $label" else label) },
+                            leadingIcon = { Icon(Icons.Default.Lock, null) },
+                            onClick = { storyAudience = value; updatesMenu = false }
+                        )
+                    }
                     DropdownMenuItem(
-                        text = { Text(if (storyAudience == "everyone") "✓ Everyone" else "Everyone") },
-                        leadingIcon = { Icon(Icons.Default.Lock, null) },
-                        onClick = { storyAudience = "everyone"; updatesMenu = false }
-                    )
-                    DropdownMenuItem(
-                        text = { Text(if (storyAudience == "only_me") "✓ Only me" else "Only me") },
-                        leadingIcon = { Icon(Icons.Default.Lock, null) },
-                        onClick = { storyAudience = "only_me"; updatesMenu = false }
+                        text = { Text("Status Privacy") },
+                        leadingIcon = { Icon(Icons.Default.People, null) },
+                        onClick = { audienceMenu = true; updatesMenu = false }
                     )
                 }
             }
@@ -258,21 +349,24 @@ fun KhahishUpdatesScreen(
         }
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedButton(onClick = { imagePicker.launch("image/*") }, enabled = !uploading) {
-                Icon(Icons.Default.Image, null); Spacer(Modifier.width(5.dp)); Text("Photo")
+            Text(
+                "Status privacy: " + when (storyAudience) {
+                    "close_friends" -> "Close Friends"
+                    "my_contacts" -> "My Contacts"
+                    "my_friends" -> "My Friends"
+                    else -> "Everyone"
+                },
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 12.sp,
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(onClick = { audienceMenu = true }) {
+                Icon(Icons.Default.People, null, tint = Green)
+                Text("Change", color = Green)
             }
-            OutlinedButton(onClick = { videoPicker.launch("video/*") }, enabled = !uploading) {
-                Icon(Icons.Default.Videocam, null); Spacer(Modifier.width(5.dp)); Text("Video")
-            }
-            Box {
-                TextButton(onClick = { audienceMenu = true }) {
-                    Icon(Icons.Default.People, null, tint = Green)
-                    Spacer(Modifier.width(4.dp))
-                    Text(if (storyAudience == "everyone") "Everyone" else "Only me", color = Green)
-                }
-                DropdownMenu(expanded = audienceMenu, onDismissRequest = { audienceMenu = false }) {
-                    DropdownMenuItem(text = { Text("Everyone") }, onClick = { storyAudience = "everyone"; audienceMenu = false })
-                    DropdownMenuItem(text = { Text("Only me") }, onClick = { storyAudience = "only_me"; audienceMenu = false })
+            DropdownMenu(expanded = audienceMenu, onDismissRequest = { audienceMenu = false }) {
+                listOf("close_friends" to "Close Friends", "my_contacts" to "My Contacts", "my_friends" to "My Friends", "everyone" to "Everyone").forEach { (value, label) ->
+                    DropdownMenuItem(text = { Text(label) }, onClick = { storyAudience = value; audienceMenu = false })
                 }
             }
         }
@@ -287,7 +381,7 @@ fun KhahishUpdatesScreen(
             searchQuery.isBlank() || story.ownerName.contains(searchQuery, true) || story.text.contains(searchQuery, true)
         }
         Card(
-            Modifier.fillMaxWidth().clickable { showTextDialog = true },
+            Modifier.fillMaxWidth().clickable { showStoryChooser = true },
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             shape = RoundedCornerShape(16.dp)
         ) {
@@ -326,7 +420,9 @@ fun KhahishUpdatesScreen(
                         fontSize = 11.sp
                     )
                 }
-                Icon(Icons.Default.Add, "Add status", tint = Green)
+                Box(Modifier.size(42.dp).clip(CircleShape).background(Green).clickable { showStoryChooser = true }, contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.Add, "Add story", tint = Color.White, modifier = Modifier.size(23.dp))
+                }
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -343,7 +439,7 @@ fun KhahishUpdatesScreen(
                     }
                     Spacer(Modifier.height(12.dp))
                     Text("No updates yet", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
-                    Text("Share a photo, video or text story.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                    Text("Share a photo, video, text or voice story.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 }
             }
             else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
