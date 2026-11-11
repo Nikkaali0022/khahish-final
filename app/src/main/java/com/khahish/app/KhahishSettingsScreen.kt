@@ -34,6 +34,8 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.SetOptions
 import java.util.Locale
 
+private data class KhahishSupportTicket(val id: String, val subject: String, val status: String, val adminReply: String)
+
 @Composable
 fun KhahishSettingsScreen(
     modifier: Modifier = Modifier,
@@ -69,7 +71,7 @@ fun KhahishSettingsScreen(
     var supportSubject by remember { mutableStateOf("") }
     var supportMessage by remember { mutableStateOf("") }
     var submittingSupport by remember { mutableStateOf(false) }
-    var supportTickets by remember { mutableStateOf(emptyList<Triple<String, String, String>>()) }
+    var supportTickets by remember { mutableStateOf(emptyList<KhahishSupportTicket>()) }
     var blockedUsers by remember { mutableStateOf(emptyList<String>()) }
     var loadingBlocked by remember { mutableStateOf(false) }
     var lastSeenVisible by remember { mutableStateOf(privacyPrefs.getBoolean("last_seen_visible", true)) }
@@ -149,7 +151,7 @@ fun KhahishSettingsScreen(
                 .whereEqualTo("userUid", uid)
                 .addSnapshotListener { snapshot, _ ->
                     supportTickets = snapshot?.documents.orEmpty().map { doc ->
-                        Triple(doc.id, doc.getString("subject").orEmpty(), doc.getString("status") ?: "pending")
+                        KhahishSupportTicket(doc.id, doc.getString("subject").orEmpty(), doc.getString("status") ?: "pending", doc.getString("adminReply").orEmpty())
                     }.sortedByDescending { it.first }
                 }
             onDispose { registration.remove() }
@@ -377,8 +379,9 @@ fun KhahishSettingsScreen(
                     } else {
                         supportTickets.take(5).forEach { ticket ->
                             Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(10.dp)).padding(10.dp)) {
-                                Text(ticket.second, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-                                Text("Status: ${ticket.third}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                                Text(ticket.subject, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+                                Text("Status: ${ticket.status}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                                if (ticket.adminReply.isNotBlank()) Text("Support reply: ${ticket.adminReply}", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
                             }
                         }
                     }
