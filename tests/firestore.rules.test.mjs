@@ -546,4 +546,15 @@ test("only group admins can add members, while ordinary members can leave", asyn
     members: ["alice", "carol", "dave"],
     updatedAt: Date.now()
   }));
+
+  // The group must never fall below the three-member minimum.
+  await assertFails(updateDoc(doc(db("alice"), "chats/group-admin-test"), {
+    members: ["alice", "carol"],
+    updatedAt: Date.now()
+  }));
+
+  await assertFails(updateDoc(doc("carol"), "chats/group-admin-test"), {
+    members: ["alice", "dave"],
+    updatedAt: Date.now()
+  }));
 });
