@@ -1,0 +1,793 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // -----------------------------------------------------
+    // Shared helpers
+    // -----------------------------------------------------
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function validUsername(username) {
+      return username is string
+        && username.matches('^[a-z0-9_]{3,20}$');
+    }
+
+    function isBlocked(blockerUid, blockedUid) {
+      return exists(
+        /databases/$(database)/documents/users/$(blockerUid)/blocked/$(blockedUid)
+      );
+    }
+
+    function isChatMember(chatId) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/chats/$(chatId))
+        && request.auth.uid in
+          get(/databases/$(database)/documents/chats/$(chatId)).data.members;
+    }
+
+    function isGroupAdmin(chatId) {
+      return isChatMember(chatId)
+        && get(/databases/$(database)/documents/chats/$(chatId)).data.get('isGroup', false) == true
+        && request.auth.uid in
+          get(/databases/$(database)/documents/chats/$(chatId)).data.get('groupAdmins', []);
+    }
+
+    function validDisappearingDuration(durationMs) {
+      return durationMs == 0
+        || durationMs == 86400000
+        || durationMs == 604800000
+        || durationMs == 7776000000;
+    }
+
+    function privateChatIsUnblocked(members) {
+      return members.size() != 2
+        || (
+          !isBlocked(members[0], members[1])
+          && !isBlocked(members[1], members[0])
+        );
+    }
+
+    function requestParticipantsMatchChat(chatId, members) {
+      return existsAfter(
+          /databases/$(database)/documents/messageRequests/$(chatId)
+        )
+        && getAfter(
+          /databases/$(database)/documents/messageRequests/$(chatId)
+        ).data.status == 'accepted'
+        && getAfter(
+          /databases/$(database)/documents/messageRequests/$(chatId)
+        ).data.acceptedBy == request.auth.uid
+        && getAfter(
+          /databases/$(database)/documents/messageRequests/$(chatId)
+        ).data.receiverUid == request.auth.uid
+        && getAfter(
+          /databases/$(database)/documents/messageRequests/$(chatId)
+        ).data.senderUid in members;
+    }
+
+    function canReadStory(storyData) {
+      return signedIn()
+        && (
+          storyData.ownerUid == request.auth.uid
+          || storyData.get('audience', 'everyone') == 'everyone'
+          || (
+            storyData.get('allowedUids', []) is list
+            && request.auth.uid in storyData.get('allowedUids', [])
+          )
+        );
+    }
+
+    function validAccountDeactivation(data, uid) {
+      return data.uid == uid
+        && data.type == 'deactivate'
+        && data.status in ['pending', 'cancelled']
+        && data.createdAt is int;
+    }
+
+    // -----------------------------------------------------
+    // Private user documents and per-user subcollections
+    // -----------------------------------------------------
+
+    match /users/{uid} {
+      allow get, create, update: if isOwner(uid);
+      allow delete: if false;
+      allow list: if false;
+
+      // Explicit subcollection rules avoid broad wildcard permissions
+      // accidentally overriding stricter login-history permissions.
+      match /blocked/{blockedUid} {
+        // Only the account owner can inspect their block list.
+        allow get, list: if isOwner(uid);
+        allow create, update, delete: if isOwner(uid);
+      }
+
+      match /trustedDevices/{deviceId} {
+        allow read, create, update, delete: if isOwner(uid);
+      }
+
+      match /loginHistory/{entryId} {
+        allow get, list, create: if isOwner(uid);
+        allow update, delete: if false;
+      }
+
+      match /privacySettings/{settingId} {
+        allow read, create, update, delete: if isOwner(uid);
+      }
+
+      match /appSettings/{settingId} {
+        allow read, create, update, delete: if isOwner(uid);
+      }
+
+      match /exportRequests/{exportId} {
+        allow read, create, delete: if isOwner(uid);
+        allow update: if isOwner(uid)
+          && request.resource.data.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'updatedAt']);
+      }
+
+      match /fcmTokens/{tokenId} {
+        allow read, create, update, delete: if isOwner(uid);
+      }
+    }
+
+    // -----------------------------------------------------
+    // Public profiles (document get only; no directory listing)
+    // -----------------------------------------------------
+
+    function safePublicProfile(data) {
+      return !('email' in data)
+        && !('contact' in data)
+        && !('phone' in data)
+        && !('phoneNumber' in data);
+    }
+
+    match /publicProfiles/{uid} {
+      // Legacy documents containing private contact fields are hidden until
+      // their owner signs in and the app removes those fields.
+      allow get: if signedIn() && safePublicProfile(resource.data);
+      allow list: if false;
+
+      allow create, update: if isOwner(uid)
+        && safePublicProfile(request.resource.data)
+        && (
+          !('uid' in request.resource.data)
+          || request.resource.data.uid == uid
+        );
+
+      allow delete: if false;
+    }
+
+    // -----------------------------------------------------
+    // Unique usernames
+    // -----------------------------------------------------
+
+    match /usernames/{username} {
+      allow get: if signedIn();
+      allow list: if false;
+
+      allow create: if signedIn()
+        && validUsername(username)
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.username == username;
+
+      // Existing claims can only be updated by their current owner.
+      // A different user must never be able to take over a claim.
+      allow update: if signedIn()
+        && validUsername(username)
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.username == username;
+
+      allow delete: if signedIn()
+        && resource.data.uid == request.auth.uid;
+    }
+
+    match /usernamesByUid/{uid} {
+      allow get: if isOwner(uid);
+      allow list: if false;
+      allow create, update, delete: if isOwner(uid);
+    }
+
+    // -----------------------------------------------------
+    // Message requests: only sender and receiver may read them
+    // -----------------------------------------------------
+
+    match /messageRequests/{requestId} {
+      // The client checks a deterministic request ID before creating
+      // a new request. Permit a signed-in read only when the document
+      // is absent, or when the caller is one of its two participants.
+      allow get: if signedIn()
+        && (
+          !exists(/databases/$(database)/documents/messageRequests/$(requestId))
+          || resource.data.senderUid == request.auth.uid
+          || resource.data.receiverUid == request.auth.uid
+        );
+
+      allow list: if signedIn()
+        && (
+          resource.data.senderUid == request.auth.uid
+          || resource.data.receiverUid == request.auth.uid
+        );
+
+      allow create: if signedIn()
+        && request.resource.data.senderUid == request.auth.uid
+        && request.resource.data.receiverUid is string
+        && request.resource.data.receiverUid != request.auth.uid
+        && request.resource.data.senderName is string
+        && request.resource.data.status == 'pending'
+        && request.resource.data.createdAt is int
+        && (
+          requestId == request.resource.data.senderUid + '_' + request.resource.data.receiverUid
+          || requestId == request.resource.data.receiverUid + '_' + request.resource.data.senderUid
+        )
+        && !isBlocked(request.resource.data.receiverUid, request.resource.data.senderUid)
+        && !isBlocked(request.resource.data.senderUid, request.resource.data.receiverUid);
+
+      allow update: if signedIn()
+        && resource.data.receiverUid == request.auth.uid
+        && resource.data.status == 'pending'
+        && request.resource.data.senderUid == resource.data.senderUid
+        && request.resource.data.receiverUid == resource.data.receiverUid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status', 'acceptedBy', 'handledBy', 'acceptedAt', 'rejectedAt'
+        ])
+        && request.resource.data.status in ['accepted', 'rejected']
+        && request.resource.data.handledBy == request.auth.uid
+        && (
+          request.resource.data.status != 'rejected'
+          || request.resource.data.rejectedAt is int
+        )
+        && (
+          request.resource.data.status == 'rejected'
+          || (
+            request.resource.data.acceptedBy == request.auth.uid
+            && request.resource.data.acceptedAt is int
+            && !isBlocked(resource.data.receiverUid, resource.data.senderUid)
+            && !isBlocked(resource.data.senderUid, resource.data.receiverUid)
+          )
+        );
+
+      allow delete: if false;
+    }
+
+    // -----------------------------------------------------
+    // Chats, private and groups
+    // -----------------------------------------------------
+
+    match /chats/{chatId} {
+      allow get: if signedIn() && request.auth.uid in resource.data.members;
+      allow list: if signedIn() && request.auth.uid in resource.data.members;
+
+      allow create: if signedIn()
+        && request.resource.data.members is list
+        && request.auth.uid in request.resource.data.members
+        && request.resource.data.memberNames is map
+        && request.resource.data.lastMessage is string
+        && request.resource.data.lastMessageAt is int
+        && request.resource.data.updatedAt is int
+        && (
+          (
+            request.resource.data.get('isGroup', false) == true
+            && request.resource.data.members.size() >= 3
+            && request.resource.data.groupName is string
+            && request.resource.data.groupAdmins is list
+            && request.auth.uid in request.resource.data.groupAdmins
+            && request.resource.data.members.hasAll(request.resource.data.groupAdmins)
+            && request.resource.data.createdBy == request.auth.uid
+            && request.resource.data.createdAt is int
+          )
+          || (
+            request.resource.data.get('isGroup', false) != true
+            && request.resource.data.members.size() == 2
+            && request.resource.data.createdBy == request.auth.uid
+            && requestParticipantsMatchChat(chatId, request.resource.data.members)
+            && privateChatIsUnblocked(request.resource.data.members)
+          )
+        );
+
+      allow update: if signedIn()
+        && request.auth.uid in resource.data.members
+        && (
+          // Ordinary chat activity, pinning and disappearing-message setting.
+          (
+            request.resource.data.members == resource.data.members
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'lastMessage', 'lastMessageAt', 'updatedAt',
+              'disappearingDurationMs',
+              'pinnedMessageId', 'pinnedMessageText', 'pinnedBy', 'pinnedAt'
+            ])
+            && request.resource.data.lastMessage is string
+            && request.resource.data.lastMessageAt is int
+            && request.resource.data.updatedAt is int
+            && (
+              !request.resource.data.diff(resource.data).affectedKeys()
+                .hasAny(['disappearingDurationMs'])
+              || validDisappearingDuration(request.resource.data.disappearingDurationMs)
+            )
+            && (
+              !request.resource.data.diff(resource.data).affectedKeys()
+                .hasAny(['pinnedBy'])
+              || !('pinnedBy' in request.resource.data)
+              || request.resource.data.pinnedBy == request.auth.uid
+            )
+          )
+          ||
+          // Group administrators may change group membership and metadata.
+          (
+            resource.data.get('isGroup', false) == true
+            && request.auth.uid in resource.data.get('groupAdmins', [])
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'members', 'memberNames', 'groupAdmins', 'groupName', 'updatedAt'
+            ])
+            && request.resource.data.members is list
+            && request.resource.data.members.size() >= 2
+            && request.resource.data.groupAdmins is list
+            && request.auth.uid in request.resource.data.groupAdmins
+            && request.resource.data.members.hasAll(request.resource.data.groupAdmins)
+            && request.resource.data.memberNames is map
+            && request.resource.data.groupName is string
+            && request.resource.data.createdBy == resource.data.createdBy
+            && request.resource.data.updatedAt is int
+          )
+          ||
+          // A member may leave a group, but cannot remove other members.
+          (
+            resource.data.get('isGroup', false) == true
+            && request.auth.uid in resource.data.members
+            && !(request.auth.uid in request.resource.data.members)
+            && resource.data.members.hasAll(request.resource.data.members)
+            && request.resource.data.members.size() == resource.data.members.size() - 1
+            && !(request.auth.uid in resource.data.get('groupAdmins', []))
+            && request.resource.data.groupAdmins == resource.data.get('groupAdmins', [])
+            && request.resource.data.memberNames == resource.data.memberNames
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'members', 'updatedAt'
+            ])
+            && request.resource.data.updatedAt is int
+          )
+        );
+
+      allow delete: if signedIn()
+        && request.auth.uid == resource.data.createdBy;
+
+      // Messages are visible to current chat members only.
+      match /messages/{messageId} {
+        allow get, list: if isChatMember(chatId);
+
+        allow create: if isChatMember(chatId)
+          && privateChatIsUnblocked(
+            get(/databases/$(database)/documents/chats/$(chatId)).data.members
+          )
+          && request.resource.data.senderId is string
+          && request.resource.data.text is string
+          && request.resource.data.imageUrl is string
+          && request.resource.data.mediaType is string
+          && request.resource.data.timestamp is int
+          && request.resource.data.deliveredTo is list
+          && request.resource.data.readBy is list
+          && (
+            // Normal messages must be authored by the signed-in user.
+            (
+              request.resource.data.senderId == request.auth.uid
+              && request.resource.data.deliveredTo == []
+              && request.resource.data.readBy == [request.auth.uid]
+            )
+            ||
+            // Backup imports preserve historical sender labels but are
+            // explicitly marked as unverified imported history.
+            (
+              request.resource.data.get('restoredFromBackup', false) == true
+              && request.resource.data.get('restoredBy', '') == request.auth.uid
+              && request.resource.data.get('backupMemberUids', []) is list
+              && request.auth.uid in request.resource.data.backupMemberUids
+              && request.resource.data.senderId in request.resource.data.backupMemberUids
+              && request.resource.data.get('restoredAt', 0) is int
+              && request.resource.data.restoredAt <= request.time.toMillis() + 300000
+              && request.resource.data.timestamp <= request.resource.data.restoredAt
+            )
+          )
+          && (
+            !('expiresAt' in request.resource.data)
+            || request.resource.data.expiresAt is int
+          )
+          && (
+            !('replyToMessageId' in request.resource.data)
+            || request.resource.data.replyToMessageId is string
+          )
+          && (
+            !('replyToText' in request.resource.data)
+            || request.resource.data.replyToText is string
+          );
+
+        allow update: if isChatMember(chatId)
+          && request.resource.data.senderId == resource.data.senderId
+          && (
+            // Only the original sender can edit message text.
+            (
+              resource.data.senderId == request.auth.uid
+              && resource.data.get('restoredFromBackup', false) != true
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'text', 'editedAt'
+              ])
+              && request.resource.data.text is string
+              && resource.data.mediaType == 'text'
+              && request.resource.data.editedAt is int
+              && request.resource.data.editedAt >= resource.data.timestamp
+              && request.resource.data.editedAt <= request.time.toMillis()
+              && resource.data.timestamp <= request.time.toMillis()
+              && request.time.toMillis() - resource.data.timestamp <= 900000
+            )
+            ||
+            // Each member can add/remove only their own reaction-map entry.
+            (
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions'])
+              && request.resource.data.reactions is map
+              && request.resource.data.reactions.diff(
+                resource.data.get('reactions', {})
+              ).affectedKeys().hasOnly([request.auth.uid])
+            )
+            ||
+            // The user who imported a backup may update only their own
+            // explicitly marked, unverified historical import documents.
+            (
+              resource.data.get('restoredFromBackup', false) == true
+              && resource.data.get('restoredBy', '') == request.auth.uid
+              && request.resource.data.get('restoredFromBackup', false) == true
+              && request.resource.data.get('restoredBy', '') == request.auth.uid
+              && request.resource.data.senderId == resource.data.senderId
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'senderId', 'text', 'imageUrl', 'mediaType', 'timestamp',
+                'deliveredTo', 'readBy', 'hiddenFor', 'expiresAt',
+                'replyToMessageId', 'replyToText', 'editedAt', 'starredBy',
+                'reactions', 'restoredFromBackup', 'restoredBy', 'restoredAt',
+                'backupMemberUids'
+              ])
+              && request.resource.data.get('backupMemberUids', []) is list
+              && request.resource.data.backupMemberUids == resource.data.get('backupMemberUids', [])
+              && request.auth.uid in request.resource.data.backupMemberUids
+              && request.resource.data.senderId in request.resource.data.backupMemberUids
+              && request.resource.data.restoredAt is int
+              && request.resource.data.timestamp <= request.resource.data.restoredAt
+              && request.resource.data.restoredAt <= request.time.toMillis() + 300000
+            )
+            ||
+            // A member may update their own delivery/read/hide/star marker.
+            (
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                'deliveredTo', 'readBy', 'hiddenFor', 'starredBy'
+              ])
+              && (
+                !request.resource.data.diff(resource.data).affectedKeys().hasAny(['deliveredTo'])
+                || (
+                  request.resource.data.deliveredTo is list
+                  && request.resource.data.deliveredTo.hasAll(resource.data.get('deliveredTo', []))
+                  && request.resource.data.deliveredTo.size()
+                    <= resource.data.get('deliveredTo', []).size() + 1
+                  && (
+                    request.resource.data.deliveredTo.size()
+                      == resource.data.get('deliveredTo', []).size()
+                    || (
+                      !(request.auth.uid in resource.data.get('deliveredTo', []))
+                      && request.auth.uid in request.resource.data.deliveredTo
+                    )
+                  )
+                )
+              )
+              && (
+                !request.resource.data.diff(resource.data).affectedKeys().hasAny(['readBy'])
+                || (
+                  request.resource.data.readBy is list
+                  && request.resource.data.readBy.hasAll(resource.data.get('readBy', []))
+                  && request.resource.data.readBy.size()
+                    <= resource.data.get('readBy', []).size() + 1
+                  && (
+                    request.resource.data.readBy.size()
+                      == resource.data.get('readBy', []).size()
+                    || (
+                      !(request.auth.uid in resource.data.get('readBy', []))
+                      && request.auth.uid in request.resource.data.readBy
+                    )
+                  )
+                )
+              )
+              && (
+                !request.resource.data.diff(resource.data).affectedKeys().hasAny(['hiddenFor'])
+                || (
+                  request.resource.data.hiddenFor is list
+                  && (
+                    (
+                      request.resource.data.hiddenFor.hasAll(resource.data.get('hiddenFor', []))
+                      && request.resource.data.hiddenFor.size()
+                        == resource.data.get('hiddenFor', []).size() + 1
+                      && !(request.auth.uid in resource.data.get('hiddenFor', []))
+                      && request.auth.uid in request.resource.data.hiddenFor
+                    )
+                    || (
+                      resource.data.get('hiddenFor', []).hasAll(request.resource.data.hiddenFor)
+                      && resource.data.get('hiddenFor', []).size()
+                        == request.resource.data.hiddenFor.size() + 1
+                      && request.auth.uid in resource.data.get('hiddenFor', [])
+                      && !(request.auth.uid in request.resource.data.hiddenFor)
+                    )
+                  )
+                )
+              )
+              && (
+                !request.resource.data.diff(resource.data).affectedKeys().hasAny(['starredBy'])
+                || (
+                  request.resource.data.starredBy is list
+                  && (
+                    (
+                      request.resource.data.starredBy.hasAll(resource.data.get('starredBy', []))
+                      && request.resource.data.starredBy.size()
+                        == resource.data.get('starredBy', []).size() + 1
+                      && !(request.auth.uid in resource.data.get('starredBy', []))
+                      && request.auth.uid in request.resource.data.starredBy
+                    )
+                    || (
+                      resource.data.get('starredBy', []).hasAll(request.resource.data.starredBy)
+                      && resource.data.get('starredBy', []).size()
+                        == request.resource.data.starredBy.size() + 1
+                      && request.auth.uid in resource.data.get('starredBy', [])
+                      && !(request.auth.uid in request.resource.data.starredBy)
+                    )
+                  )
+                )
+              )
+            )
+          );
+
+        // Messages may be deleted by their sender, or by a chat member after expiry.
+        allow delete: if isChatMember(chatId)
+          && (
+            resource.data.senderId == request.auth.uid
+            || (
+              resource.data.get('expiresAt', 0) is int
+              && resource.data.get('expiresAt', 0) > 0
+              && resource.data.expiresAt <= request.time.toMillis()
+            )
+          );
+      }
+
+      match /typing/{typingUid} {
+        allow get, list: if isChatMember(chatId);
+        allow create, update: if isChatMember(chatId)
+          && request.auth.uid == typingUid
+          && request.resource.data.isTyping is bool;
+        allow delete: if isChatMember(chatId)
+          && request.auth.uid == typingUid;
+      }
+
+      match /liveLocations/{uid} {
+        allow get, list: if isChatMember(chatId);
+        allow create, update: if isChatMember(chatId)
+          && request.auth.uid == uid
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.latitude is number
+          && request.resource.data.longitude is number
+          && request.resource.data.updatedAt is int
+          && request.resource.data.expiresAt is int
+          && request.resource.data.isActive is bool;
+        allow delete: if isChatMember(chatId) && request.auth.uid == uid;
+      }
+    }
+
+    // -----------------------------------------------------
+    // Calls (one-to-one Agora signaling)
+    // -----------------------------------------------------
+
+    match /calls/{callId} {
+      allow create: if signedIn()
+        && request.resource.data.callerUid == request.auth.uid
+        && request.resource.data.calleeUid is string
+        && request.resource.data.calleeUid != request.auth.uid
+        && !isBlocked(request.auth.uid, request.resource.data.calleeUid)
+        && !isBlocked(request.resource.data.calleeUid, request.auth.uid)
+        && request.resource.data.participants is list
+        && request.resource.data.participants.size() == 2
+        && request.auth.uid in request.resource.data.participants
+        && request.resource.data.calleeUid in request.resource.data.participants
+        && request.resource.data.channelName is string
+        && request.resource.data.callType in ['voice', 'video']
+        && request.resource.data.status == 'ringing'
+        && request.resource.data.createdAt is int
+        && request.resource.data.updatedAt is int;
+
+      allow get: if signedIn()
+        && (
+          resource.data.callerUid == request.auth.uid
+          || resource.data.calleeUid == request.auth.uid
+        );
+
+      allow list: if signedIn()
+        && (
+          request.auth.uid in resource.data.participants
+          || resource.data.callerUid == request.auth.uid
+          || resource.data.calleeUid == request.auth.uid
+        );
+
+      allow update: if signedIn()
+        && request.resource.data.callerUid == resource.data.callerUid
+        && request.resource.data.calleeUid == resource.data.calleeUid
+        && request.resource.data.participants == resource.data.participants
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status', 'updatedAt', 'acceptedAt', 'endedAt'
+        ])
+        && request.resource.data.updatedAt is int
+        && (
+          (
+            request.auth.uid == resource.data.calleeUid
+            && resource.data.status == 'ringing'
+            && request.resource.data.status == 'accepted'
+            && request.resource.data.acceptedAt is int
+            && request.resource.data.acceptedAt == request.resource.data.updatedAt
+            && request.resource.data.get('endedAt', 0) == resource.data.get('endedAt', 0)
+            && request.resource.data.get('endedAt', 0) == 0
+          )
+          || (
+            request.auth.uid == resource.data.calleeUid
+            && resource.data.status == 'ringing'
+            && request.resource.data.status in ['rejected', 'missed']
+            && request.resource.data.get('acceptedAt', 0) == resource.data.get('acceptedAt', 0)
+            && request.resource.data.get('endedAt', 0) == resource.data.get('endedAt', 0)
+          )
+          || (
+            request.auth.uid == resource.data.callerUid
+            && resource.data.status == 'ringing'
+            && request.resource.data.status == 'missed'
+            && request.resource.data.get('acceptedAt', 0) == resource.data.get('acceptedAt', 0)
+            && request.resource.data.get('endedAt', 0) == resource.data.get('endedAt', 0)
+          )
+          || (
+            request.auth.uid == resource.data.callerUid
+            && resource.data.status in ['ringing', 'accepted', 'rejected', 'missed']
+            && request.resource.data.status == 'ended'
+            && request.resource.data.endedAt is int
+            && request.resource.data.endedAt == request.resource.data.updatedAt
+            && request.resource.data.get('acceptedAt', 0) == resource.data.get('acceptedAt', 0)
+          )
+          || (
+            request.auth.uid == resource.data.calleeUid
+            && resource.data.status in ['ringing', 'accepted']
+            && request.resource.data.status == 'ended'
+            && request.resource.data.endedAt is int
+            && request.resource.data.endedAt == request.resource.data.updatedAt
+            && request.resource.data.get('acceptedAt', 0) == resource.data.get('acceptedAt', 0)
+          )
+        );
+
+      allow delete: if signedIn()
+        && request.auth.uid == resource.data.callerUid;
+    }
+
+    // -----------------------------------------------------
+    // Stories and story views
+    // -----------------------------------------------------
+
+    match /stories/{storyId} {
+      // Direct document reads reject expired stories.
+      allow get: if canReadStory(resource.data)
+        && resource.data.get('expiresAt', 0) is int
+        && resource.data.expiresAt > request.time.toMillis();
+
+      // Firestore cannot use request.time as a query filter value. The app's
+      // list queries therefore include expiresAt > clientNow and the UI
+      // filters again; audience privacy is still checked per returned story.
+      allow list: if signedIn()
+        && (
+          resource.data.ownerUid == request.auth.uid
+          || resource.data.get('audience', 'everyone') == 'everyone'
+          || (
+            resource.data.get('allowedUids', []) is list
+            && request.auth.uid in resource.data.get('allowedUids', [])
+          )
+        );
+
+      allow create: if signedIn()
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerName is string
+        && request.resource.data.text is string
+        && request.resource.data.mediaUrl is string
+        && request.resource.data.mediaType is string
+        && request.resource.data.createdAt is int
+        && request.resource.data.expiresAt is int
+        && request.resource.data.expiresAt > request.resource.data.createdAt
+        && request.resource.data.audience in ['everyone', 'only_me'];
+
+      allow update: if false;
+      allow delete: if signedIn()
+        && resource.data.ownerUid == request.auth.uid;
+
+      match /views/{viewerUid} {
+        allow get, list: if signedIn()
+          && (
+            get(/databases/$(database)/documents/stories/$(storyId)).data.ownerUid == request.auth.uid
+            || viewerUid == request.auth.uid
+          );
+
+        allow create, update: if signedIn()
+          && viewerUid == request.auth.uid
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.name is string
+          && request.resource.data.viewedAt is int
+          && canReadStory(
+            get(/databases/$(database)/documents/stories/$(storyId)).data
+          );
+
+        allow delete: if signedIn()
+          && get(/databases/$(database)/documents/stories/$(storyId)).data.ownerUid == request.auth.uid;
+      }
+    }
+
+    // -----------------------------------------------------
+    // Account deactivation only (account deletion is excluded)
+    // -----------------------------------------------------
+
+    match /accountRequests/{uid} {
+      allow get: if isOwner(uid);
+      allow list: if false;
+
+      allow create: if isOwner(uid)
+        && validAccountDeactivation(request.resource.data, uid)
+        && request.resource.data.status == 'pending';
+
+      allow update: if isOwner(uid)
+        && validAccountDeactivation(request.resource.data, uid)
+        && resource.data.uid == uid
+        && resource.data.type == 'deactivate'
+        && (
+          (
+            resource.data.status == 'pending'
+            && request.resource.data.status == 'cancelled'
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'cancelledAt'])
+            && request.resource.data.cancelledAt is int
+          )
+          || (
+            resource.data.status == 'cancelled'
+            && request.resource.data.status == 'pending'
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'createdAt', 'email', 'note'])
+          )
+        );
+
+      allow delete: if false;
+    }
+
+    // -----------------------------------------------------
+    // User-submitted reports; moderation requires admin claim
+    // -----------------------------------------------------
+
+    match /reports/{reportId} {
+      allow create: if signedIn()
+        && request.resource.data.reporterUid == request.auth.uid
+        && request.resource.data.type == 'user'
+        && request.resource.data.targetUid is string
+        && request.resource.data.targetUid != request.auth.uid
+        && request.resource.data.targetName is string
+        && request.resource.data.reason is string
+        && request.resource.data.createdAt is int
+        && request.resource.data.status == 'pending';
+
+      allow get, list, update, delete: if signedIn()
+        && request.auth.token.admin == true;
+    }
+
+    // -----------------------------------------------------
+    // Default deny
+    // -----------------------------------------------------
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

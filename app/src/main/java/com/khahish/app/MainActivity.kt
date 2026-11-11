@@ -1,11 +1,21 @@
 package com.khahish.app
 
+import android.Manifest
+import android.app.Activity
+import android.location.LocationManager
+import android.provider.ContactsContract
 import android.content.Context
+import android.content.pm.PackageManager
+import android.media.MediaRecorder
+import android.media.MediaPlayer
 import android.content.Intent
 import android.net.Uri
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -15,9 +25,21 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -32,14 +54,22 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.statusBarsPadding
 import coil.compose.AsyncImage
 import com.google.firebase.auth.FirebaseAuth
@@ -59,15 +89,17 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
 import java.util.Locale
+import kotlin.math.abs
+import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
 private const val CLOUDINARY_CLOUD_NAME = "koctiaes"
 private const val CLOUDINARY_UPLOAD_PRESET = "ml_default"
 
-private val Green = Color(0xFF18A889)
-private val Ink = Color(0xFF101A19)
-private val Pale = Color(0xFFF4F8F6)
-private val Muted = Color(0xFF788681)
+internal val Green = Color(0xFF18A889)
+internal val Ink = Color(0xFF101A19)
+internal val Pale = Color(0xFFF4F8F6)
+internal val Muted = Color(0xFF788681)
 
 data class Chat(
     val id: String,
@@ -75,8 +107,31 @@ data class Chat(
     val name: String,
     val message: String,
     val time: String,
-    val initials: String
+    val initials: String,
+    val isGroup: Boolean = false,
+    val memberUids: List<String> = emptyList(),
+    val initialMessageId: String = ""
 )
+
+data class ChatMessageSearchResult(
+    val chat: Chat,
+    val messageId: String,
+    val text: String,
+    val timestamp: Long
+)
+
+data class LiveLocationPoint(
+    val latitude: Double,
+    val longitude: Double,
+    val isActive: Boolean,
+    val updatedAt: Long,
+    val expiresAt: Long
+)
+
+data class MessageRequestItem(val id: String, val senderUid: String, val senderName: String, val senderUsername: String, val createdAt: Long)
+
+internal fun normalizeKhahishUsername(value: String): String = value.trim().removePrefix("@").lowercase(Locale.ROOT)
+internal fun isValidKhahishUsername(value: String): Boolean = Regex("^[a-z0-9_]{3,20}$").matches(normalizeKhahishUsername(value))
 
 data class AppUser(
     val uid: String = "",
@@ -84,8 +139,11 @@ data class AppUser(
     val nameLowercase: String = "",
     val photoUrl: String = "",
     val username: String = "",
+    val bio: String = "",
     val isOnline: Boolean = false,
-    val lastSeenAt: Long = 0L
+    val lastSeenAt: Long = 0L,
+    val lastSeenVisible: Boolean = true,
+    val onlineStatusVisible: Boolean = true
 )
 
 data class MessageItem(
@@ -96,7 +154,16 @@ data class MessageItem(
     val mediaType: String = "text",
     val timestamp: Long = 0L,
     val deliveredTo: List<String> = emptyList(),
-    val readBy: List<String> = emptyList()
+    val readBy: List<String> = emptyList(),
+    val hiddenFor: List<String> = emptyList(),
+    val expiresAt: Long = 0L,
+    val replyToMessageId: String = "",
+    val replyToText: String = "",
+    val reactions: Map<String, String> = emptyMap(),
+    val editedAt: Long = 0L,
+    val starredBy: List<String> = emptyList(),
+    val restoredFromBackup: Boolean = false,
+    val isPending: Boolean = false
 )
 
 private fun privateChatId(uid1: String, uid2: String): String =
@@ -129,7 +196,11 @@ private fun saveUserToFirestore(
         "name" to cleanName,
         "nameLowercase" to cleanName.lowercase(Locale.ROOT),
         "photoUrl" to "",
-        "updatedAt" to now
+        "updatedAt" to now,
+        "email" to FieldValue.delete(),
+        "contact" to FieldValue.delete(),
+        "phone" to FieldValue.delete(),
+        "phoneNumber" to FieldValue.delete()
     )
 
     db.collection("users").document(uid)
@@ -140,9 +211,44 @@ private fun saveUserToFirestore(
 }
 
 class MainActivity : ComponentActivity() {
+    var pendingNotificationIntent by mutableStateOf<Intent?>(null)
+        private set
+
+    fun consumePendingNotificationIntent(): Intent? {
+        val pending = pendingNotificationIntent
+        pendingNotificationIntent = null
+        return pending
+    }
+
+    private var appInForeground = false
+    private var presenceUid: String? = null
+    private val presenceAuthListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+        val newUid = firebaseAuth.currentUser?.uid
+        if (presenceUid != null && presenceUid != newUid) updateKhahishPresence(presenceUid, false)
+        if (newUid != null && presenceUid != newUid) {
+            KhahishMessagingService.syncCurrentToken(this@MainActivity)
+        }
+        presenceUid = newUid
+        if (appInForeground) updateKhahishPresence(newUid, true)
+    }
+
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
+        pendingNotificationIntent = intent.takeIf {
+            it.hasExtra("khahish_chat_id") || it.hasExtra("khahish_call_id")
+        }
 
+        // Ask Android 13+ users for permission to show message notifications.
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                3001
+            )
+        }
+
+        FirebaseAuth.getInstance().addAuthStateListener(presenceAuthListener)
         window.statusBarColor = android.graphics.Color.WHITE
         window.navigationBarColor = android.graphics.Color.WHITE
 
@@ -156,16 +262,100 @@ class MainActivity : ComponentActivity() {
             KhahishApp()
         }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        pendingNotificationIntent = intent.takeIf {
+            it.hasExtra("khahish_chat_id") || it.hasExtra("khahish_call_id")
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        appInForeground = true
+        presenceUid = FirebaseAuth.getInstance().currentUser?.uid
+        updateKhahishPresence(presenceUid, true)
+    }
+
+    override fun onStop() {
+        appInForeground = false
+        updateKhahishPresence(presenceUid, false)
+        super.onStop()
+    }
+
+    override fun onDestroy() {
+        FirebaseAuth.getInstance().removeAuthStateListener(presenceAuthListener)
+        super.onDestroy()
+    }
+
+    private fun updateKhahishPresence(uid: String?, foreground: Boolean) {
+        if (uid.isNullOrBlank()) return
+        val prefs = getSharedPreferences("khahish_privacy_settings", Context.MODE_PRIVATE)
+        val showOnline = prefs.getBoolean("online_status_visible", true)
+        val showLastSeen = prefs.getBoolean("last_seen_visible", true)
+        val now = System.currentTimeMillis()
+        val privateUpdates = hashMapOf<String, Any>(
+            "isOnline" to (foreground && showOnline),
+            "lastSeenAt" to if (foreground) FieldValue.delete() else now
+        )
+        val publicUpdates = hashMapOf<String, Any>(
+            "isOnline" to (foreground && showOnline),
+            "onlineStatusVisible" to showOnline,
+            "lastSeenVisible" to showLastSeen,
+            // Remove any legacy private fields from public profile documents.
+            "email" to FieldValue.delete(),
+            "contact" to FieldValue.delete(),
+            "phone" to FieldValue.delete(),
+            "phoneNumber" to FieldValue.delete()
+        )
+        if (!foreground && showLastSeen) publicUpdates["lastSeenAt"] = now
+        else if (!showLastSeen) publicUpdates["lastSeenAt"] = FieldValue.delete()
+        val db = FirebaseFirestore.getInstance()
+        db.collection("users").document(uid).set(privateUpdates, SetOptions.merge())
+        db.collection("publicProfiles").document(uid).set(publicUpdates, SetOptions.merge())
+    }
 }
 
 @Composable
 fun KhahishApp() {
     val auth = remember { FirebaseAuth.getInstance() }
+    val appContext = LocalContext.current
+    val uiPreferences = remember {
+        appContext.getSharedPreferences("khahish_ui_settings", Context.MODE_PRIVATE)
+    }
+    var animationsEnabled by remember {
+        mutableStateOf(uiPreferences.getBoolean("animations_enabled", true))
+    }
+    var slideTransitionsEnabled by remember {
+        mutableStateOf(uiPreferences.getBoolean("slide_transitions_enabled", true))
+    }
+    val advancedPreferences = remember {
+        appContext.getSharedPreferences("khahish_advanced_settings", Context.MODE_PRIVATE)
+    }
+    var oneHandedMode by remember {
+        mutableStateOf(advancedPreferences.getBoolean("one_handed", false))
+    }
+    var themeMode by remember {
+        mutableStateOf(uiPreferences.getString("theme_mode", "system") ?: "system")
+    }
+    val systemDark = isSystemInDarkTheme()
+    val useDarkTheme = when (themeMode) {
+        "dark" -> true
+        "light" -> false
+        else -> systemDark
+    }
 
     var currentUser by remember { mutableStateOf(auth.currentUser) }
     var tab by remember { mutableStateOf("Chats") }
+    val tabOrder = listOf("Chats", "Updates", "Calls", "Settings")
     var selectedChat by remember { mutableStateOf<Chat?>(null) }
+    var profileTargetUid by remember { mutableStateOf("") }
     var showNewChat by remember { mutableStateOf(false) }
+    var showNewGroup by remember { mutableStateOf(false) }
+    var activeCall by remember { mutableStateOf<KhahishCall?>(null) }
+    var incomingCall by remember { mutableStateOf(false) }
+    val latestActiveCall by rememberUpdatedState(activeCall)
 
     DisposableEffect(auth) {
         val listener = FirebaseAuth.AuthStateListener {
@@ -175,19 +365,183 @@ fun KhahishApp() {
         onDispose { auth.removeAuthStateListener(listener) }
     }
 
+    val hostActivity = appContext as? MainActivity
+    val pendingNotificationIntent = hostActivity?.pendingNotificationIntent
+
+    LaunchedEffect(currentUser?.uid, pendingNotificationIntent) {
+        val uid = currentUser?.uid ?: return@LaunchedEffect
+        val notificationIntent = hostActivity?.consumePendingNotificationIntent()
+            ?: return@LaunchedEffect
+        val callId = notificationIntent.getStringExtra("khahish_call_id").orEmpty()
+        if (callId.isNotBlank()) {
+            FirebaseFirestore.getInstance().collection("calls").document(callId).get()
+                .addOnSuccessListener { snapshot ->
+                    val call = if (snapshot.exists()) KhahishCall.from(snapshot) else null
+                    if (call == null || call.calleeUid != uid) {
+                        Toast.makeText(appContext, "This incoming call is not available for your account.", Toast.LENGTH_LONG).show()
+                    } else if (call.status != "ringing") {
+                        Toast.makeText(appContext, "This call is no longer ringing.", Toast.LENGTH_LONG).show()
+                    } else {
+                        incomingCall = true
+                        activeCall = call
+                        tab = "Calls"
+                        selectedChat = null
+                        showNewChat = false
+                        showNewGroup = false
+                        profileTargetUid = ""
+                    }
+                }
+                .addOnFailureListener { error ->
+                    Toast.makeText(appContext, "Could not open incoming call: " + (error.message ?: "Unknown error"), Toast.LENGTH_LONG).show()
+                }
+            return@LaunchedEffect
+        }
+
+        val chatId = notificationIntent.getStringExtra("khahish_chat_id").orEmpty()
+        if (chatId.isBlank()) return@LaunchedEffect
+
+        FirebaseFirestore.getInstance().collection("chats").document(chatId).get()
+            .addOnSuccessListener { snapshot ->
+                val members = (snapshot.get("members") as? List<*>)
+                    ?.filterIsInstance<String>()
+                    .orEmpty()
+                if (!snapshot.exists() || uid !in members) {
+                    Toast.makeText(appContext, "This chat is not available.", Toast.LENGTH_LONG).show()
+                    return@addOnSuccessListener
+                }
+
+                val isGroup = snapshot.getBoolean("isGroup") == true
+                val peerUid = members.firstOrNull { it != uid }.orEmpty()
+                val memberNames = snapshot.get("memberNames") as? Map<*, *>
+                val storedPeerName = memberNames?.get(peerUid) as? String
+                val lastMessage = snapshot.getString("lastMessage").orEmpty()
+
+                fun openChat(name: String) {
+                    val cleanName = name.ifBlank { if (isGroup) "Group chat" else "Khahish User" }
+                    selectedChat = Chat(
+                        id = chatId,
+                        peerUid = if (isGroup) "" else peerUid,
+                        name = cleanName,
+                        message = lastMessage,
+                        time = "",
+                        initials = cleanName.take(1).uppercase(Locale.ROOT),
+                        isGroup = isGroup,
+                        memberUids = members
+                    )
+                    tab = "Chats"
+                    showNewChat = false
+                    showNewGroup = false
+                    profileTargetUid = ""
+                }
+
+                if (isGroup) {
+                    openChat(snapshot.getString("groupName").orEmpty())
+                } else if (peerUid.isBlank()) {
+                    Toast.makeText(appContext, "This chat has no valid other participant.", Toast.LENGTH_LONG).show()
+                } else {
+                    FirebaseFirestore.getInstance().collection("publicProfiles").document(peerUid).get()
+                        .addOnSuccessListener { profile ->
+                            openChat(
+                                storedPeerName
+                                    ?: profile.getString("name")
+                                    ?: profile.getString("displayName")
+                                    ?: "Khahish User"
+                            )
+                        }
+                        .addOnFailureListener {
+                            openChat(storedPeerName ?: "Khahish User")
+                        }
+                }
+            }
+            .addOnFailureListener { error ->
+                Toast.makeText(appContext, "Could not open chat: " + (error.message ?: "Unknown error"), Toast.LENGTH_LONG).show()
+            }
+    }
+
+    DisposableEffect(currentUser?.uid) {
+        val uid = currentUser?.uid
+        if (uid.isNullOrBlank()) {
+            onDispose { }
+        } else {
+            val deviceId = Settings.Secure.getString(appContext.contentResolver, Settings.Secure.ANDROID_ID)
+                ?.takeIf { it.isNotBlank() } ?: "android-device"
+            val deviceRef = FirebaseFirestore.getInstance().collection("users").document(uid)
+                .collection("trustedDevices").document(deviceId)
+            val deviceName = Build.MANUFACTURER + " " + Build.MODEL
+            var active = true
+            var revocationStarted = false
+            var deviceRegistration: com.google.firebase.firestore.ListenerRegistration? = null
+            deviceRef.set(mapOf(
+                "deviceName" to deviceName,
+                "platform" to "Android",
+                "lastActiveAt" to System.currentTimeMillis(),
+                "trusted" to true
+            ), SetOptions.merge()).addOnSuccessListener {
+                if (active) {
+                    deviceRegistration = deviceRef.addSnapshotListener { snapshot, _ ->
+                        if (snapshot != null && (!snapshot.exists() || snapshot.getBoolean("trusted") == false) && !revocationStarted) {
+                            revocationStarted = true
+                            KhahishMessagingService.removeCurrentToken(uid) {
+                                auth.signOut()
+                                currentUser = null
+                                Toast.makeText(appContext, "This device was removed from trusted devices. Please sign in again.", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    }
+                    FirebaseFirestore.getInstance().collection("users").document(uid)
+                        .collection("loginHistory").add(mapOf(
+                            "time" to System.currentTimeMillis(),
+                            "deviceName" to deviceName,
+                            "platform" to "Android"
+                        ))
+                }
+            }
+            onDispose {
+                active = false
+                deviceRegistration?.remove()
+            }
+        }
+    }
+
+    DisposableEffect(currentUser?.uid) {
+        val uid = currentUser?.uid
+        if (uid.isNullOrBlank()) {
+            onDispose { }
+        } else {
+            val registration = KhahishCallRepository().listenForIncomingCalls(uid) { incoming ->
+                if (incoming != null && latestActiveCall == null) {
+                    incomingCall = true
+                    activeCall = incoming
+                }
+            }
+            onDispose { registration.remove() }
+        }
+    }
+
     BackHandler(
         enabled = currentUser != null &&
-            (selectedChat != null || showNewChat || tab != "Chats")
+            (selectedChat != null || showNewChat || showNewGroup || profileTargetUid.isNotBlank() || tab != "Chats")
     ) {
         when {
+            profileTargetUid.isNotBlank() -> profileTargetUid = ""
+            activeCall != null -> {
+                activeCall = null
+                incomingCall = false
+            }
             selectedChat != null -> selectedChat = null
+            showNewGroup -> showNewGroup = false
             showNewChat -> showNewChat = false
             tab != "Chats" -> tab = "Chats"
         }
     }
 
     MaterialTheme(
-        colorScheme = lightColorScheme(
+        colorScheme = if (useDarkTheme) darkColorScheme(
+            primary = Color(0xFF55D6B4),
+            background = Color(0xFF101918),
+            surface = Color(0xFF1B2725),
+            onSurface = Color(0xFFE6F0ED)
+        ) else lightColorScheme(
             primary = Green,
             background = Pale,
             surface = Color.White,
@@ -206,15 +560,72 @@ fun KhahishApp() {
 
                 if (user == null) {
                     AuthScreen { currentUser = auth.currentUser }
+                } else if (activeCall != null) {
+                    KhahishCallScreen(
+                        call = activeCall!!,
+                        isIncoming = incomingCall,
+                        onExit = {
+                            activeCall = null
+                            incomingCall = false
+                        }
+                    )
+                } else if (profileTargetUid.isNotBlank()) {
+                    KhahishUserProfileScreen(
+                        uid = profileTargetUid,
+                        onBack = { profileTargetUid = "" },
+                        onStartCall = { peerUid, peerName, isVideo ->
+                            KhahishCallRepository().createOutgoingCall(
+                                callerUid = user.uid,
+                                callerName = user.displayName ?: "Khahish User",
+                                calleeUid = peerUid,
+                                calleeName = peerName,
+                                isVideo = isVideo,
+                                onSuccess = { call ->
+                                    incomingCall = false
+                                    activeCall = call
+                                },
+                                onError = { message ->
+                                    Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
+                                }
+                            )
+                        }
+                    )
                 } else if (selectedChat != null) {
                     ConversationScreen(
                         chat = selectedChat!!,
-                        onBack = { selectedChat = null }
+                        onBack = { selectedChat = null },
+                        onViewProfile = { profileTargetUid = it },
+                        onStartCall = { isVideo ->
+                            KhahishCallRepository().createOutgoingCall(
+                                callerUid = user.uid,
+                                callerName = user.displayName ?: "Khahish User",
+                                calleeUid = selectedChat!!.peerUid,
+                                calleeName = selectedChat!!.name,
+                                isVideo = isVideo,
+                                onSuccess = { call ->
+                                    incomingCall = false
+                                    activeCall = call
+                                },
+                                onError = { message ->
+                                    Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
+                                }
+                            )
+                        }
+                    )
+                } else if (showNewGroup) {
+                    KhahishGroupChatScreen(
+                        currentUid = user.uid,
+                        onBack = { showNewGroup = false },
+                        onCreated = {
+                            selectedChat = it
+                            showNewGroup = false
+                        }
                     )
                 } else if (showNewChat) {
                     NewChatScreen(
                         currentUid = user.uid,
                         onBack = { showNewChat = false },
+                        onCreateGroup = { showNewChat = false; showNewGroup = true },
                         onChatCreated = {
                             selectedChat = it
                             showNewChat = false
@@ -222,67 +633,72 @@ fun KhahishApp() {
                     )
                 } else {
                     Scaffold(
-                        containerColor = Pale,
+                        containerColor = MaterialTheme.colorScheme.background,
+                        floatingActionButtonPosition = if (oneHandedMode) FabPosition.Center else FabPosition.End,
                         topBar = {
                             Column(
                                 Modifier
                                     .fillMaxWidth()
-                                    .background(Color.White)
+                                    .background(
+                                        Brush.linearGradient(
+                                            listOf(
+                                                Color(0xFF031D1B),
+                                                Color(0xFF075C4C),
+                                                Color(0xFF003B42)
+                                            )
+                                        )
+                                    )
                                     .statusBarsPadding()
-                                    .padding(horizontal = 20.dp, vertical = 12.dp)
+                                    .padding(horizontal = 18.dp, vertical = 7.dp)
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Box(
-                                        Modifier
-                                            .size(42.dp)
-                                            .background(
-                                                Green,
-                                                RoundedCornerShape(14.dp)
-                                            ),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Forum,
-                                            contentDescription = null,
-                                            tint = Color.White
-                                        )
-                                    }
+                                    Image(
+                                        painter = painterResource(R.drawable.khahish_logo),
+                                        contentDescription = "Khahish logo",
+                                        modifier = Modifier.size(38.dp),
+                                        contentScale = ContentScale.Fit
+                                    )
 
                                     Spacer(Modifier.width(12.dp))
 
-                                    Column(Modifier.weight(1f)) {
+                                    Row(
+                                        modifier = Modifier.weight(1f),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
                                         Text(
-                                            "Khahish (خواہش)",
-                                            fontSize = 22.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Ink
+                                            "Khahish",
+                                            fontSize = 24.sp,
+                                            fontWeight = FontWeight.Black,
+                                            color = Color.White,
+                                            letterSpacing = 0.4.sp
                                         )
-                                        Text(
-                                            "Connect. Share. Stay Close.",
-                                            fontSize = 11.sp,
-                                            color = Muted
-                                        )
+                                        Spacer(Modifier.width(7.dp))
+                                        Text("🦎", fontSize = 23.sp)
                                     }
 
                                     IconButton(onClick = { tab = "Settings" }) {
-                                        Icon(Icons.Default.Settings, "Settings")
+                                        Icon(
+                                            Icons.Default.Settings,
+                                            "Settings",
+                                            tint = Color.White
+                                        )
                                     }
                                 }
 
-                                Spacer(Modifier.height(12.dp))
+                                Spacer(Modifier.height(5.dp))
 
                                 Text(
                                     if (tab == "Chats") "Messages" else tab,
                                     fontSize = 22.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Ink
+                                    color = Color.White
                                 )
                             }
                         },
                         bottomBar = {
-                            NavigationBar(containerColor = Color.White) {
+                            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                                 listOf(
                                     "Chats" to Icons.Default.Chat,
                                     "Updates" to Icons.Default.DonutLarge,
@@ -310,35 +726,92 @@ fun KhahishApp() {
                             }
                         }
                     ) { padding ->
-                        when (tab) {
-                            "Chats" -> ChatList(
-                                modifier = Modifier.padding(padding),
-                                currentUid = user.uid,
-                                onOpen = { selectedChat = it }
-                            )
-
-                            "Updates" -> PlaceholderPage(
-                                title = "Updates",
-                                description = "Your updates will appear here.",
-                                modifier = Modifier.padding(padding)
-                            )
-
-                            "Calls" -> PlaceholderPage(
-                                title = "Calls",
-                                description = "Call history will appear here after calling is integrated.",
-                                modifier = Modifier.padding(padding)
-                            )
-
-                            "Settings" -> SettingsPage(
-                                modifier = Modifier.padding(padding),
-                                onLogout = {
-                                    auth.signOut()
-                                    currentUser = null
-                                    selectedChat = null
-                                    showNewChat = false
-                                    tab = "Chats"
+                        AnimatedContent(
+                            targetState = tab,
+                            modifier = Modifier.pointerInput(tab) {
+                                var dragDistance = 0f
+                                detectHorizontalDragGestures(
+                                    onHorizontalDrag = { _, amount -> dragDistance += amount },
+                                    onDragEnd = {
+                                        if (abs(dragDistance) > 80f) {
+                                            val currentIndex = tabOrder.indexOf(tab)
+                                            val nextIndex = if (dragDistance < 0f) currentIndex + 1 else currentIndex - 1
+                                            if (nextIndex in tabOrder.indices) tab = tabOrder[nextIndex]
+                                        }
+                                        dragDistance = 0f
+                                    },
+                                    onDragCancel = { dragDistance = 0f }
+                                )
+                            },
+                            transitionSpec = {
+                                when {
+                                    animationsEnabled && slideTransitionsEnabled -> {
+                                        val movingForward = tabOrder.indexOf(targetState) > tabOrder.indexOf(initialState)
+                                        (slideInHorizontally { width -> if (movingForward) width / 3 else -width / 3 } + fadeIn()) togetherWith
+                                            (slideOutHorizontally { width -> if (movingForward) -width / 3 else width / 3 } + fadeOut())
+                                    }
+                                    animationsEnabled -> fadeIn() togetherWith fadeOut()
+                                    else -> EnterTransition.None togetherWith ExitTransition.None
                                 }
-                            )
+                            },
+                            label = "main_tab_transition"
+                        ) { selectedTab ->
+                            when (selectedTab) {
+                                "Chats" -> ChatList(
+                                    modifier = Modifier.padding(padding),
+                                    currentUid = user.uid,
+                                    onOpen = { selectedChat = it },
+                                    onViewProfile = { profileTargetUid = it }
+                                )
+
+                                "Updates" -> KhahishUpdatesScreen(
+                                    currentUid = user.uid,
+                                    currentName = user.displayName ?: "Khahish User",
+                                    modifier = Modifier.padding(padding)
+                                )
+
+                                "Calls" -> KhahishCallHistoryScreen(
+                                    uid = user.uid,
+                                    modifier = Modifier.padding(padding),
+                                    onStartCall = { peerUid, peerName, isVideo ->
+                                        KhahishCallRepository().createOutgoingCall(
+                                            callerUid = user.uid,
+                                            callerName = user.displayName ?: "Khahish User",
+                                            calleeUid = peerUid,
+                                            calleeName = peerName,
+                                            isVideo = isVideo,
+                                            onSuccess = { call ->
+                                                incomingCall = false
+                                                activeCall = call
+                                            },
+                                            onError = { message ->
+                                                Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
+                                            }
+                                        )
+                                    }
+                                )
+
+                                "Settings" -> KhahishSettingsScreen(
+                                    modifier = Modifier.padding(padding),
+                                    onLogout = {
+                                        KhahishMessagingService.removeCurrentToken(user.uid) {
+                                            auth.signOut()
+                                            currentUser = null
+                                            selectedChat = null
+                                            showNewChat = false
+                                            tab = "Chats"
+                                        }
+                                    },
+                                    onAnimationsChanged = { animationsEnabled = it },
+                                    onSlideTransitionsChanged = { slideTransitionsEnabled = it },
+                                    onOneHandedChanged = { oneHandedMode = it },
+                                    themeMode = themeMode,
+                                    onThemeModeChanged = {
+                                        themeMode = it
+                                        uiPreferences.edit().putString("theme_mode", it).apply()
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -354,6 +827,7 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
     val db = remember { FirebaseFirestore.getInstance() }
 
     var name by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var isSignUp by remember { mutableStateOf(true) }
@@ -362,38 +836,52 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
     Column(
         Modifier
             .fillMaxSize()
-            .background(Pale)
+            .background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState())
             .padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(
-            Modifier
-                .size(68.dp)
-                .background(Green, RoundedCornerShape(20.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                Icons.Default.Forum,
-                null,
-                tint = Color.White,
-                modifier = Modifier.size(36.dp)
-            )
-        }
+        Image(
+            painter = painterResource(R.drawable.khahish_logo),
+            contentDescription = "Khahish logo",
+            modifier = Modifier.size(88.dp),
+            contentScale = ContentScale.Fit
+        )
 
         Spacer(Modifier.height(16.dp))
 
         Text(
-            "Khahish (خواہش)",
-            fontSize = 26.sp,
+            "Khahish",
+            fontSize = 28.sp,
+            fontWeight = FontWeight.ExtraBold,
+            letterSpacing = 0.4.sp,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+
+        Spacer(Modifier.height(3.dp))
+
+        Text(
+            "Private Messaging, Made Simple",
+            fontSize = 14.sp,
             fontWeight = FontWeight.Bold,
-            color = Ink
+            letterSpacing = 0.6.sp,
+            color = Green
         )
 
         Text(
+            "Developed by Nikka Ali",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.3.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        Text(
             if (isSignUp) "Create your account" else "Welcome back",
-            color = Muted
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
         Spacer(Modifier.height(24.dp))
@@ -403,6 +891,25 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                 value = name,
                 onValueChange = { name = it },
                 label = { Text("Your name") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+            shape = RoundedCornerShape(16.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Green,
+                unfocusedBorderColor = Color(0xFFD8E5E0),
+                focusedContainerColor = MaterialTheme.colorScheme.surface,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                cursorColor = Green
+            )
+            )
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = username,
+                onValueChange = { username = it.lowercase(Locale.ROOT).filter { ch -> ch in 'a'..'z' || ch in '0'..'9' || ch == '_' }.take(20) },
+                label = { Text("Unique username") },
+                placeholder = { Text("your_username") },
+                leadingIcon = { Text("@", color = Green) },
+                supportingText = { Text("3–20 characters; letters, numbers and _ only.", color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
@@ -414,7 +921,15 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
             onValueChange = { email = it.trim() },
             label = { Text("Email address") },
             modifier = Modifier.fillMaxWidth(),
-            singleLine = true
+            singleLine = true,
+            shape = RoundedCornerShape(16.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Green,
+                unfocusedBorderColor = Color(0xFFD8E5E0),
+                focusedContainerColor = Color.White,
+                unfocusedContainerColor = Color.White,
+                cursorColor = Green
+            )
         )
 
         Spacer(Modifier.height(12.dp))
@@ -425,7 +940,15 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
             label = { Text("Password (6+ characters)") },
             visualTransformation = PasswordVisualTransformation(),
             modifier = Modifier.fillMaxWidth(),
-            singleLine = true
+            singleLine = true,
+            shape = RoundedCornerShape(16.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Green,
+                unfocusedBorderColor = Color(0xFFD8E5E0),
+                focusedContainerColor = Color.White,
+                unfocusedContainerColor = Color.White,
+                cursorColor = Green
+            )
         )
 
         if (!isSignUp) {
@@ -462,20 +985,63 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                     showToast(context, "Enter your name")
                     return@Button
                 }
+                if (isSignUp && !isValidKhahishUsername(username)) {
+                    showToast(context, "Choose a valid unique username (3–20 characters).")
+                    return@Button
+                }
 
                 isLoading = true
 
                 if (isSignUp) {
                     auth.createUserWithEmailAndPassword(email.trim(), password)
                         .addOnSuccessListener { result ->
-                            saveUserToFirestore(
-                                db,
-                                result.user?.uid,
-                                name,
-                                email
-                            )
-                            isLoading = false
-                            onLoginSuccess()
+                            val newUid = result.user?.uid
+                            val cleanUsername = normalizeKhahishUsername(username)
+                            if (newUid.isNullOrBlank()) {
+                                auth.signOut()
+                                isLoading = false
+                                showToast(context, "Account created, but profile setup failed. Please sign in.")
+                                return@addOnSuccessListener
+                            }
+                            val usernameRef = db.collection("usernames").document(cleanUsername)
+                            db.runTransaction { transaction ->
+                                val existingClaim = transaction.get(usernameRef)
+                                if (existingClaim.exists()) throw IllegalStateException("That username is already taken.")
+                                val now = System.currentTimeMillis()
+                                val profileData = mapOf<String, Any>(
+                                    "uid" to newUid,
+                                    "name" to name.trim(),
+                                    "nameLowercase" to name.trim().lowercase(Locale.ROOT),
+                                    "email" to email.trim(),
+                                    "username" to cleanUsername,
+                                    "bio" to "",
+                                    "photoUrl" to "",
+                                    "createdAt" to now,
+                                    "updatedAt" to now
+                                )
+                                transaction.set(usernameRef, mapOf("uid" to newUid, "username" to cleanUsername, "updatedAt" to now))
+                                transaction.set(db.collection("users").document(newUid), profileData, SetOptions.merge())
+                                val publicProfileData = mapOf(
+                                    "uid" to newUid,
+                                    "name" to name.trim(),
+                                    "nameLowercase" to name.trim().lowercase(Locale.ROOT),
+                                    "username" to cleanUsername,
+                                    "bio" to "",
+                                    "photoUrl" to "",
+                                    "createdAt" to now,
+                                    "updatedAt" to now
+                                )
+                                transaction.set(db.collection("publicProfiles").document(newUid), publicProfileData, SetOptions.merge())
+                                null
+                            }.addOnSuccessListener {
+                                saveUserToFirestore(db, newUid, name, email)
+                                isLoading = false
+                                onLoginSuccess()
+                            }.addOnFailureListener { error ->
+                                auth.signOut()
+                                isLoading = false
+                                showToast(context, (error.message ?: "Username setup failed") + ". Sign in and choose a username in Edit Profile if the account was created.")
+                            }
                         }
                         .addOnFailureListener { error ->
                             isLoading = false
@@ -553,6 +1119,7 @@ fun NewChatScreen(
     modifier: Modifier = Modifier,
     currentUid: String,
     onBack: () -> Unit,
+    onCreateGroup: () -> Unit = {},
     onChatCreated: (Chat) -> Unit
 ) {
     val db = remember { FirebaseFirestore.getInstance() }
@@ -564,54 +1131,47 @@ fun NewChatScreen(
     var creatingUid by remember { mutableStateOf("") }
 
     LaunchedEffect(search) {
-        val queryText = search.trim().lowercase(Locale.ROOT)
-
-        if (queryText.length < 2) {
-            users = emptyList()
-            loading = false
+        val term = normalizeKhahishUsername(search)
+        if (term.length < 3 || !isValidKhahishUsername(term)) {
+            users = emptyList(); loading = false
         } else {
             loading = true
-            db.collection("publicProfiles")
-                .orderBy("nameLowercase")
-                .startAt(queryText)
-                .endAt(queryText + "\uf8ff")
-                .limit(30)
-                .get()
-                .addOnSuccessListener { snapshot ->
-                    users = snapshot.documents.mapNotNull { doc ->
-                        val user = doc.toObject(AppUser::class.java)
-                        if (user != null && user.uid != currentUid) user else null
-                    }
+            db.collection("usernames").document(term).get().addOnSuccessListener { claim ->
+                val targetUid = claim.getString("uid").orEmpty()
+                if (targetUid.isBlank() || targetUid == currentUid) {
+                    users = emptyList(); loading = false
+                } else db.collection("publicProfiles").document(targetUid).get().addOnSuccessListener { profile ->
+                    users = listOfNotNull(profile.toObject(AppUser::class.java)?.takeIf { it.uid == targetUid })
                     loading = false
-                }
-                .addOnFailureListener { error ->
-                    loading = false
-                    showToast(context, "Search failed: ${error.message}")
-                }
+                }.addOnFailureListener { loading = false; showToast(context, "Profile lookup failed: " + it.message) }
+            }.addOnFailureListener { loading = false; showToast(context, "Username search failed: " + it.message) }
         }
     }
 
     Column(
         modifier
             .fillMaxSize()
-            .background(Pale)
+            .background(MaterialTheme.colorScheme.background)
     ) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .background(Color.White)
+                .background(MaterialTheme.colorScheme.surface)
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
                 Icon(Icons.Default.ArrowBack, "Back")
             }
+            IconButton(onClick = onCreateGroup) {
+                Icon(Icons.Default.GroupAdd, "Create group")
+            }
 
             OutlinedTextField(
                 value = search,
                 onValueChange = { search = it },
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Search users by name") },
+                placeholder = { Text("Enter exact username, e.g. ali_123") },
                 leadingIcon = { Icon(Icons.Default.Search, null) },
                 singleLine = true,
                 shape = RoundedCornerShape(16.dp)
@@ -619,9 +1179,9 @@ fun NewChatScreen(
         }
 
         Text(
-            "Search registered Khahish users",
+            "Find one person by their unique username",
             modifier = Modifier.padding(18.dp),
-            color = Muted,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 13.sp
         )
 
@@ -632,13 +1192,13 @@ fun NewChatScreen(
             )
         }
 
-        if (search.trim().length < 2) {
+        if (normalizeKhahishUsername(search).length < 3) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Type at least 2 letters to search", color = Muted)
+                Text("Enter a complete username (3–20 letters, numbers or _)", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else if (!loading && users.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No users found", color = Muted)
+                Text("No users found", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
             LazyColumn {
@@ -656,20 +1216,17 @@ fun NewChatScreen(
                                 val members = listOf(currentUid, user.uid).sorted()
                                 val now = System.currentTimeMillis()
 
-                                val chatData = hashMapOf<String, Any>(
-                                    "members" to members,
-                                    "memberNames" to mapOf(
-                                        currentUid to "You",
-                                        user.uid to user.name
-                                    ),
-                                    "lastMessage" to "",
-                                    "lastMessageAt" to 0L,
-                                    "updatedAt" to now
-                                )
-
-                                chatRef.get()
-                                    .addOnSuccessListener { existing ->
-                                        if (existing.exists()) {
+                                db.collection("chats")
+                                    .whereEqualTo(
+                                        com.google.firebase.firestore.FieldPath.documentId(),
+                                        chatId
+                                    )
+                                    .whereArrayContains("members", currentUid)
+                                    .limit(1)
+                                    .get()
+                                    .addOnSuccessListener { matches ->
+                                        val existing = matches.documents.firstOrNull()
+                                        if (existing != null) {
                                             creatingUid = ""
                                             onChatCreated(
                                                 Chat(
@@ -683,52 +1240,47 @@ fun NewChatScreen(
                                                 )
                                             )
                                         } else {
-                                            chatRef.set(chatData)
-                                                .addOnSuccessListener {
-                                                    creatingUid = ""
-                                                    onChatCreated(
-                                                        Chat(
-                                                            id = chatId,
-                                                            peerUid = user.uid,
-                                                            name = user.name.ifBlank { "Khahish User" },
-                                                            message = "",
-                                                            time = "",
-                                                            initials = user.name.firstOrNull()
-                                                                ?.uppercase() ?: "K"
-                                                        )
-                                                    )
+                                            val requestRef = db.collection("messageRequests").document(chatId)
+                                            requestRef.get().addOnSuccessListener { request ->
+                                                val status = request.getString("status").orEmpty()
+                                                when {
+                                                    !request.exists() -> {
+                                                        val senderName = FirebaseAuth.getInstance().currentUser?.displayName?.takeIf { it.isNotBlank() } ?: "Khahish User"
+                                                        requestRef.set(mapOf("senderUid" to currentUid, "receiverUid" to user.uid, "senderName" to senderName, "senderUsername" to "", "receiverName" to user.name, "status" to "pending", "createdAt" to now))
+                                                            .addOnSuccessListener { creatingUid = ""; showToast(context, "Message request sent. Chat opens after acceptance.") }
+                                                            .addOnFailureListener { creatingUid = ""; showToast(context, "Request failed: ${it.message}") }
+                                                    }
+                                                    status == "pending" && request.getString("senderUid") == currentUid -> { creatingUid = ""; showToast(context, "Your message request is already pending.") }
+                                                    status == "pending" -> { creatingUid = ""; showToast(context, "This person has already requested to chat. Accept it from Chats.") }
+                                                    status == "rejected" -> { creatingUid = ""; showToast(context, "This person rejected the request. Chat cannot start.") }
+                                                    status == "accepted" -> {
+                                                        creatingUid = ""
+                                                        showToast(context, "This request was accepted. Open your Chats list to continue.")
+                                                    }
+                                                    else -> { creatingUid = ""; showToast(context, "A chat request already exists.") }
                                                 }
-                                                .addOnFailureListener { error ->
-                                                    creatingUid = ""
-                                                    showToast(
-                                                        context,
-                                                        "Chat create failed: ${error.message}"
-                                                    )
-                                                }
+                                            }.addOnFailureListener { creatingUid = ""; showToast(context, "Request lookup failed: ${it.message}") }
                                         }
                                     }
                                     .addOnFailureListener { error ->
                                         creatingUid = ""
                                         showToast(
                                             context,
-                                            "Chat open failed: ${error.message}"
+                                            "Chat lookup failed: ${error.message}"
                                         )
                                     }
                             }
                             .padding(horizontal = 18.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            Modifier
-                                .size(48.dp)
-                                .background(Color(0xFFDCEFE9), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                user.name.firstOrNull()?.uppercase() ?: "K",
-                                color = Green,
-                                fontWeight = FontWeight.Bold
-                            )
+                        if (user.photoUrl.isNotBlank()) {
+                            AsyncImage(model = user.photoUrl, contentDescription = "Profile picture",
+                                modifier = Modifier.size(48.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                        } else {
+                            Box(Modifier.size(48.dp).background(Color(0xFFDCEFE9), CircleShape),
+                                contentAlignment = Alignment.Center) {
+                                Text(user.name.firstOrNull()?.uppercase() ?: "K", color = Green, fontWeight = FontWeight.Bold)
+                            }
                         }
 
                         Spacer(Modifier.width(13.dp))
@@ -736,14 +1288,20 @@ fun NewChatScreen(
                         Column(Modifier.weight(1f)) {
                             Text(
                                 user.name.ifBlank { "Khahish User" },
-                                color = Ink,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 fontWeight = FontWeight.SemiBold
                             )
-                            Text(
-                                "Tap to start private chat",
-                                color = Muted,
-                                fontSize = 12.sp
-                            )
+                            val statusText = when {
+                                user.isOnline && user.onlineStatusVisible -> "Online"
+                                user.lastSeenVisible && user.lastSeenAt > 0L ->
+                                    "Last seen " + java.text.SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault())
+                                        .format(java.util.Date(user.lastSeenAt))
+                                else -> "Tap to send a message request"
+                            }
+                            Text(statusText, color = if (statusText == "Online") Green else MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                            if (user.bio.isNotBlank()) {
+                                Text(user.bio, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, maxLines = 2)
+                            }
                         }
 
                         if (creatingUid == user.uid) {
@@ -767,13 +1325,25 @@ fun NewChatScreen(
 fun ChatList(
     modifier: Modifier = Modifier,
     currentUid: String,
-    onOpen: (Chat) -> Unit
+    onOpen: (Chat) -> Unit,
+    onViewProfile: (String) -> Unit
 ) {
     val db = remember { FirebaseFirestore.getInstance() }
+    val context = LocalContext.current
 
     var chats by remember { mutableStateOf(listOf<Chat>()) }
+    var incomingRequests by remember { mutableStateOf(listOf<MessageRequestItem>()) }
+    var unreadCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     var loading by remember { mutableStateOf(true) }
     var search by remember { mutableStateOf("") }
+    var profilePhotos by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var expandedProfileMenu by remember { mutableStateOf("") }
+    var selectedPictureUrl by remember { mutableStateOf("") }
+    var messageSearchResults by remember { mutableStateOf(emptyList<ChatMessageSearchResult>()) }
+    var isSearchingMessages by remember { mutableStateOf(false) }
+    var messageSearchCursors by remember { mutableStateOf(emptyMap<String, com.google.firebase.firestore.DocumentSnapshot>()) }
+    var hasMoreMessageSearchPages by remember { mutableStateOf(false) }
+    var isLoadingMoreMessageSearch by remember { mutableStateOf(false) }
 
     DisposableEffect(currentUid) {
         val registration = db.collection("chats")
@@ -789,22 +1359,23 @@ fun ChatList(
 
                     chats = docs.mapNotNull { doc ->
                         val members = doc.get("members") as? List<*>
-                        val peerUid = members
-                            ?.filterIsInstance<String>()
-                            ?.firstOrNull { it != currentUid }
+                        val memberUids = members?.filterIsInstance<String>() ?: emptyList()
+                        val peerUid = memberUids.firstOrNull { it != currentUid }
                             ?: return@mapNotNull null
-
                         val names = doc.get("memberNames") as? Map<*, *>
-                        val peerName = names?.get(peerUid) as? String
-                            ?: "Khahish User"
+                        val isGroup = doc.getBoolean("isGroup") == true
+                        val peerName = names?.get(peerUid) as? String ?: "Khahish User"
+                        val displayName = if (isGroup) doc.getString("groupName") ?: "Group chat" else peerName
 
                         Chat(
                             id = doc.id,
                             peerUid = peerUid,
-                            name = peerName,
+                            name = displayName,
                             message = doc.getString("lastMessage") ?: "",
                             time = "",
-                            initials = peerName.firstOrNull()?.uppercase() ?: "K"
+                            initials = displayName.firstOrNull()?.uppercase() ?: "K",
+                            isGroup = isGroup,
+                            memberUids = memberUids
                         )
                     }.sortedByDescending { chat ->
                         docs.firstOrNull { it.id == chat.id }
@@ -818,10 +1389,176 @@ fun ChatList(
         onDispose { registration.remove() }
     }
 
+    DisposableEffect(currentUid) {
+        val registration = db.collection("messageRequests").whereEqualTo("receiverUid", currentUid)
+            .whereEqualTo("status", "pending").addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+                incomingRequests = snapshot.documents.map { doc ->
+                    MessageRequestItem(doc.id, doc.getString("senderUid").orEmpty(), doc.getString("senderName").orEmpty().ifBlank { "Khahish User" }, doc.getString("senderUsername").orEmpty(), doc.getLong("createdAt") ?: 0L)
+                }.sortedByDescending { it.createdAt }
+            }
+        onDispose { registration.remove() }
+    }
+
+    // Har conversation ke unread messages ko real-time track karein.
+    // Existing readBy receipt se sirf doosre user ke unread messages count hote hain.
+    DisposableEffect(chats.map { it.id }.joinToString("|"), currentUid) {
+        val registrations = chats.map { chat ->
+            chat.id to db.collection("chats").document(chat.id)
+                .collection("messages")
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null || snapshot == null) return@addSnapshotListener
+                    val count = snapshot.documents.count { doc ->
+                        val senderId = doc.getString("senderId").orEmpty()
+                        val readBy = doc.get("readBy") as? List<*>
+                            ?: emptyList<Any>()
+                        senderId.isNotBlank() &&
+                            senderId != currentUid &&
+                            currentUid !in readBy
+                    }
+                    unreadCounts = unreadCounts.toMutableMap().apply {
+                        if (count > 0) put(chat.id, count) else remove(chat.id)
+                    }
+                }
+        }
+        onDispose { registrations.forEach { it.second.remove() } }
+    }
+
+    DisposableEffect(chats.map { it.peerUid }.distinct().joinToString("|")) {
+        val registrations = chats.map { it.peerUid }.distinct().map { peerUid ->
+            db.collection("publicProfiles").document(peerUid).addSnapshotListener { snap, _ ->
+                val photo = snap?.getString("photoUrl").orEmpty()
+                profilePhotos = profilePhotos.toMutableMap().apply { if (photo.isBlank()) remove(peerUid) else put(peerUid, photo) }
+            }
+        }
+        onDispose { registrations.forEach { it.remove() } }
+    }
+
+    LaunchedEffect(search, chats.map { it.id }.joinToString("|")) {
+        val queryText = search.trim()
+        messageSearchResults = emptyList()
+        messageSearchCursors = emptyMap()
+        hasMoreMessageSearchPages = false
+        isLoadingMoreMessageSearch = false
+
+        if (queryText.length < 2) {
+            isSearchingMessages = false
+        } else {
+            kotlinx.coroutines.delay(350)
+            val currentChats = chats
+            if (currentChats.isEmpty()) {
+                isSearchingMessages = false
+            } else {
+                isSearchingMessages = true
+                val tasks = currentChats.map { chat ->
+                    db.collection("chats").document(chat.id).collection("messages")
+                        .orderBy("timestamp", Query.Direction.DESCENDING)
+                        .limit(100)
+                        .get()
+                }
+                com.google.android.gms.tasks.Tasks.whenAllSuccess<com.google.firebase.firestore.QuerySnapshot>(tasks)
+                    .addOnSuccessListener { snapshots ->
+                        if (search.trim() == queryText) {
+                            val nextCursors = mutableMapOf<String, com.google.firebase.firestore.DocumentSnapshot>()
+                            messageSearchResults = currentChats.flatMapIndexed { index, chat ->
+                                val docs = snapshots.getOrNull(index)?.documents.orEmpty()
+                                if (docs.size == 100) docs.lastOrNull()?.let { nextCursors[chat.id] = it }
+                                docs.filter { doc ->
+                                    doc.getString("text").orEmpty().contains(queryText, ignoreCase = true) ||
+                                        doc.getString("replyToText").orEmpty().contains(queryText, ignoreCase = true)
+                                }.map { doc ->
+                                    ChatMessageSearchResult(
+                                        chat = chat.copy(initialMessageId = doc.id),
+                                        messageId = doc.id,
+                                        text = doc.getString("text").orEmpty().ifBlank { doc.getString("replyToText").orEmpty() },
+                                        timestamp = doc.getLong("timestamp") ?: 0L
+                                    )
+                                }
+                            }.sortedByDescending { it.timestamp }
+                            messageSearchCursors = nextCursors
+                            hasMoreMessageSearchPages = nextCursors.isNotEmpty()
+                        }
+                        isSearchingMessages = false
+                    }
+                    .addOnFailureListener {
+                        if (search.trim() == queryText) messageSearchResults = emptyList()
+                        isSearchingMessages = false
+                    }
+            }
+        }
+    }
+
+    fun loadOlderMessageSearchResults() {
+        val queryText = search.trim()
+        if (queryText.length < 2 || isLoadingMoreMessageSearch) return
+        val pageChats = chats.mapNotNull { chat ->
+            messageSearchCursors[chat.id]?.let { cursor -> chat to cursor }
+        }
+        if (pageChats.isEmpty()) {
+            hasMoreMessageSearchPages = false
+            return
+        }
+
+        isLoadingMoreMessageSearch = true
+        val tasks = pageChats.map { (chat, cursor) ->
+            db.collection("chats").document(chat.id).collection("messages")
+                .orderBy("timestamp", Query.Direction.DESCENDING)
+                .startAfter(cursor)
+                .limit(100)
+                .get()
+        }
+        com.google.android.gms.tasks.Tasks.whenAllSuccess<com.google.firebase.firestore.QuerySnapshot>(tasks)
+            .addOnSuccessListener { snapshots ->
+                if (search.trim() == queryText) {
+                    val nextCursors = messageSearchCursors.toMutableMap()
+                    val nextResults = mutableListOf<ChatMessageSearchResult>()
+                    pageChats.forEachIndexed { index, (chat, _) ->
+                        val docs = snapshots.getOrNull(index)?.documents.orEmpty()
+                        if (docs.size == 100) {
+                            docs.lastOrNull()?.let { nextCursors[chat.id] = it }
+                        } else {
+                            nextCursors.remove(chat.id)
+                        }
+                        docs.filter { doc ->
+                            doc.getString("text").orEmpty().contains(queryText, ignoreCase = true) ||
+                                doc.getString("replyToText").orEmpty().contains(queryText, ignoreCase = true)
+                        }.forEach { doc ->
+                            nextResults.add(
+                                ChatMessageSearchResult(
+                                    chat = chat.copy(initialMessageId = doc.id),
+                                    messageId = doc.id,
+                                    text = doc.getString("text").orEmpty().ifBlank { doc.getString("replyToText").orEmpty() },
+                                    timestamp = doc.getLong("timestamp") ?: 0L
+                                )
+                            )
+                        }
+                    }
+                    messageSearchResults = (messageSearchResults + nextResults)
+                        .distinctBy { it.chat.id + "|" + it.messageId }
+                        .sortedByDescending { it.timestamp }
+                    messageSearchCursors = nextCursors
+                    hasMoreMessageSearchPages = nextCursors.isNotEmpty()
+                }
+                isLoadingMoreMessageSearch = false
+            }
+            .addOnFailureListener {
+                isLoadingMoreMessageSearch = false
+                if (search.trim() == queryText) {
+                    showToast(context, "Could not search older messages: ${it.message}")
+                }
+            }
+    }
+
     val filtered = chats.filter {
         it.name.contains(search, true) || it.message.contains(search, true)
     }
 
+    if (selectedPictureUrl.isNotBlank()) Dialog(onDismissRequest = { selectedPictureUrl = "" }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(Modifier.fillMaxWidth().fillMaxHeight(.82f).background(Color.Black, RoundedCornerShape(18.dp)), contentAlignment = Alignment.Center) {
+            AsyncImage(model = selectedPictureUrl, contentDescription = "Profile picture", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+            IconButton(onClick = { selectedPictureUrl = "" }, modifier = Modifier.align(Alignment.TopEnd)) { Icon(Icons.Default.Close, "Close", tint = Color.White) }
+        }
+    }
     Column(modifier.fillMaxSize()) {
         OutlinedTextField(
             value = search,
@@ -843,7 +1580,7 @@ fun ChatList(
                 CircularProgressIndicator(color = Green)
             }
 
-            filtered.isEmpty() -> Box(
+            filtered.isEmpty() && incomingRequests.isEmpty() && messageSearchResults.isEmpty() && !isSearchingMessages -> Box(
                 Modifier
                     .fillMaxSize()
                     .padding(24.dp),
@@ -860,12 +1597,12 @@ fun ChatList(
                     Text(
                         if (search.isBlank()) "No private chats yet"
                         else "No matching conversations",
-                        color = Ink,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
                         "Tap the edit button to find a user",
-                        color = Muted,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp
                     )
                 }
@@ -874,6 +1611,38 @@ fun ChatList(
             else -> LazyColumn(
                 contentPadding = PaddingValues(bottom = 90.dp)
             ) {
+                if (incomingRequests.isNotEmpty()) {
+                    item { Text("MESSAGE REQUESTS", modifier = Modifier.fillMaxWidth().padding(start = 18.dp, top = 10.dp, bottom = 4.dp), color = Green, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                    items(incomingRequests, key = { "request-${it.id}" }) { request ->
+                        Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                            Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                                Text(request.senderName, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                                Text("wants to start a conversation", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                    TextButton(onClick = {
+                                        db.collection("messageRequests").document(request.id).update(mapOf("status" to "rejected", "handledBy" to currentUid, "rejectedAt" to System.currentTimeMillis()))
+                                            .addOnSuccessListener { showToast(context, "Message request rejected.") }
+                                            .addOnFailureListener { showToast(context, "Could not reject request: ${it.message}") }
+                                    }) { Text("Reject", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                                    Spacer(Modifier.width(8.dp))
+                                    Button(onClick = {
+                                        val reqRef = db.collection("messageRequests").document(request.id)
+                                        val chatRef = db.collection("chats").document(request.id)
+                                        val now = System.currentTimeMillis()
+                                        val members = listOf(currentUid, request.senderUid).sorted()
+                                        val batch = db.batch()
+                                        batch.update(reqRef, mapOf("status" to "accepted", "acceptedBy" to currentUid, "handledBy" to currentUid, "acceptedAt" to now))
+                                        batch.set(chatRef, mapOf("members" to members, "memberNames" to mapOf(currentUid to (FirebaseAuth.getInstance().currentUser?.displayName ?: "You"), request.senderUid to request.senderName), "lastMessage" to "", "lastMessageAt" to 0L, "updatedAt" to now, "createdAt" to now, "createdBy" to currentUid, "disappearingDurationMs" to 0L))
+                                        batch.commit().addOnSuccessListener {
+                                            showToast(context, "Request accepted. Chat is ready.")
+                                            onOpen(Chat(request.id, request.senderUid, request.senderName, "", "", request.senderName.firstOrNull()?.uppercase() ?: "K"))
+                                        }.addOnFailureListener { showToast(context, "Could not accept request: ${it.message}") }
+                                    }, colors = ButtonDefaults.buttonColors(containerColor = Green)) { Text("Accept", color = Color.White) }
+                                }
+                            }
+                        }
+                    }
+                }
                 items(filtered, key = { it.id }) { chat ->
                     Row(
                         Modifier
@@ -882,18 +1651,31 @@ fun ChatList(
                             .padding(horizontal = 18.dp, vertical = 13.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            Modifier
-                                .size(52.dp)
-                                .background(Color(0xFFDCEFE9), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                chat.initials,
-                                color = Green,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp
-                            )
+                        if (chat.isGroup) {
+                            Box(
+                                Modifier.size(52.dp).background(Color(0xFFDCEFE9), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) { Icon(Icons.Default.Groups, "Group chat", tint = Green, modifier = Modifier.size(28.dp)) }
+                        } else {
+                            Box {
+                                val photo = profilePhotos[chat.peerUid].orEmpty()
+                                if (photo.isNotBlank()) {
+                                    AsyncImage(model = photo, contentDescription = "Profile picture",
+                                        modifier = Modifier.size(52.dp).clip(CircleShape).clickable { expandedProfileMenu = chat.id },
+                                        contentScale = ContentScale.Crop)
+                                } else {
+                                    Box(Modifier.size(52.dp).background(Color(0xFFDCEFE9), CircleShape)
+                                        .clickable { expandedProfileMenu = chat.id }, contentAlignment = Alignment.Center) {
+                                        Text(chat.initials, color = Green, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                    }
+                                }
+                                DropdownMenu(expanded = expandedProfileMenu == chat.id, onDismissRequest = { expandedProfileMenu = "" }) {
+                                    DropdownMenuItem(text = { Text("View profile picture") }, leadingIcon = { Icon(Icons.Default.AccountCircle, null) },
+                                        enabled = photo.isNotBlank(), onClick = { selectedPictureUrl = photo; expandedProfileMenu = "" })
+                                    DropdownMenuItem(text = { Text("View profile") }, leadingIcon = { Icon(Icons.Default.Person, null) },
+                                        onClick = { expandedProfileMenu = ""; onViewProfile(chat.peerUid) })
+                                }
+                            }
                         }
 
                         Spacer(Modifier.width(13.dp))
@@ -902,21 +1684,40 @@ fun ChatList(
                             Text(
                                 chat.name,
                                 fontWeight = FontWeight.SemiBold,
-                                color = Ink
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                             Spacer(Modifier.height(5.dp))
                             Text(
                                 chat.message.ifBlank { "Start your conversation" },
-                                color = Muted,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 12.sp,
                                 maxLines = 1
                             )
                         }
 
+                        val unreadCount = unreadCounts[chat.id] ?: 0
+                        if (unreadCount > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .padding(end = 8.dp)
+                                    .defaultMinSize(minWidth = 25.dp, minHeight = 25.dp)
+                                    .background(Color(0xFF16A66A), CircleShape)
+                                    .padding(horizontal = 7.dp, vertical = 4.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = if (unreadCount > 99) "99+" else unreadCount.toString(),
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
                         Icon(
                             Icons.Default.ChevronRight,
                             null,
-                            tint = Muted
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
 
@@ -925,30 +1726,166 @@ fun ChatList(
                         modifier = Modifier.padding(start = 82.dp)
                     )
                 }
+                if (search.trim().length >= 2) {
+                    item {
+                        Text(
+                            if (isSearchingMessages) "Searching messages…" else "Matching messages",
+                            color = Green,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp)
+                        )
+                    }
+                    items(messageSearchResults, key = { "message-${it.chat.id}-${it.messageId}" }) { result ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable { onOpen(result.chat) }
+                                .padding(horizontal = 18.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                                Text(result.chat.name, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                Text(result.text, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, maxLines = 2)
+                            }
+                        }
+                    }
+                    if (hasMoreMessageSearchPages) {
+                        item {
+                            TextButton(
+                                onClick = { loadOlderMessageSearchResults() },
+                                enabled = !isLoadingMoreMessageSearch,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                            ) {
+                                if (isLoadingMoreMessageSearch) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Green)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Searching older messages…")
+                                } else {
+                                    Text("Search older messages", color = Green)
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 }
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun ConversationScreen(
     chat: Chat,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onViewProfile: (String) -> Unit,
+    onStartCall: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
     val db = remember { FirebaseFirestore.getInstance() }
     val auth = remember { FirebaseAuth.getInstance() }
     val currentUserId = auth.currentUser?.uid ?: return
+    val readReceiptsEnabled = remember {
+        context.getSharedPreferences("khahish_privacy_settings", Context.MODE_PRIVATE)
+            .getBoolean("read_receipts", true)
+    }
 
     val chatRef = remember(chat.id) {
         db.collection("chats").document(chat.id)
     }
-
     var text by remember { mutableStateOf("") }
     var messages by remember { mutableStateOf(listOf<MessageItem>()) }
+    var liveLocations by remember(chat.id) { mutableStateOf(emptyMap<String, LiveLocationPoint>()) }
+    var showLiveLocationOptions by remember { mutableStateOf(false) }
+    var pendingLiveLocationDuration by remember { mutableStateOf(0L) }
+    val messageListState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val messageScrollScope = rememberCoroutineScope()
+    var initialMessagesPositioned by remember(chat.id) { mutableStateOf(false) }
+    val isAtLatestMessage by remember {
+        derivedStateOf {
+            messages.isEmpty() || messageListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index == messages.lastIndex
+        }
+    }
     var isUploading by remember { mutableStateOf(false) }
     var isSending by remember { mutableStateOf(false) }
     var peerTyping by remember { mutableStateOf(false) }
+    var peerOnline by remember { mutableStateOf(false) }
+    var peerLastSeenAt by remember { mutableStateOf(0L) }
+    var peerLastSeenVisible by remember { mutableStateOf(true) }
+    var peerOnlineStatusVisible by remember { mutableStateOf(true) }
+    var peerPhotoUrl by remember { mutableStateOf("") }
+    var peerBio by remember { mutableStateOf("") }
+    var showMediaPreviews by remember(chat.id) { mutableStateOf(true) }
+    var notificationsMuted by remember(chat.id) { mutableStateOf(false) }
+    var chatBubbleColorHex by remember(chat.id) { mutableStateOf("#18A889") }
+    var chatWallpaperColorHex by remember(chat.id) { mutableStateOf("#F4F8F7") }
+
+    val chatSettingsRef = remember(currentUserId, chat.id) {
+        db.collection("users").document(currentUserId)
+            .collection("appSettings").document("chat_${chat.id}")
+    }
+
+    fun saveChatSetting(key: String, value: Any) {
+        chatSettingsRef.set(
+            mapOf(key to value, "updatedAt" to System.currentTimeMillis()),
+            SetOptions.merge()
+        ).addOnFailureListener { showToast(context, "Could not save chat setting: ${it.message}") }
+    }
+
+    DisposableEffect(currentUserId, chat.id) {
+        val settingsRegistration = chatSettingsRef.addSnapshotListener { snapshot, _ ->
+            showMediaPreviews = snapshot?.getBoolean("showMediaPreviews") != false
+            notificationsMuted = snapshot?.getBoolean("notificationsMuted") == true
+            chatBubbleColorHex = snapshot?.getString("bubbleColor") ?: "#18A889"
+            chatWallpaperColorHex = snapshot?.getString("wallpaperColor") ?: "#F4F8F7"
+        }
+        onDispose { settingsRegistration.remove() }
+    }
     var attachmentMenu by remember { mutableStateOf(false) }
+    var isRecordingVoice by remember { mutableStateOf(false) }
+    var voiceRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
+    var voiceRecordingFile by remember { mutableStateOf<File?>(null) }
+    var selectedMessageIds by remember { mutableStateOf(setOf<String>()) }
+    var editTarget by remember { mutableStateOf<MessageItem?>(null) }
+    var editText by remember { mutableStateOf("") }
+    var pinnedMessageId by remember { mutableStateOf("") }
+    var pinnedMessageText by remember { mutableStateOf("") }
+    var pinnedBy by remember { mutableStateOf("") }
+    var showGroupInfo by remember { mutableStateOf(false) }
+    var showStarredDialog by remember { mutableStateOf(false) }
+    var groupAdmins by remember(chat.id) { mutableStateOf(emptyList<String>()) }
+    var groupMemberUids by remember(chat.id) { mutableStateOf(chat.memberUids) }
+    var groupMemberNames by remember(chat.id) { mutableStateOf(emptyMap<String, String>()) }
+    var displayGroupName by remember(chat.id) { mutableStateOf(chat.name) }
+    var groupNameDraft by remember(chat.id) { mutableStateOf(chat.name) }
+    var showAddGroupMembers by remember { mutableStateOf(false) }
+    var groupMemberSearch by remember { mutableStateOf("") }
+    var groupSearchResults by remember { mutableStateOf(emptyList<AppUser>()) }
+    var peerMenuExpanded by remember { mutableStateOf(false) }
+    var chatMenuExpanded by remember { mutableStateOf(false) }
+    var showChatThemeDialog by remember { mutableStateOf(false) }
+    var showPeerPicture by remember { mutableStateOf(false) }
+    var videoToPlay by remember { mutableStateOf("") }
+    var photoToView by remember { mutableStateOf("") }
+    var showDeleteOptions by remember { mutableStateOf(false) }
+    var showDisappearingOptions by remember { mutableStateOf(false) }
+    var disappearingDurationMs by remember { mutableStateOf(0L) }
+    var replyTarget by remember { mutableStateOf<MessageItem?>(null) }
+    var reactionTarget by remember { mutableStateOf<MessageItem?>(null) }
+    var showForwardDialog by remember { mutableStateOf(false) }
+    var forwardUsers by remember { mutableStateOf(emptyList<AppUser>()) }
+    var forwardSearch by remember { mutableStateOf("") }
+    var loadingForwardUsers by remember { mutableStateOf(false) }
+    var forwarding by remember { mutableStateOf(false) }
+    var chatSearchVisible by remember(chat.id) { mutableStateOf(false) }
+    var chatSearchQuery by remember(chat.id) { mutableStateOf("") }
+
+    val displayedMessages = remember(messages, chatSearchQuery) {
+        val query = chatSearchQuery.trim()
+        if (query.isBlank()) messages else messages.filter { message ->
+            message.text.contains(query, ignoreCase = true) ||
+                message.replyToText.contains(query, ignoreCase = true)
+        }
+    }
+
 
     val imagePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
@@ -1016,6 +1953,89 @@ fun ConversationScreen(
         }
     }
 
+    val contactPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val uri = result.data?.data
+            if (uri != null) {
+                val columns = arrayOf(
+                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                    ContactsContract.CommonDataKinds.Phone.NUMBER
+                )
+                context.contentResolver.query(uri, columns, null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val name = cursor.getString(0).orEmpty()
+                        val number = cursor.getString(1).orEmpty()
+                        val contactText = "Name: $name\nPhone: $number"
+                        sendChatMessage(chatRef, currentUserId, contactText, "", "contact", context) { }
+                    }
+                }
+            }
+        }
+    }
+
+    fun sendLastKnownLocation() {
+        try {
+            val manager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            val location = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+                .mapNotNull { provider -> manager.getLastKnownLocation(provider) }
+                .maxByOrNull { it.time }
+            if (location == null) {
+                showToast(context, "No recent location is available. Turn on location and try again.")
+            } else {
+                val latitude = location.latitude
+                val longitude = location.longitude
+                val mapUrl = "https://maps.google.com/?q=$latitude,$longitude"
+                val label = String.format(Locale.US, "Location shared: %.5f, %.5f", latitude, longitude)
+                sendChatMessage(chatRef, currentUserId, label, mapUrl, "location", context) { }
+            }
+        } catch (error: SecurityException) {
+            showToast(context, "Location permission is required.")
+        } catch (error: Exception) {
+            showToast(context, "Could not read location: ${error.message}")
+        }
+    }
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        if (grants.values.any { it }) sendLastKnownLocation()
+        else showToast(context, "Location permission was not granted.")
+    }
+
+    fun startLiveLocationService(durationMs: Long) {
+        if (durationMs <= 0L) return
+        val serviceIntent = Intent(context, KhahishLiveLocationService::class.java).apply {
+            action = KhahishLiveLocationService.ACTION_START
+            putExtra(KhahishLiveLocationService.EXTRA_CHAT_ID, chat.id)
+            putExtra(KhahishLiveLocationService.EXTRA_UID, currentUserId)
+            putExtra(KhahishLiveLocationService.EXTRA_DURATION_MS, durationMs)
+        }
+        try {
+            androidx.core.content.ContextCompat.startForegroundService(context, serviceIntent)
+            val label = when (durationMs) {
+                15L * 60L * 1000L -> "15 minutes"
+                60L * 60L * 1000L -> "1 hour"
+                else -> "8 hours"
+            }
+            sendChatMessage(chatRef, currentUserId, "Live location shared for $label", "", "live_location", context) { }
+            showToast(context, "Live location sharing started. Stop it from the notification at any time.")
+        } catch (error: Exception) {
+            showToast(context, "Could not start live location: ${error.message}")
+        }
+    }
+
+    val liveLocationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        val granted = grants.values.any { it }
+        val duration = pendingLiveLocationDuration
+        pendingLiveLocationDuration = 0L
+        if (granted && duration > 0L) startLiveLocationService(duration)
+        else showToast(context, "Location permission was not granted.")
+    }
+
     val documentPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
@@ -1038,10 +2058,171 @@ fun ConversationScreen(
         }
     }
 
+
+    fun startVoiceRecording() {
+        try {
+            val output = File(context.cacheDir, "khahish_voice_${System.currentTimeMillis()}.m4a")
+            val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                MediaRecorder(context)
+            } else {
+                @Suppress("DEPRECATION")
+                MediaRecorder()
+            }
+            recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
+            recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+            recorder.setAudioEncodingBitRate(96000)
+            recorder.setAudioSamplingRate(44100)
+            recorder.setOutputFile(output.absolutePath)
+            recorder.prepare()
+            recorder.start()
+            voiceRecorder = recorder
+            voiceRecordingFile = output
+            isRecordingVoice = true
+            showToast(context, "Recording… tap the mic again to send")
+        } catch (error: Exception) {
+            voiceRecorder?.release()
+            voiceRecorder = null
+            isRecordingVoice = false
+            showToast(context, "Could not start recording: ${error.message}")
+        }
+    }
+
+    fun stopVoiceRecordingAndSend() {
+        val recorder = voiceRecorder
+        val file = voiceRecordingFile
+        try {
+            recorder?.stop()
+        } catch (_: Exception) {
+            file?.delete()
+            showToast(context, "Voice recording was too short. Please try again.")
+        } finally {
+            recorder?.release()
+            voiceRecorder = null
+            isRecordingVoice = false
+            voiceRecordingFile = null
+        }
+        if (file == null || !file.exists() || file.length() < 1000L) {
+            file?.delete()
+            return
+        }
+        isUploading = true
+        uploadToCloudinary(
+            context, Uri.fromFile(file), "video",
+            onSuccess = { url ->
+                isUploading = false
+                isSending = true
+                sendChatMessage(chatRef, currentUserId, "", url, "audio", context) {
+                    isSending = false
+                    file.delete()
+                }
+            },
+            onError = {
+                isUploading = false
+                file.delete()
+                showToast(context, it)
+            }
+        )
+    }
+
+    val voicePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) startVoiceRecording()
+        else showToast(context, "Microphone permission is required for voice messages.")
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            try {
+                voiceRecorder?.stop()
+            } catch (_: Exception) {
+            }
+            voiceRecorder?.release()
+            voiceRecorder = null
+            voiceRecordingFile?.delete()
+        }
+    }
+
+    DisposableEffect(chat.id) {
+        val chatSettingsRegistration = chatRef.addSnapshotListener { snapshot, _ ->
+            disappearingDurationMs = snapshot?.getLong("disappearingDurationMs") ?: 0L
+            pinnedMessageId = snapshot?.getString("pinnedMessageId").orEmpty()
+            pinnedMessageText = snapshot?.getString("pinnedMessageText").orEmpty()
+            pinnedBy = snapshot?.getString("pinnedBy").orEmpty()
+            if (chat.isGroup && snapshot != null) {
+                groupMemberUids = snapshot.get("members") as? List<String> ?: chat.memberUids
+                groupAdmins = snapshot.get("groupAdmins") as? List<String> ?: listOf(snapshot.getString("createdBy").orEmpty()).filter { it.isNotBlank() }
+                groupMemberNames = (snapshot.get("memberNames") as? Map<*, *>)?.mapNotNull { (key, value) ->
+                    if (key is String && value is String) key to value else null
+                }?.toMap() ?: emptyMap()
+                displayGroupName = snapshot.getString("groupName") ?: chat.name
+                groupNameDraft = displayGroupName
+                if (currentUserId !in groupMemberUids) onBack()
+            }
+        }
+        onDispose { chatSettingsRegistration.remove() }
+    }
+
+    LaunchedEffect(showAddGroupMembers, groupMemberSearch, groupMemberUids.joinToString("|")) {
+        if (!showAddGroupMembers) {
+            groupSearchResults = emptyList()
+        } else {
+            val term = normalizeKhahishUsername(groupMemberSearch)
+            if (term.length < 3 || !isValidKhahishUsername(term)) groupSearchResults = emptyList()
+            else db.collection("usernames").document(term).get().addOnSuccessListener { claim ->
+                val targetUid = claim.getString("uid").orEmpty()
+                if (targetUid.isBlank() || targetUid == currentUserId || targetUid in groupMemberUids) groupSearchResults = emptyList()
+                else db.collection("publicProfiles").document(targetUid).get().addOnSuccessListener { profile ->
+                    groupSearchResults = listOfNotNull(profile.toObject(AppUser::class.java)?.takeIf { it.uid == targetUid })
+                }
+            }
+        }
+    }
+
+    DisposableEffect(chat.peerUid) {
+        val profileRegistration = db.collection("publicProfiles").document(chat.peerUid)
+            .addSnapshotListener { snapshot, _ ->
+                peerOnline = snapshot?.getBoolean("isOnline") == true
+                peerPhotoUrl = snapshot?.getString("photoUrl").orEmpty()
+                peerBio = snapshot?.getString("bio").orEmpty()
+                peerLastSeenAt = snapshot?.getLong("lastSeenAt") ?: 0L
+                peerLastSeenVisible = snapshot?.getBoolean("lastSeenVisible") ?: true
+                peerOnlineStatusVisible = snapshot?.getBoolean("onlineStatusVisible") ?: true
+            }
+        onDispose { profileRegistration.remove() }
+    }
+
+    LaunchedEffect(messages.size, chat.id) {
+        if (!initialMessagesPositioned && messages.isNotEmpty()) {
+            val targetIndex = if (chat.initialMessageId.isNotBlank()) {
+                messages.indexOfFirst { it.id == chat.initialMessageId }
+            } else -1
+            messageListState.scrollToItem(if (targetIndex >= 0) targetIndex else messages.lastIndex)
+            initialMessagesPositioned = true
+        }
+    }
+
+    DisposableEffect(chat.id) {
+        val registration = chatRef.collection("liveLocations").addSnapshotListener { snapshot, error ->
+            if (error != null || snapshot == null) return@addSnapshotListener
+            liveLocations = snapshot.documents.associate { doc ->
+                doc.id to LiveLocationPoint(
+                    latitude = doc.getDouble("latitude") ?: 0.0,
+                    longitude = doc.getDouble("longitude") ?: 0.0,
+                    isActive = doc.getBoolean("isActive") == true,
+                    updatedAt = doc.getLong("updatedAt") ?: 0L,
+                    expiresAt = doc.getLong("expiresAt") ?: 0L
+                )
+            }
+        }
+        onDispose { registration.remove() }
+    }
+
     DisposableEffect(chat.id, currentUserId) {
         val messagesRegistration = chatRef.collection("messages")
             .orderBy("timestamp", Query.Direction.ASCENDING)
-            .addSnapshotListener { snapshot, error ->
+            .addSnapshotListener(com.google.firebase.firestore.MetadataChanges.INCLUDE) { snapshot, error ->
                 if (error != null || snapshot == null) return@addSnapshotListener
 
                 messages = snapshot.documents.map { doc ->
@@ -1055,8 +2236,26 @@ fun ConversationScreen(
                         deliveredTo = doc.get("deliveredTo") as? List<String>
                             ?: emptyList(),
                         readBy = doc.get("readBy") as? List<String>
-                            ?: emptyList()
+                            ?: emptyList(),
+                        hiddenFor = doc.get("hiddenFor") as? List<String>
+                            ?: emptyList(),
+                        expiresAt = doc.getLong("expiresAt") ?: 0L,
+                        replyToMessageId = doc.getString("replyToMessageId") ?: "",
+                        replyToText = doc.getString("replyToText") ?: "",
+                        reactions = (doc.get("reactions") as? Map<*, *>)?.mapNotNull { (k, v) -> if (k is String && v is String) k to v else null }?.toMap() ?: emptyMap(),
+                        editedAt = doc.getLong("editedAt") ?: 0L,
+                        starredBy = doc.get("starredBy") as? List<String> ?: emptyList(),
+                        restoredFromBackup = doc.getBoolean("restoredFromBackup") == true,
+                        isPending = doc.metadata.hasPendingWrites()
                     )
+                }.filter { currentUserId !in it.hiddenFor && (it.expiresAt == 0L || it.expiresAt > System.currentTimeMillis()) }
+
+                // Remove expired messages from Firestore once their deadline has passed.
+                snapshot.documents.forEach { doc ->
+                    val expiry = doc.getLong("expiresAt") ?: 0L
+                    if (expiry > 0L && expiry <= System.currentTimeMillis()) {
+                        doc.reference.delete()
+                    }
                 }
 
                 // Sirf un messages par receipt update karein
@@ -1076,7 +2275,7 @@ fun ConversationScreen(
                                 FieldValue.arrayUnion(currentUserId)
                         }
 
-                        if (currentUserId !in read) {
+                        if (readReceiptsEnabled && currentUserId !in read) {
                             updates["readBy"] =
                                 FieldValue.arrayUnion(currentUserId)
                         }
@@ -1088,11 +2287,17 @@ fun ConversationScreen(
                 }
             }
 
-        val typingRegistration = chatRef.collection("typing")
-            .document(chat.peerUid)
-            .addSnapshotListener { snapshot, _ ->
-                peerTyping = snapshot?.getBoolean("isTyping") == true
-            }
+        val typingRegistration = if (chat.isGroup) {
+            chatRef.collection("typing").whereEqualTo("isTyping", true)
+                .addSnapshotListener { snapshot, _ ->
+                    peerTyping = snapshot?.documents?.any { it.id != currentUserId } == true
+                }
+        } else {
+            chatRef.collection("typing").document(chat.peerUid)
+                .addSnapshotListener { snapshot, _ ->
+                    peerTyping = snapshot?.getBoolean("isTyping") == true
+                }
+        }
 
         onDispose {
             messagesRegistration.remove()
@@ -1123,50 +2328,223 @@ fun ConversationScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .background(Pale)
+            .background(MaterialTheme.colorScheme.background)
     ) {
         Row(
-            Modifier
-                .fillMaxWidth()
-                .background(Color.White)
-                .statusBarsPadding()
+            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).statusBarsPadding()
                 .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, "Back")
+            IconButton(onClick = {
+                if (selectedMessageIds.isNotEmpty()) selectedMessageIds = emptySet() else onBack()
+            }) { Icon(Icons.Default.ArrowBack, "Back") }
+            if (selectedMessageIds.isNotEmpty()) {
+                Text("${selectedMessageIds.size} selected", modifier = Modifier.weight(1f),
+                    color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                TextButton(onClick = {
+                    selectedMessageIds.forEach { id ->
+                        val item = messages.firstOrNull { it.id == id } ?: return@forEach
+                        val ref = chatRef.collection("messages").document(id)
+                        if (currentUserId in item.starredBy) ref.update("starredBy", FieldValue.arrayRemove(currentUserId))
+                        else ref.update("starredBy", FieldValue.arrayUnion(currentUserId))
+                    }
+                    selectedMessageIds = emptySet()
+                }) { Icon(Icons.Default.Star, null); Text("Star") }
+                TextButton(
+                    enabled = selectedMessageIds.size == 1,
+                    onClick = {
+                        val item = messages.firstOrNull { it.id == selectedMessageIds.firstOrNull() }
+                        if (item != null) {
+                            if (item.senderId != currentUserId || item.mediaType != "text" ||
+                                System.currentTimeMillis() - item.timestamp > 15 * 60 * 1000L) {
+                                showToast(context, "Only your text messages from the last 15 minutes can be edited.")
+                            } else {
+                                editTarget = item
+                                editText = item.text
+                            }
+                        }
+                    }
+                ) { Icon(Icons.Default.Edit, null); Text("Edit") }
+                TextButton(
+                    enabled = selectedMessageIds.size == 1,
+                    onClick = {
+                        val item = messages.firstOrNull { it.id == selectedMessageIds.firstOrNull() }
+                        if (item != null) {
+                            chatRef.update(mapOf(
+                                "pinnedMessageId" to item.id,
+                                "pinnedMessageText" to item.text.ifBlank { item.mediaType.replaceFirstChar { ch -> ch.uppercase() } },
+                                "pinnedBy" to currentUserId,
+                                "pinnedAt" to System.currentTimeMillis()
+                            )).addOnSuccessListener {
+                                showToast(context, "Message pinned")
+                                selectedMessageIds = emptySet()
+                            }.addOnFailureListener { showToast(context, "Could not pin message: ${it.message}") }
+                        }
+                    }
+                ) { Icon(Icons.Default.PushPin, null); Text("Pin") }
+                TextButton(onClick = { showForwardDialog = true }) { Icon(Icons.Default.Forward, null); Text("Forward") }
+                TextButton(onClick = { showDeleteOptions = true }) {
+                    Icon(Icons.Default.DeleteOutline, null)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Delete")
+                }
+            } else {
+                if (chat.isGroup) {
+                    Box(
+                        Modifier.size(40.dp).background(Color(0xFFDCEFE9), CircleShape).clickable { showGroupInfo = true },
+                        contentAlignment = Alignment.Center
+                    ) { Icon(Icons.Default.Groups, "Group info", tint = Green) }
+                } else {
+                    Box {
+                        if (peerPhotoUrl.isNotBlank()) {
+                            AsyncImage(model = peerPhotoUrl, contentDescription = "Profile picture",
+                                modifier = Modifier.size(40.dp).clip(CircleShape).clickable { onViewProfile(chat.peerUid) }, contentScale = ContentScale.Crop)
+                        } else {
+                            Box(Modifier.size(40.dp).background(Color(0xFFDCEFE9), CircleShape).clickable { onViewProfile(chat.peerUid) }, contentAlignment = Alignment.Center) {
+                                Text(chat.initials, color = Green, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        DropdownMenu(expanded = peerMenuExpanded, onDismissRequest = { peerMenuExpanded = false }) {
+                            DropdownMenuItem(text = { Text("View profile picture") }, leadingIcon = { Icon(Icons.Default.AccountCircle, null) }, enabled = peerPhotoUrl.isNotBlank(), onClick = { peerMenuExpanded = false; showPeerPicture = true })
+                            DropdownMenuItem(text = { Text("View contact") }, leadingIcon = { Icon(Icons.Default.Person, null) }, onClick = { peerMenuExpanded = false; onViewProfile(chat.peerUid) })
+                        }
+                    }
+                }
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(if (chat.isGroup) displayGroupName else chat.name, modifier = Modifier.clickable { if (!chat.isGroup) onViewProfile(chat.peerUid) else showGroupInfo = true }, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                    val peerStatusText = when {
+                        chat.isGroup -> "Group · ${chat.memberUids.size} members"
+                        peerTyping -> "typing..."
+                        peerOnline && peerOnlineStatusVisible -> "Online"
+                        peerLastSeenVisible && peerLastSeenAt > 0L -> {
+                            val elapsed = (System.currentTimeMillis() - peerLastSeenAt).coerceAtLeast(0L)
+                            val pattern = if (elapsed <= 7L * 24L * 60L * 60L * 1000L) "h:mm a" else "d MMM, h:mm a"
+                            "Last seen " + java.text.SimpleDateFormat(pattern, Locale.getDefault())
+                                .format(java.util.Date(peerLastSeenAt))
+                        }
+                        else -> ""
+                    }
+                    Text(peerStatusText, color = if (peerTyping || peerStatusText == "Online") Green else MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                    if (peerBio.isNotBlank()) Text(peerBio, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp, maxLines = 1)
+                }
+                IconButton(onClick = {
+                    chatSearchVisible = !chatSearchVisible
+                    chatSearchQuery = ""
+                }) {
+                    Icon(Icons.Default.Search, "Search chat history", tint = Green)
+                }
+                if (!chat.isGroup) {
+                    IconButton(onClick = { onStartCall(false) }) { Icon(Icons.Default.Call, "Voice call", tint = Green) }
+                    IconButton(onClick = { onStartCall(true) }) { Icon(Icons.Default.Videocam, "Video call", tint = Green) }
+                }
+                Box {
+                    IconButton(onClick = { chatMenuExpanded = true }) {
+                        Icon(Icons.Default.MoreVert, "Chat options", tint = MaterialTheme.colorScheme.onSurface)
+                    }
+                    DropdownMenu(expanded = chatMenuExpanded, onDismissRequest = { chatMenuExpanded = false }) {
+                        if (!chat.isGroup) {
+                            DropdownMenuItem(
+                                text = { Text("View contact") },
+                                leadingIcon = { Icon(Icons.Default.Person, null) },
+                                onClick = { chatMenuExpanded = false; onViewProfile(chat.peerUid) }
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("Search") },
+                            leadingIcon = { Icon(Icons.Default.Search, null) },
+                            onClick = { chatMenuExpanded = false; chatSearchVisible = true; chatSearchQuery = "" }
+                        )
+                        if (!chat.isGroup) {
+                            DropdownMenuItem(
+                                text = { Text("Report") },
+                                leadingIcon = { Icon(Icons.Default.Report, null) },
+                                onClick = { chatMenuExpanded = false; onViewProfile(chat.peerUid) }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Block") },
+                                leadingIcon = { Icon(Icons.Default.Block, null) },
+                                onClick = { chatMenuExpanded = false; onViewProfile(chat.peerUid) }
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text(if (notificationsMuted) "Unmute notifications" else "Mute notifications") },
+                            leadingIcon = { Icon(Icons.Default.NotificationsOff, null) },
+                            onClick = {
+                                chatMenuExpanded = false
+                                notificationsMuted = !notificationsMuted
+                                saveChatSetting("notificationsMuted", notificationsMuted)
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Disappearing messages") },
+                            leadingIcon = { Icon(Icons.Default.Timer, null) },
+                            onClick = { chatMenuExpanded = false; showDisappearingOptions = true }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Chat Theme") },
+                            leadingIcon = { Icon(Icons.Default.Palette, null) },
+                            onClick = { chatMenuExpanded = false; showChatThemeDialog = true }
+                        )
+                        if (chat.isGroup) {
+                            DropdownMenuItem(
+                                text = { Text("Add members") },
+                                leadingIcon = { Icon(Icons.Default.GroupAdd, null) },
+                                onClick = { chatMenuExpanded = false; showAddGroupMembers = true }
+                            )
+                        }
+                    }
+                }
             }
+        }
 
-            Box(
-                Modifier
-                    .size(40.dp)
-                    .background(Color(0xFFDCEFE9), CircleShape),
-                contentAlignment = Alignment.Center
+        if (chatSearchVisible) {
+            Row(
+                Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(chat.initials, color = Green, fontWeight = FontWeight.Bold)
-            }
-
-            Spacer(Modifier.width(10.dp))
-
-            Column(Modifier.weight(1f)) {
-                Text(chat.name, fontWeight = FontWeight.SemiBold, color = Ink)
-                Text(
-                    if (peerTyping) "typing..." else "Khahish private chat",
-                    color = if (peerTyping) Green else Muted,
-                    fontSize = 11.sp
+                OutlinedTextField(
+                    value = chatSearchQuery,
+                    onValueChange = { chatSearchQuery = it },
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("Search all messages in this chat") },
+                    leadingIcon = { Icon(Icons.Default.Search, null) },
+                    singleLine = true
                 )
+                Spacer(Modifier.width(8.dp))
+                Text(displayedMessages.size.toString(), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                IconButton(onClick = { chatSearchVisible = false; chatSearchQuery = "" }) {
+                    Icon(Icons.Default.Close, "Close search")
+                }
             }
+        }
 
-            IconButton(onClick = {
-                startKhahishCall(context, chat, false)
-            }) {
-                Icon(Icons.Default.Call, "Voice call", tint = Green)
-            }
-
-            IconButton(onClick = {
-                startKhahishCall(context, chat, true)
-            }) {
-                Icon(Icons.Default.Videocam, "Video call", tint = Green)
+        if (pinnedMessageId.isNotBlank()) {
+            Row(
+                Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant)
+                    .clickable {
+                        val index = messages.indexOfFirst { it.id == pinnedMessageId }
+                        if (index >= 0) messageScrollScope.launch { messageListState.animateScrollToItem(index) }
+                    }
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.PushPin, contentDescription = "Pinned message", tint = Green)
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Pinned message", color = Green, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text(pinnedMessageText, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, maxLines = 1)
+                }
+                if (pinnedBy == currentUserId) {
+                    IconButton(onClick = {
+                        chatRef.update(mapOf(
+                            "pinnedMessageId" to FieldValue.delete(),
+                            "pinnedMessageText" to FieldValue.delete(),
+                            "pinnedBy" to FieldValue.delete(),
+                            "pinnedAt" to FieldValue.delete()
+                        )).addOnFailureListener { showToast(context, "Could not unpin: ${it.message}") }
+                    }) { Icon(Icons.Default.Close, contentDescription = "Unpin message", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+                }
             }
         }
 
@@ -1177,31 +2555,54 @@ fun ConversationScreen(
             )
         }
 
-        LazyColumn(
+        Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp),
-            contentPadding = PaddingValues(vertical = 12.dp)
         ) {
-            items(messages, key = { it.id }) { msg ->
+            LazyColumn(
+                state = messageListState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(android.graphics.Color.parseColor(chatWallpaperColorHex)))
+                    .padding(horizontal = 12.dp),
+                contentPadding = PaddingValues(vertical = 12.dp)
+            ) {
+                if (chatSearchVisible && displayedMessages.isEmpty()) {
+                    item { Text("No matching messages", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(24.dp), textAlign = TextAlign.Center) }
+                }
+                items(displayedMessages, key = { it.id }) { msg ->
                 val isMe = msg.senderId == currentUserId
 
+                val isSelected = msg.id in selectedMessageIds
                 Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    horizontalArrangement = if (isMe) {
-                        Arrangement.End
-                    } else {
-                        Arrangement.Start
-                    }
+                    Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    horizontalArrangement = if (isMe) Arrangement.End else Arrangement.Start
                 ) {
                     Column(
                         Modifier
                             .widthIn(max = 285.dp)
+                            .pointerInput(msg.id) {
+                                var horizontalDrag = 0f
+                                detectHorizontalDragGestures(
+                                    onHorizontalDrag = { _, amount -> horizontalDrag += amount },
+                                    onDragEnd = {
+                                        if (kotlin.math.abs(horizontalDrag) > 70f) replyTarget = msg
+                                        horizontalDrag = 0f
+                                    }
+                                )
+                            }
+                            .combinedClickable(
+                                onClick = {
+                                    if (selectedMessageIds.isNotEmpty()) {
+                                        selectedMessageIds = if (isSelected) selectedMessageIds - msg.id else selectedMessageIds + msg.id
+                                    }
+                                },
+                                onLongClick = { reactionTarget = msg }
+                            )
+                            .border(2.dp, if (isSelected) Green else Color.Transparent, RoundedCornerShape(16.dp))
                             .background(
-                                if (isMe) Color(0xFFD9F7EC) else Color.White,
+                                if (isSelected) MaterialTheme.colorScheme.surfaceVariant else if (isMe) Color(android.graphics.Color.parseColor(chatBubbleColorHex)) else MaterialTheme.colorScheme.surface,
                                 RoundedCornerShape(
                                     topStart = 16.dp,
                                     topEnd = 16.dp,
@@ -1211,29 +2612,55 @@ fun ConversationScreen(
                             )
                             .padding(10.dp)
                     ) {
+                        if (chat.isGroup && !isMe) {
+                            Text(
+                                groupMemberNames[msg.senderId] ?: "Group member",
+                                color = Green,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                         when (msg.mediaType) {
-                            "image" -> AsyncImage(
-                                model = msg.imageUrl,
-                                contentDescription = "Shared photo",
-                                modifier = Modifier
-                                    .sizeIn(maxWidth = 250.dp, maxHeight = 250.dp)
-                                    .clip(RoundedCornerShape(10.dp)),
-                                contentScale = ContentScale.Crop
-                            )
+                            "image" -> {
+                                if (showMediaPreviews) {
+                                    AsyncImage(
+                                        model = msg.imageUrl,
+                                        contentDescription = "Shared photo — tap to view full screen",
+                                        modifier = Modifier
+                                            .sizeIn(maxWidth = 250.dp, maxHeight = 250.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .clickable { photoToView = msg.imageUrl },
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Row(
+                                        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                                            .clickable { photoToView = msg.imageUrl }.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.VisibilityOff, null, tint = Green)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Photo preview hidden • tap to view", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            }
 
-                            "video" -> MediaOpenRow(
-                                "Video — tap to play",
-                                Icons.Default.PlayCircle,
-                                msg.imageUrl,
-                                context
-                            )
+                            "video" -> Row(
+                                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .clickable { videoToPlay = msg.imageUrl }.padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.PlayCircle, null, tint = Green, modifier = Modifier.size(30.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    if (showMediaPreviews) "Play video" else "Video preview hidden • tap to play",
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
 
-                            "audio" -> MediaOpenRow(
-                                "Audio file — tap to play",
-                                Icons.Default.PlayArrow,
-                                msg.imageUrl,
-                                context
-                            )
+                            "audio" -> AudioMessagePlayer(msg.imageUrl)
 
                             "document" -> MediaOpenRow(
                                 "Document — tap to open",
@@ -1242,11 +2669,83 @@ fun ConversationScreen(
                                 context
                             )
 
-                            "location" -> Text(msg.text, color = Ink)
+                            "live_location" -> {
+                                val point = liveLocations[msg.senderId]
+                                val active = point?.isActive == true && point.expiresAt > System.currentTimeMillis()
+                                Row(
+                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                                        .clickable {
+                                            if (point != null && active) {
+                                                openSharedUrl(context, "https://maps.google.com/?q=${point.latitude},${point.longitude}")
+                                            } else {
+                                                showToast(context, "Live location sharing has ended.")
+                                            }
+                                        }
+                                        .padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.MyLocation, null, tint = Green)
+                                    Spacer(Modifier.width(8.dp))
+                                    Column {
+                                        Text("Live location", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                                        Text(if (active) "Tap to view latest location" else "Sharing ended", color = Green, fontSize = 11.sp)
+                                        Text(msg.text, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                                    }
+                                }
+                            }
+
+                            "location" -> Row(
+                                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .clickable { openSharedUrl(context, msg.imageUrl) }
+                                    .padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.LocationOn, null, tint = Green)
+                                Spacer(Modifier.width(8.dp))
+                                Column {
+                                    Text("Shared location", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                                    Text("Tap to open in Maps", color = Green, fontSize = 11.sp)
+                                    Text(msg.text, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                                }
+                            }
+                            "contact" -> Column(Modifier.fillMaxWidth().background(Color(0xFFEAF4F0), RoundedCornerShape(10.dp)).padding(10.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.ContactPage, null, tint = Green)
+                                    Spacer(Modifier.width(7.dp))
+                                    Text("Shared contact", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                                }
+                                Text(msg.text, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
+                            }
                         }
 
-                        if (msg.text.isNotBlank() && msg.mediaType != "location") {
-                            Text(msg.text, color = Ink, fontSize = 15.sp)
+                        if (msg.replyToMessageId.isNotBlank()) {
+                            Column(Modifier.fillMaxWidth().background(Color(0xFFEAF4F0), RoundedCornerShape(8.dp)).padding(7.dp)) {
+                                Text("Reply", color = Green, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text(msg.replyToText, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, maxLines = 2)
+                            }
+                            Spacer(Modifier.height(5.dp))
+                        }
+                        if (msg.text.isNotBlank() && msg.mediaType != "location" && msg.mediaType != "contact") {
+                            Text(msg.text, color = if (isSelected) Color.Black else MaterialTheme.colorScheme.onSurface, fontSize = 15.sp)
+                        }
+                        if (msg.restoredFromBackup) {
+                            Text("Imported backup • sender not verified", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp)
+                        }
+                        if (msg.reactions.isNotEmpty()) {
+                            Row(
+                                Modifier.align(Alignment.End)
+                                    .padding(top = 2.dp)
+                                    .background(Color(0xFFF4F8F7), RoundedCornerShape(12.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                msg.reactions.values.groupingBy { it }.eachCount().forEach { (emoji, count) ->
+                                    Text(emoji + if (count > 1) " $count" else "", fontSize = 11.sp)
+                                }
+                            }
                         }
 
                         Row(
@@ -1259,39 +2758,88 @@ fun ConversationScreen(
                                     Locale.getDefault()
                                 ).format(java.util.Date(msg.timestamp)),
                                 fontSize = 10.sp,
-                                color = Muted
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            if (msg.editedAt > 0L) {
+                                Text(" · edited", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+
 
                             if (isMe) {
-                                val read = msg.readBy.any { it != currentUserId }
-                                val delivered =
-                                    msg.deliveredTo.any { it != currentUserId }
-
                                 Spacer(Modifier.width(4.dp))
-                                Text(
-                                    when {
-                                        read -> "✓✓"
-                                        delivered -> "✓✓"
-                                        else -> "✓"
-                                    },
-                                    color = if (read) Color(0xFF1686D9) else Muted,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                if (msg.isPending) {
+                                    Icon(
+                                        Icons.Default.Schedule,
+                                        contentDescription = "Waiting to send",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                } else {
+                                    val read = msg.readBy.any { it != currentUserId }
+                                    val delivered = msg.deliveredTo.any { it != currentUserId }
+                                    Text(
+                                        when {
+                                            read -> "✓✓"
+                                            delivered -> "✓✓"
+                                            else -> "✓"
+                                        },
+                                        color = if (read) Color(0xFF1686D9) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
                     }
                 }
+                }
+            }
+            if (!isAtLatestMessage && messages.isNotEmpty()) {
+                SmallFloatingActionButton(
+                    onClick = {
+                        val lastIndex = messages.lastIndex
+                        if (lastIndex >= 0) {
+                            // Smoothly jump to the newest message.
+                            messageScrollScope.launch {
+                                messageListState.animateScrollToItem(lastIndex)
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 18.dp, bottom = 16.dp),
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    contentColor = Green,
+                    shape = CircleShape,
+                    elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 5.dp)
+                ) {
+                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Jump to latest message")
+                }
             }
         }
 
+        if (replyTarget != null) {
+            Row(Modifier.fillMaxWidth().background(Color(0xFFE8F5F0)).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Replying to message", color = Green, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text(replyTarget!!.text.ifBlank { replyTarget!!.mediaType }, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, fontSize = 12.sp)
+                }
+                IconButton(onClick = { replyTarget = null }) { Icon(Icons.Default.Close, "Cancel reply") }
+            }
+        }
         Row(
             Modifier
                 .fillMaxWidth()
-                .background(Color.White)
-                .padding(horizontal = 5.dp, vertical = 7.dp),
+                .padding(horizontal = 10.dp, vertical = 8.dp)
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(30.dp))
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(30.dp))
+                .padding(horizontal = 5.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            IconButton(onClick = { text += "😊" }) {
+                Icon(Icons.Default.EmojiEmotions, "Insert emoji", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
             Box {
                 IconButton(onClick = { attachmentMenu = true }) {
                     Icon(Icons.Default.AttachFile, "Attachments", tint = Green)
@@ -1342,13 +2890,37 @@ fun ConversationScreen(
                         leadingIcon = { Icon(Icons.Default.LocationOn, null) },
                         onClick = {
                             attachmentMenu = false
-                            showToast(
-                                context,
-                                "Location sharing is not available in this build."
-                            )
+                            val fineGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                            val coarseGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                            if (fineGranted || coarseGranted) sendLastKnownLocation()
+                            else locationPermissionLauncher.launch(arrayOf(
+                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                Manifest.permission.ACCESS_COARSE_LOCATION
+                            ))
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Share live location") },
+                        leadingIcon = { Icon(Icons.Default.MyLocation, null) },
+                        onClick = {
+                            attachmentMenu = false
+                            showLiveLocationOptions = true
+                        }
+                    )
+
+                    DropdownMenuItem(
+                        text = { Text("Share contact") },
+                        leadingIcon = { Icon(Icons.Default.ContactPage, null) },
+                        onClick = {
+                            attachmentMenu = false
+                            contactPicker.launch(Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI))
                         }
                     )
                 }
+            }
+
+            IconButton(onClick = { imagePicker.launch("image/*") }) {
+                Icon(Icons.Default.PhotoLibrary, "Open gallery", tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
             OutlinedTextField(
@@ -1360,42 +2932,682 @@ fun ConversationScreen(
                 modifier = Modifier.weight(1f),
                 placeholder = { Text("Message...") },
                 shape = RoundedCornerShape(24.dp),
-                singleLine = true
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                    focusedBorderColor = Color.Transparent,
+                    unfocusedBorderColor = Color.Transparent
+                )
             )
 
-            IconButton(onClick = {
-                showToast(
-                    context,
-                    "Voice recording is not available yet. You can attach an audio file."
-                )
-            }) {
-                Icon(Icons.Default.Mic, "Voice message", tint = Green)
-            }
-
             IconButton(
-                enabled = !isSending && !isUploading,
+                enabled = !isUploading && !isSending,
+                modifier = Modifier
+                    .padding(start = 4.dp)
+                    .size(54.dp)
+                    .shadow(8.dp, CircleShape)
+                    .background(Green, CircleShape),
                 onClick = {
                     val message = text.trim()
-                    if (message.isNotBlank()) {
-                        text = ""
-                        updateTyping(false)
-                        isSending = true
-
-                        sendChatMessage(
-                            chatRef,
-                            currentUserId,
-                            message,
-                            "",
-                            "text",
-                            context
-                        ) {
-                            isSending = false
+                    when {
+                        isRecordingVoice -> stopVoiceRecordingAndSend()
+                        message.isNotBlank() -> {
+                            text = ""
+                            updateTyping(false)
+                            isSending = true
+                            sendChatMessage(
+                                chatRef,
+                                currentUserId,
+                                message,
+                                "",
+                                "text",
+                                context,
+                                replyToMessageId = replyTarget?.id.orEmpty(),
+                                replyToText = replyTarget?.text?.ifBlank { replyTarget?.mediaType ?: "Media" }.orEmpty()
+                            ) {
+                                isSending = false
+                                replyTarget = null
+                            }
                         }
+                        ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED ->
+                            startVoiceRecording()
+                        else -> voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                     }
                 }
             ) {
-                Icon(Icons.Default.Send, "Send", tint = Green)
+                Icon(
+                    when {
+                        isRecordingVoice -> Icons.Default.Stop
+                        text.isNotBlank() -> Icons.Default.Send
+                        else -> Icons.Default.Mic
+                    },
+                    when {
+                        isRecordingVoice -> "Stop and send voice message"
+                        text.isNotBlank() -> "Send message"
+                        else -> "Record voice message"
+                    },
+                    tint = Color.White,
+                    modifier = Modifier.size(23.dp)
+                )
             }
+        }
+    }
+
+    if (showForwardDialog) {
+        LaunchedEffect(showForwardDialog, forwardSearch) {
+            val term = normalizeKhahishUsername(forwardSearch)
+            if (!showForwardDialog || term.length < 3 || !isValidKhahishUsername(term)) { forwardUsers = emptyList(); loadingForwardUsers = false }
+            else {
+                loadingForwardUsers = true
+                db.collection("usernames").document(term).get().addOnSuccessListener { claim ->
+                    val targetUid = claim.getString("uid").orEmpty()
+                    if (targetUid.isBlank() || targetUid == currentUserId) { forwardUsers = emptyList(); loadingForwardUsers = false }
+                    else db.collection("publicProfiles").document(targetUid).get().addOnSuccessListener { profile ->
+                        forwardUsers = listOfNotNull(profile.toObject(AppUser::class.java)?.takeIf { it.uid == targetUid }); loadingForwardUsers = false
+                    }.addOnFailureListener { loadingForwardUsers = false; showToast(context, "Profile lookup failed: ${it.message}") }
+                }.addOnFailureListener { loadingForwardUsers = false; showToast(context, "Username lookup failed: ${it.message}") }
+            }
+        }
+        AlertDialog(onDismissRequest = { if (!forwarding) showForwardDialog = false }, title = { Text("Forward selected messages") }, text = {
+            Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                OutlinedTextField(value = forwardSearch, onValueChange = { forwardSearch = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Recipient username") }, placeholder = { Text("Enter exact username") }, singleLine = true)
+                if (loadingForwardUsers) CircularProgressIndicator(color = Green)
+                else forwardUsers.forEach { target ->
+                    TextButton(enabled = !forwarding, onClick = {
+                        forwarding = true
+                        val targetRef = db.collection("chats").document(privateChatId(currentUserId, target.uid))
+                        targetRef.get().addOnSuccessListener { existing ->
+                            if (!existing.exists()) { forwarding = false; showToast(context, "Send a message request and wait for acceptance before forwarding."); return@addOnSuccessListener }
+                            val batch = db.batch()
+                            messages.filter { it.id in selectedMessageIds }.forEach { original ->
+                                val ref = targetRef.collection("messages").document()
+                                batch.set(ref, mapOf("senderId" to currentUserId, "text" to original.text, "imageUrl" to original.imageUrl, "mediaType" to original.mediaType, "timestamp" to System.currentTimeMillis(), "deliveredTo" to emptyList<String>(), "readBy" to listOf(currentUserId), "forwarded" to true))
+                            }
+                            batch.commit().addOnSuccessListener {
+                                targetRef.update(mapOf("lastMessage" to "Forwarded message", "lastMessageAt" to System.currentTimeMillis(), "updatedAt" to System.currentTimeMillis()))
+                                forwarding = false; showForwardDialog = false; selectedMessageIds = emptySet()
+                                showToast(context, "Messages forwarded to ${target.name}")
+                            }.addOnFailureListener { forwarding = false; showToast(context, "Forward failed: ${it.message}") }
+                        }.addOnFailureListener { forwarding = false; showToast(context, "Could not open chat: ${it.message}") }
+                    }) { Text(target.name, color = MaterialTheme.colorScheme.onSurface) }
+                }
+                if (!loadingForwardUsers && forwardUsers.isEmpty()) Text("Enter an existing user's exact username.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }, confirmButton = { TextButton(onClick = { showForwardDialog = false }, enabled = !forwarding) { Text("Close") } })
+    }
+    if (showAddGroupMembers && chat.isGroup) {
+        AlertDialog(
+            onDismissRequest = { showAddGroupMembers = false },
+            title = { Text("Add participants") },
+            text = {
+                Column(Modifier.heightIn(max = 380.dp)) {
+                    OutlinedTextField(
+                        value = groupMemberSearch,
+                        onValueChange = { groupMemberSearch = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Search by exact username") },
+                        singleLine = true
+                    )
+                    if (normalizeKhahishUsername(groupMemberSearch).length < 3) {
+                        Text("Enter at least 2 letters to search.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp))
+                    } else if (groupSearchResults.isEmpty()) {
+                        Text("No new users found.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp))
+                    } else {
+                        Column(Modifier.verticalScroll(rememberScrollState())) {
+                            groupSearchResults.forEach { candidate ->
+                                TextButton(onClick = {
+                                    chatRef.update(
+                                        "members", FieldValue.arrayUnion(candidate.uid),
+                                        "memberNames.${candidate.uid}", candidate.name.ifBlank { "Khahish User" }
+                                    ).addOnSuccessListener {
+                                        groupMemberSearch = ""
+                                        showToast(context, "${candidate.name} added to group")
+                                    }.addOnFailureListener { showToast(context, "Could not add participant: ${it.message}") }
+                                }, modifier = Modifier.fillMaxWidth()) {
+                                    Text(candidate.name, color = MaterialTheme.colorScheme.onSurface)
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showAddGroupMembers = false }) { Text("Done") } }
+        )
+    }
+
+    if (showStarredDialog) {
+        val starred = messages.filter { currentUserId in it.starredBy }
+        AlertDialog(
+            onDismissRequest = { showStarredDialog = false },
+            title = { Text("Starred messages") },
+            text = {
+                if (starred.isEmpty()) Text("You have not starred any messages in this chat.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                else Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                    starred.forEach { item ->
+                        TextButton(onClick = {
+                            val index = messages.indexOfFirst { it.id == item.id }
+                            if (index >= 0) messageScrollScope.launch { messageListState.animateScrollToItem(index) }
+                            showStarredDialog = false
+                        }, modifier = Modifier.fillMaxWidth()) {
+                            Text(item.text.ifBlank { item.mediaType.replaceFirstChar { ch -> ch.uppercase() } }, color = MaterialTheme.colorScheme.onSurface, maxLines = 2)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showStarredDialog = false }) { Text("Close") } }
+        )
+    }
+
+    if (showGroupInfo && chat.isGroup) {
+        val isGroupAdmin = currentUserId in groupAdmins
+        AlertDialog(
+            onDismissRequest = { showGroupInfo = false },
+            title = { Text("Group info") },
+            text = {
+                Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                    if (isGroupAdmin) {
+                        OutlinedTextField(
+                            value = groupNameDraft,
+                            onValueChange = { groupNameDraft = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Group name") },
+                            singleLine = true
+                        )
+                        TextButton(onClick = {
+                            val clean = groupNameDraft.trim()
+                            if (clean.isNotBlank()) chatRef.update("groupName", clean)
+                                .addOnSuccessListener { displayGroupName = clean; showToast(context, "Group name updated") }
+                                .addOnFailureListener { showToast(context, "Could not rename group: ${it.message}") }
+                        }) { Text("Save group name") }
+                    }
+                    Text("${groupMemberUids.size} participants", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    if (isGroupAdmin) {
+                        TextButton(onClick = { showAddGroupMembers = true }) {
+                            Icon(Icons.Default.PersonAdd, null)
+                            Spacer(Modifier.width(5.dp))
+                            Text("Add participants")
+                        }
+                    }
+                    groupMemberUids.forEach { memberUid ->
+                        val memberName = groupMemberNames[memberUid] ?: if (memberUid == currentUserId) "You" else memberUid.take(10)
+                        val memberIsAdmin = memberUid in groupAdmins
+                        Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(memberName, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
+                                if (memberIsAdmin) Text("Group admin", color = Green, fontSize = 10.sp)
+                            }
+                            if (isGroupAdmin && memberUid != currentUserId) {
+                                TextButton(onClick = {
+                                    val update = if (memberIsAdmin) FieldValue.arrayRemove(memberUid) else FieldValue.arrayUnion(memberUid)
+                                    chatRef.update("groupAdmins", update)
+                                        .addOnSuccessListener { showToast(context, if (memberIsAdmin) "Admin role removed" else "Promoted to admin") }
+                                        .addOnFailureListener { showToast(context, "Role update failed: ${it.message}") }
+                                }) { Text(if (memberIsAdmin) "Remove admin" else "Make admin", fontSize = 10.sp) }
+                                TextButton(onClick = {
+                                    chatRef.update(
+                                        "members", FieldValue.arrayRemove(memberUid),
+                                        "groupAdmins", FieldValue.arrayRemove(memberUid),
+                                        "memberNames.$memberUid", FieldValue.delete()
+                                    ).addOnSuccessListener { showToast(context, "Participant removed") }
+                                        .addOnFailureListener { showToast(context, "Could not remove participant: ${it.message}") }
+                                }) { Text("Remove", color = MaterialTheme.colorScheme.error, fontSize = 10.sp) }
+                            }
+                        }
+                    }
+                    val canLeave = currentUserId !in groupAdmins || groupAdmins.size > 1
+                    TextButton(enabled = canLeave, onClick = {
+                        chatRef.update(
+                            "members", FieldValue.arrayRemove(currentUserId),
+                            "groupAdmins", FieldValue.arrayRemove(currentUserId),
+                            "memberNames.$currentUserId", FieldValue.delete()
+                        ).addOnSuccessListener { showGroupInfo = false; onBack() }
+                            .addOnFailureListener { showToast(context, "Could not leave group: ${it.message}") }
+                    }) { Text("Leave group", color = MaterialTheme.colorScheme.error) }
+                    if (!canLeave) Text("Promote another admin before leaving this group.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                }
+            },
+            confirmButton = { TextButton(onClick = { showGroupInfo = false }) { Text("Done") } }
+        )
+    }
+
+    if (editTarget != null) {
+        AlertDialog(
+            onDismissRequest = { editTarget = null },
+            title = { Text("Edit message") },
+            text = {
+                OutlinedTextField(
+                    value = editText,
+                    onValueChange = { editText = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Message") },
+                    minLines = 2,
+                    maxLines = 5
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val target = editTarget ?: return@TextButton
+                    val updated = editText.trim()
+                    if (updated.isBlank()) {
+                        showToast(context, "Message cannot be empty.")
+                    } else if (System.currentTimeMillis() - target.timestamp > 15 * 60 * 1000L) {
+                        showToast(context, "The 15-minute edit window has expired.")
+                    } else {
+                        chatRef.collection("messages").document(target.id).update(
+                            mapOf("text" to updated, "editedAt" to System.currentTimeMillis())
+                        ).addOnSuccessListener {
+                            chatRef.update(mapOf("lastMessage" to updated, "updatedAt" to System.currentTimeMillis()))
+                            selectedMessageIds = emptySet()
+                            editTarget = null
+                            showToast(context, "Message updated")
+                        }.addOnFailureListener { showToast(context, "Edit failed: ${it.message}") }
+                    }
+                }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { editTarget = null }) { Text("Cancel") } }
+        )
+    }
+
+    if (reactionTarget != null) {
+        Dialog(onDismissRequest = { reactionTarget = null }) {
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = MaterialTheme.colorScheme.surface,
+                shadowElevation = 12.dp
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    listOf("❤️", "😂", "😮", "😢", "👍", "🙏").forEach { emoji ->
+                        TextButton(onClick = {
+                            val target = reactionTarget ?: return@TextButton
+                            val messageRef = chatRef.collection("messages").document(target.id)
+                            val updateTask = if (target.reactions[currentUserId] == emoji) {
+                                messageRef.update("reactions.$currentUserId", FieldValue.delete())
+                            } else {
+                                messageRef.update("reactions.$currentUserId", emoji)
+                            }
+                            updateTask.addOnSuccessListener { reactionTarget = null }
+                                .addOnFailureListener {
+                                    showToast(context, "Reaction failed: ${it.message}")
+                                    reactionTarget = null
+                                }
+                        }) {
+                            Text(emoji, fontSize = 25.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (showPeerPicture && peerPhotoUrl.isNotBlank()) Dialog(onDismissRequest = { showPeerPicture = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(Modifier.fillMaxWidth().fillMaxHeight(.82f).background(Color.Black, RoundedCornerShape(18.dp)), contentAlignment = Alignment.Center) {
+            AsyncImage(model = peerPhotoUrl, contentDescription = "Profile picture", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+            IconButton(onClick = { showPeerPicture = false }, modifier = Modifier.align(Alignment.TopEnd)) { Icon(Icons.Default.Close, "Close", tint = Color.White) }
+        }
+    }
+    if (photoToView.isNotBlank()) Dialog(
+        onDismissRequest = { photoToView = "" },
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+    ) {
+        Box(
+            Modifier.fillMaxSize().background(Color.Black),
+            contentAlignment = Alignment.Center
+        ) {
+            var photoScale by remember(photoToView) { mutableFloatStateOf(1f) }
+            var photoOffset by remember(photoToView) { mutableStateOf(Offset.Zero) }
+            val zoomState = rememberTransformableState { zoomChange, panChange, _ ->
+                photoScale = (photoScale * zoomChange).coerceIn(1f, 5f)
+                photoOffset = if (photoScale > 1f) photoOffset + panChange else Offset.Zero
+            }
+            AsyncImage(
+                model = photoToView,
+                contentDescription = "Full-screen photo — pinch to zoom",
+                modifier = Modifier.fillMaxSize()
+                    .graphicsLayer(
+                        scaleX = photoScale,
+                        scaleY = photoScale,
+                        translationX = photoOffset.x,
+                        translationY = photoOffset.y
+                    )
+                    .transformable(zoomState),
+                contentScale = ContentScale.Fit
+            )
+            IconButton(
+                onClick = { photoToView = "" },
+                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp)
+                    .background(Color.Black.copy(alpha = .45f), CircleShape)
+            ) { Icon(Icons.Default.Close, "Close photo", tint = Color.White) }
+        }
+    }
+    if (videoToPlay.isNotBlank()) Dialog(
+        onDismissRequest = { videoToPlay = "" },
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+    ) {
+        Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+            KhahishVideoPlayer(
+                url = videoToPlay,
+                modifier = Modifier.fillMaxWidth().fillMaxHeight()
+            )
+            IconButton(
+                onClick = { videoToPlay = "" },
+                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp)
+                    .background(Color.Black.copy(alpha = .5f), CircleShape)
+            ) { Icon(Icons.Default.Close, "Close video", tint = Color.White) }
+        }
+    }
+
+    if (showLiveLocationOptions) {
+        AlertDialog(
+            onDismissRequest = { showLiveLocationOptions = false },
+            title = { Text("Share live location") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Your location will update while sharing is active. A persistent Android notification lets you stop sharing at any time.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                    listOf(
+                        15L * 60L * 1000L to "15 minutes",
+                        60L * 60L * 1000L to "1 hour",
+                        8L * 60L * 60L * 1000L to "8 hours"
+                    ).forEach { (duration, label) ->
+                        TextButton(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = {
+                                showLiveLocationOptions = false
+                                val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                                val coarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                                if (fine || coarse) startLiveLocationService(duration)
+                                else {
+                                    pendingLiveLocationDuration = duration
+                                    liveLocationPermissionLauncher.launch(arrayOf(
+                                        Manifest.permission.ACCESS_FINE_LOCATION,
+                                        Manifest.permission.ACCESS_COARSE_LOCATION
+                                    ))
+                                }
+                            }
+                        ) { Text(label, color = Green) }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showLiveLocationOptions = false }) { Text("Cancel") } }
+        )
+    }
+
+    if (showChatThemeDialog) {
+        val themeGroups = listOf(
+            "Featured" to listOf(
+                Triple("Khahish Green", "#18A889", "#F4F8F7"),
+                Triple("Ocean", "#287DA8", "#EAF5FA"),
+                Triple("Sunset", "#C56A48", "#FFF1E8")
+            ),
+            "Nature" to listOf(
+                Triple("Forest", "#397A58", "#EAF4EC"),
+                Triple("Sage", "#66856B", "#F0F5EC"),
+                Triple("Earth", "#936B4D", "#F5EEE5")
+            ),
+            "Minimal" to listOf(
+                Triple("Lavender", "#8070A8", "#F4F0FA"),
+                Triple("Rose", "#B96E82", "#FFF1F4")
+            ),
+            "Dark" to listOf(
+                Triple("Midnight", "#4E9B87", "#101918"),
+                Triple("Graphite", "#8C9AA6", "#171C22")
+            )
+        )
+        AlertDialog(
+            onDismissRequest = { showChatThemeDialog = false },
+            title = { Text("Chat Theme") },
+            text = {
+                Column(
+                    Modifier.heightIn(max = 430.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    themeGroups.forEach { group ->
+                        Text(group.first, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        group.second.forEach { option ->
+                            Row(
+                                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                                    .clickable {
+                                        chatBubbleColorHex = option.second
+                                        chatWallpaperColorHex = option.third
+                                        saveChatSetting("bubbleColor", option.second)
+                                        saveChatSetting("wallpaperColor", option.third)
+                                        showChatThemeDialog = false
+                                    }
+                                    .padding(vertical = 7.dp, horizontal = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    Modifier.size(42.dp).clip(RoundedCornerShape(10.dp))
+                                        .background(Color(android.graphics.Color.parseColor(option.third))),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Box(
+                                        Modifier.size(24.dp).clip(CircleShape)
+                                            .background(Color(android.graphics.Color.parseColor(option.second)))
+                                    )
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Text(option.first, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    chatBubbleColorHex = "#18A889"
+                    chatWallpaperColorHex = "#F4F8F7"
+                    saveChatSetting("bubbleColor", "#18A889")
+                    saveChatSetting("wallpaperColor", "#F4F8F7")
+                    showChatThemeDialog = false
+                }) { Text("Reset default") }
+            },
+            dismissButton = { TextButton(onClick = { showChatThemeDialog = false }) { Text("Close") } }
+        )
+    }
+
+    if (showDisappearingOptions) {
+        AlertDialog(
+            onDismissRequest = { showDisappearingOptions = false },
+            title = { Text("Disappearing messages") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Choose how long new messages stay in this chat. This applies to both participants.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                    listOf(0L to "Off", 86_400_000L to "24 Hours", 604_800_000L to "7 Days", 7_776_000_000L to "90 Days").forEach { (duration, label) ->
+                        Row(Modifier.fillMaxWidth().clickable {
+                            chatRef.update("disappearingDurationMs", duration)
+                                .addOnSuccessListener { showToast(context, "Disappearing messages: $label") }
+                                .addOnFailureListener { showToast(context, "Could not update setting: ${it.message}") }
+                            showDisappearingOptions = false
+                        }.padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selected = disappearingDurationMs == duration, onClick = {
+                                chatRef.update("disappearingDurationMs", duration)
+                                    .addOnSuccessListener { showToast(context, "Disappearing messages: $label") }
+                                    .addOnFailureListener { showToast(context, "Could not update setting: ${it.message}") }
+                                showDisappearingOptions = false
+                            })
+                            Spacer(Modifier.width(8.dp))
+                            Text(label, color = MaterialTheme.colorScheme.onSurface)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showDisappearingOptions = false }) { Text("Close") } }
+        )
+    }
+
+    if (showDeleteOptions && selectedMessageIds.isNotEmpty()) {
+        val selectedMessages = messages.filter { it.id in selectedMessageIds }
+        val canDeleteForEveryone = selectedMessages.isNotEmpty() && selectedMessages.all { it.senderId == currentUserId }
+        AlertDialog(
+            onDismissRequest = { showDeleteOptions = false },
+            title = { Text("Delete selected messages?") },
+            text = { Text("Choose whether to remove these messages only from your chat or for everyone.") },
+            confirmButton = {
+                Column(horizontalAlignment = Alignment.End) {
+                    TextButton(onClick = {
+                        selectedMessageIds.toList().forEach { id ->
+                            chatRef.collection("messages").document(id)
+                                .update("hiddenFor", FieldValue.arrayUnion(currentUserId))
+                                .addOnFailureListener { showToast(context, "Could not delete message: ${it.message}") }
+                        }
+                        selectedMessageIds = emptySet()
+                        showDeleteOptions = false
+                    }) { Text("Delete for me") }
+                    if (canDeleteForEveryone) {
+                        TextButton(onClick = {
+                            selectedMessageIds.toList().forEach { id ->
+                                chatRef.collection("messages").document(id).delete()
+                                    .addOnFailureListener { showToast(context, "Could not delete for everyone: ${it.message}") }
+                            }
+                            selectedMessageIds = emptySet()
+                            showDeleteOptions = false
+                        }) { Text("Delete for everyone", color = MaterialTheme.colorScheme.error) }
+                    }
+                }
+            },
+            dismissButton = { TextButton(onClick = { showDeleteOptions = false }) { Text("Cancel") } }
+        )
+    }
+}
+
+@Composable
+private fun AudioMessagePlayer(url: String) {
+    val context = LocalContext.current
+    var player by remember(url) { mutableStateOf<MediaPlayer?>(null) }
+    var playing by remember(url) { mutableStateOf(false) }
+    var loading by remember(url) { mutableStateOf(false) }
+    var durationMs by remember(url) { mutableStateOf(0) }
+    var progress by remember(url) { mutableStateOf(0f) }
+    var seeking by remember(url) { mutableStateOf(false) }
+    var playbackSpeed by remember(url) { mutableStateOf(1f) }
+
+    DisposableEffect(url) {
+        onDispose { try { player?.release() } catch (_: Exception) { }; player = null }
+    }
+    LaunchedEffect(player, playing) {
+        while (playing) {
+            if (!seeking) {
+                val active = player
+                if (active != null) {
+                    durationMs = active.duration.coerceAtLeast(durationMs)
+                    progress = (active.currentPosition.toFloat() / durationMs.coerceAtLeast(1)).coerceIn(0f, 1f)
+                }
+            }
+            kotlinx.coroutines.delay(100)
+        }
+    }
+    LaunchedEffect(player, playbackSpeed) {
+        player?.let { active ->
+            try { active.playbackParams = active.playbackParams.setSpeed(playbackSpeed) }
+            catch (_: Exception) { }
+        }
+    }
+    fun timeText(ms: Int): String {
+        val seconds = ms.coerceAtLeast(0) / 1000
+        return String.format(Locale.US, "%d:%02d", seconds / 60, seconds % 60)
+    }
+
+    Row(
+        Modifier.widthIn(max = 248.dp)
+            .background(Color(0xFF102B2A), RoundedCornerShape(14.dp))
+            .padding(horizontal = 9.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier.size(38.dp)
+                .background(Brush.linearGradient(listOf(Color(0xFF00E6A0), Color(0xFF00A98B))), CircleShape)
+                .clickable(enabled = !loading) {
+                    if (playing) {
+                        player?.pause()
+                        playing = false
+                    } else if (player != null) {
+                        if (durationMs > 0 && progress >= 0.999f) {
+                            player?.seekTo(0)
+                            progress = 0f
+                        }
+                        player?.start()
+                        playing = true
+                    } else {
+                        loading = true
+                        val created = MediaPlayer()
+                        try {
+                            created.setDataSource(url)
+                            created.setOnPreparedListener { ready ->
+                                loading = false
+                                durationMs = ready.duration.coerceAtLeast(0)
+                                player = ready
+                                ready.start()
+                                playing = true
+                            }
+                            created.setOnCompletionListener { done ->
+                                playing = false
+                                done.seekTo(0)
+                                progress = 0f
+                            }
+                            created.setOnErrorListener { failed, _, _ ->
+                                loading = false
+                                playing = false
+                                failed.release()
+                                player = null
+                                Toast.makeText(context, "Unable to play this voice message", Toast.LENGTH_SHORT).show()
+                                true
+                            }
+                            created.prepareAsync()
+                        } catch (_: Exception) {
+                            loading = false
+                            created.release()
+                            Toast.makeText(context, "Unable to play this voice message", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            if (loading) CircularProgressIndicator(Modifier.size(20.dp), color = Color.White, strokeWidth = 2.dp)
+            else Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, "Play or pause", tint = Color.White, modifier = Modifier.size(25.dp))
+        }
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            BoxWithConstraints(Modifier.fillMaxWidth().height(32.dp), contentAlignment = Alignment.CenterStart) {
+                val bars = 25
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    repeat(bars) { index ->
+                        val barHeight = 7f + kotlin.math.abs(kotlin.math.sin(index * 0.79)).toFloat() * 19f
+                        Box(
+                            Modifier.weight(1f).height(barHeight.dp).clip(RoundedCornerShape(3.dp))
+                                .background(if (index.toFloat() / (bars - 1) <= progress) Color(0xFF00E6A0) else Color(0xFF66827D))
+                        )
+                    }
+                }
+                Text("🦎", Modifier.offset(x = (maxWidth - 19.dp) * progress).align(Alignment.CenterStart), fontSize = 17.sp)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Slider(
+                    value = progress,
+                    onValueChange = { seeking = true; progress = it },
+                    onValueChangeFinished = {
+                        if (durationMs > 0) player?.seekTo((durationMs * progress).toInt())
+                        seeking = false
+                    },
+                    enabled = durationMs > 0 && !loading,
+                    modifier = Modifier.weight(1f).height(17.dp),
+                    colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Color(0xFF00E6A0), inactiveTrackColor = Color(0xFF66827D))
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(timeText(durationMs), color = Color.White, fontSize = 10.sp)
+                Text(
+                    when (playbackSpeed) { 1.5f -> "1.5×"; 2f -> "2×"; else -> "1×" },
+                    color = Color(0xFFB8D9D0),
+                    fontSize = 10.sp,
+                    modifier = Modifier.padding(start = 6.dp).clickable {
+                        playbackSpeed = when (playbackSpeed) { 1f -> 1.5f; 1.5f -> 2f; else -> 1f }
+                    }
+                )
+            }
+            Text(timeText((durationMs * progress).toInt()), color = Color(0xFFB8D9D0), fontSize = 9.sp)
         }
     }
 }
@@ -1416,8 +3628,17 @@ private fun MediaOpenRow(
     ) {
         Icon(icon, null, tint = Green)
         Spacer(Modifier.width(8.dp))
-        Text(label, color = Ink)
+        Text(label, color = MaterialTheme.colorScheme.onSurface)
     }
+}
+
+private fun isKhahishNetworkAvailable(context: Context): Boolean {
+    val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        ?: return false
+    val network = connectivity.activeNetwork ?: return false
+    val capabilities = connectivity.getNetworkCapabilities(network) ?: return false
+    return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+        capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
 }
 
 private fun sendChatMessage(
@@ -1427,52 +3648,104 @@ private fun sendChatMessage(
     mediaUrl: String,
     mediaType: String,
     context: Context,
+    replyToMessageId: String = "",
+    replyToText: String = "",
     onComplete: () -> Unit
 ) {
     val now = System.currentTimeMillis()
+    val completionDelivered = java.util.concurrent.atomic.AtomicBoolean(false)
+    fun completeOnce() {
+        if (completionDelivered.compareAndSet(false, true)) onComplete()
+    }
 
-    val data = hashMapOf<String, Any>(
-        "senderId" to senderId,
-        "text" to messageText,
-        "imageUrl" to mediaUrl,
-        "mediaType" to mediaType,
-        "timestamp" to now,
-        "deliveredTo" to emptyList<String>(),
-        "readBy" to listOf(senderId)
-    )
-
-    chatRef.collection("messages")
-        .add(data)
-        .addOnSuccessListener {
-            val preview = when (mediaType) {
-                "image" -> "Photo"
-                "video" -> "Video"
-                "audio" -> "Audio"
-                "document" -> "Document"
-                "location" -> "Location"
-                else -> messageText
+    fun sendUsingCachedSettings(chatSnapshot: com.google.firebase.firestore.DocumentSnapshot?) {
+        fun sendNow() {
+            val duration = chatSnapshot?.getLong("disappearingDurationMs") ?: 0L
+            val data = hashMapOf<String, Any>(
+                "senderId" to senderId,
+                "text" to messageText,
+                "imageUrl" to mediaUrl,
+                "mediaType" to mediaType,
+                "timestamp" to now,
+                "deliveredTo" to emptyList<String>(),
+                "readBy" to listOf(senderId)
+            )
+            if (duration > 0L) data["expiresAt"] = now + duration
+            if (replyToMessageId.isNotBlank()) {
+                data["replyToMessageId"] = replyToMessageId
+                data["replyToText"] = replyToText
             }
 
-            chatRef.update(
-                mapOf(
+            // Firestore stores this write in its local persistent queue immediately,
+            // renders it with hasPendingWrites=true, and retries it after reconnect.
+            val writeTask = chatRef.collection("messages").add(data)
+            completeOnce()
+
+            writeTask.addOnSuccessListener { messageDocument ->
+                KhahishPushClient.notifyMessage(chatRef.id, messageDocument.id)
+                val preview = when (mediaType) {
+                    "image" -> "Photo"
+                    "video" -> "Video"
+                    "audio" -> "Audio"
+                    "document" -> "Document"
+                    "location" -> "Location"
+                    "contact" -> "Contact"
+                    else -> messageText
+                }
+                chatRef.update(mapOf(
                     "lastMessage" to preview,
                     "lastMessageAt" to now,
                     "updatedAt" to now
-                )
-            ).addOnCompleteListener { updateTask ->
-                if (!updateTask.isSuccessful) {
-                    showToast(
-                        context,
-                        "Message sent, but chat preview could not update."
-                    )
+                )).addOnCompleteListener { updateTask ->
+                    if (!updateTask.isSuccessful) showToast(context, "Message sent, but chat preview could not update.")
+                    completeOnce()
                 }
-                onComplete()
+            }.addOnFailureListener { error ->
+                completeOnce()
+                showToast(context, "Message could not be synced: ${error.message}")
             }
         }
-        .addOnFailureListener { error ->
-            onComplete()
-            showToast(context, "Message failed: ${error.message}")
+
+        val members = chatSnapshot?.get("members") as? List<*> ?: emptyList<Any>()
+        val otherUid = members.filterIsInstance<String>().firstOrNull { it != senderId }.orEmpty()
+        if (chatSnapshot?.getBoolean("isGroup") != true && members.size == 2 && otherUid.isNotBlank()) {
+            if (!isKhahishNetworkAvailable(context)) {
+                // Rules re-check blocked users when this queued write reaches Firestore.
+                sendNow()
+            } else {
+                FirebaseFirestore.getInstance().collection("users").document(senderId)
+                    .collection("blocked").document(otherUid).get()
+                    .addOnSuccessListener { myBlock ->
+                        if (myBlock.exists()) {
+                            completeOnce()
+                            showToast(context, "Message not sent. You have blocked this account.")
+                        } else sendNow()
+                    }
+                    .addOnFailureListener {
+                        completeOnce()
+                        showToast(context, "Could not verify your blocked list. Please try again.")
+                    }
+            }
+        } else {
+            sendNow()
         }
+    }
+
+    if (isKhahishNetworkAvailable(context)) {
+        chatRef.get().addOnSuccessListener { sendUsingCachedSettings(it) }
+            .addOnFailureListener { error ->
+                completeOnce()
+                showToast(context, "Could not read chat settings: ${error.message}")
+            }
+    } else {
+        chatRef.get(com.google.firebase.firestore.Source.CACHE)
+            .addOnSuccessListener { sendUsingCachedSettings(it) }
+            .addOnFailureListener {
+                // A first-time/offline chat may have no cached document. Still
+                // enqueue the message locally; the server enforces security on sync.
+                sendUsingCachedSettings(null)
+            }
+    }
 }
 
 private fun openSharedUrl(context: Context, url: String) {
@@ -1547,7 +3820,7 @@ fun SettingsPage(
     Column(
         modifier
             .fillMaxSize()
-            .background(Pale)
+            .background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
@@ -1555,7 +3828,7 @@ fun SettingsPage(
             "Settings",
             fontSize = 25.sp,
             fontWeight = FontWeight.Bold,
-            color = Ink
+            color = MaterialTheme.colorScheme.onSurface
         )
 
         Spacer(Modifier.height(18.dp))
@@ -1602,7 +3875,7 @@ fun SettingsPage(
                 } else if (blockedUsers.isEmpty()) {
                     Text(
                         "No blocked accounts",
-                        color = Muted,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(12.dp)
                     )
                 } else {
@@ -1616,7 +3889,7 @@ fun SettingsPage(
                             Text(
                                 blockedUid.take(12) + "...",
                                 Modifier.weight(1f),
-                                color = Ink
+                                color = MaterialTheme.colorScheme.onSurface
                             )
 
                             TextButton(
@@ -1728,7 +4001,7 @@ fun SettingsPage(
 }
 
 @Composable
-private fun StorageMediaPage(
+internal fun StorageMediaPage(
     modifier: Modifier = Modifier,
     onBack: () -> Unit
 ) {
@@ -1779,7 +4052,7 @@ private fun StorageMediaPage(
     Column(
         modifier
             .fillMaxSize()
-            .background(Pale)
+            .background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
     ) {
@@ -1794,7 +4067,7 @@ private fun StorageMediaPage(
                 "Storage and media",
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Bold,
-                color = Ink
+                color = MaterialTheme.colorScheme.onSurface
             )
         }
 
@@ -1803,7 +4076,7 @@ private fun StorageMediaPage(
         SettingsGroup("STORAGE USAGE") {
             Text(
                 "Khahish app storage",
-                color = Ink,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.SemiBold
             )
 
@@ -1823,7 +4096,7 @@ private fun StorageMediaPage(
                 )
                 Text(
                     "App files and cache on this device",
-                    color = Muted,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp
                 )
             }
@@ -1862,7 +4135,7 @@ private fun StorageMediaPage(
         SettingsGroup("MEDIA AUTO-DOWNLOAD") {
             Text(
                 "Choose which media types may be automatically downloaded when auto-download is supported.",
-                color = Muted,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp
             )
 
@@ -1925,7 +4198,7 @@ private fun StorageMediaPage(
 
         Text(
             "Note: These preferences are saved on this device. Automatic downloading and gallery saving will take effect when those features are connected to the media system. Storage usage currently reports Khahish app files and cache, not your Cloudinary online files.",
-            color = Muted,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 12.sp
         )
 
@@ -1947,8 +4220,8 @@ private fun MediaPreferenceRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
-            Text(title, color = Ink, fontWeight = FontWeight.SemiBold)
-            Text(subtitle, color = Muted, fontSize = 11.sp)
+            Text(title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
         }
 
         Switch(
@@ -1992,7 +4265,7 @@ private fun SettingsGroup(
     Column(
         Modifier
             .fillMaxWidth()
-            .background(Color.White, RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp))
             .padding(14.dp)
     ) {
         Text(
@@ -2031,19 +4304,19 @@ private fun SettingsItem(
         Spacer(Modifier.width(14.dp))
 
         Column(Modifier.weight(1f)) {
-            Text(title, color = Ink, fontWeight = FontWeight.SemiBold)
-            Text(subtitle, color = Muted, fontSize = 11.sp)
+            Text(title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
         }
 
         Icon(
             Icons.Default.ChevronRight,
             contentDescription = null,
-            tint = Muted
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
 
-private fun uploadToCloudinary(
+internal fun uploadToCloudinary(
     context: Context,
     uri: Uri,
     resourceType: String,
@@ -2123,7 +4396,7 @@ fun PlaceholderPage(
     Box(
         modifier
             .fillMaxSize()
-            .background(Pale)
+            .background(MaterialTheme.colorScheme.background)
             .padding(24.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -2139,7 +4412,7 @@ fun PlaceholderPage(
 
             Text(
                 title,
-                color = Ink,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.Bold,
                 fontSize = 20.sp
             )
@@ -2148,9 +4421,451 @@ fun PlaceholderPage(
 
             Text(
                 description,
-                color = Muted,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
             )
         }
+    }
+}
+
+
+@Composable
+private fun KhahishUserProfileScreen(
+    uid: String,
+    onBack: () -> Unit,
+    onStartCall: (peerUid: String, peerName: String, isVideo: Boolean) -> Unit
+) {
+    val db = remember { FirebaseFirestore.getInstance() }
+    val currentUid = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
+    val context = LocalContext.current
+    val settingsRef = remember(currentUid, uid) {
+        db.collection("users").document(currentUid).collection("appSettings").document("chat_${privateChatId(currentUid, uid)}")
+    }
+
+    var name by remember(uid) { mutableStateOf("Loading profile…") }
+    var photo by remember(uid) { mutableStateOf("") }
+    var username by remember(uid) { mutableStateOf("") }
+    var bio by remember(uid) { mutableStateOf("") }
+    var online by remember(uid) { mutableStateOf(false) }
+    var loading by remember(uid) { mutableStateOf(true) }
+    var showPicture by remember { mutableStateOf(false) }
+    var showBlockConfirm by remember { mutableStateOf(false) }
+    var showReportDialog by remember { mutableStateOf(false) }
+    var reportReason by remember { mutableStateOf("Spam or unwanted content") }
+
+    var notificationsMuted by remember(uid) { mutableStateOf(false) }
+    var showMediaPreviews by remember(uid) { mutableStateOf(true) }
+    var showSearchDialog by remember { mutableStateOf(false) }
+    var showMediaDialog by remember { mutableStateOf(false) }
+    var showStarredDialog by remember { mutableStateOf(false) }
+    var showStorageDialog by remember { mutableStateOf(false) }
+    var searchText by remember { mutableStateOf("") }
+    var chatMessages by remember(uid) { mutableStateOf(emptyList<MessageItem>()) }
+    var loadingMessages by remember { mutableStateOf(false) }
+    var messageLoadError by remember { mutableStateOf("") }
+    var mediaStorageBytes by remember(uid) { mutableStateOf(0L) }
+
+    val chatId = privateChatId(currentUid, uid)
+    val mediaMessages = remember(chatMessages) {
+        chatMessages.filter { it.mediaType != "text" || it.imageUrl.isNotBlank() || it.text.contains("http", true) }
+    }
+    val starredMessages = remember(chatMessages, currentUid) {
+        chatMessages.filter { currentUid in it.starredBy }
+    }
+    val searchResults = remember(chatMessages, searchText) {
+        val query = searchText.trim()
+        if (query.isBlank()) emptyList()
+        else chatMessages.filter { it.text.contains(query, ignoreCase = true) }
+    }
+
+    fun loadChatMessages() {
+        if (currentUid.isBlank() || loadingMessages) return
+        loadingMessages = true
+        messageLoadError = ""
+        db.collection("chats").document(chatId).collection("messages")
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .limit(250)
+            .get()
+            .addOnSuccessListener { snapshot ->
+                chatMessages = snapshot.documents.map { document ->
+                    MessageItem(
+                        id = document.id,
+                        senderId = document.getString("senderId").orEmpty(),
+                        text = document.getString("text").orEmpty(),
+                        imageUrl = document.getString("imageUrl").orEmpty(),
+                        mediaType = document.getString("mediaType") ?: "text",
+                        timestamp = document.getLong("timestamp") ?: 0L,
+                        starredBy = document.get("starredBy") as? List<String> ?: emptyList()
+                    )
+                }
+                mediaStorageBytes = snapshot.documents.sumOf {
+                    it.getLong("fileSizeBytes") ?: it.getLong("sizeBytes") ?: 0L
+                }
+                loadingMessages = false
+            }
+            .addOnFailureListener {
+                loadingMessages = false
+                messageLoadError = it.message ?: "Unable to load chat details."
+            }
+    }
+
+    fun saveChatSetting(key: String, value: Boolean) {
+        if (currentUid.isBlank()) return
+        settingsRef.set(
+            mapOf(key to value, "updatedAt" to System.currentTimeMillis()),
+            SetOptions.merge()
+        ).addOnFailureListener {
+            Toast.makeText(context, "Setting could not be saved: ${it.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    DisposableEffect(uid) {
+        val listener = db.collection("publicProfiles").document(uid).addSnapshotListener { snap, _ ->
+            if (snap != null && snap.exists()) {
+                name = snap.getString("name") ?: "Khahish User"
+                photo = snap.getString("photoUrl").orEmpty()
+                username = snap.getString("username").orEmpty()
+                bio = snap.getString("bio").orEmpty()
+                online = snap.getBoolean("isOnline") == true && snap.getBoolean("onlineStatusVisible") != false
+            }
+            loading = false
+        }
+        onDispose { listener.remove() }
+    }
+
+    DisposableEffect(uid, currentUid) {
+        val registration = settingsRef.addSnapshotListener { snapshot, _ ->
+            notificationsMuted = snapshot?.getBoolean("notificationsMuted") == true
+            showMediaPreviews = snapshot?.getBoolean("showMediaPreviews") != false
+        }
+        onDispose { registration.remove() }
+    }
+
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Row(
+            Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)
+                .statusBarsPadding().padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") }
+            Text("Contact Info", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+        }
+
+        if (loading) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = Green)
+            }
+        } else {
+            Column(
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 18.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                if (photo.isNotBlank()) {
+                    AsyncImage(
+                        model = photo,
+                        contentDescription = "Profile picture",
+                        modifier = Modifier.size(142.dp).clip(CircleShape).clickable { showPicture = true },
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Box(Modifier.size(142.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape), contentAlignment = Alignment.Center) {
+                        Text(name.take(1).uppercase(Locale.getDefault()), color = MaterialTheme.colorScheme.onPrimaryContainer, fontSize = 48.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+                Text(name, color = MaterialTheme.colorScheme.onBackground, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                if (username.isNotBlank()) Text("@$username", color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)
+                Text(if (online) "Online" else "Khahish member", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                if (bio.isNotBlank()) {
+                    Spacer(Modifier.height(14.dp))
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                        Text(bio, Modifier.fillMaxWidth().padding(16.dp), color = MaterialTheme.colorScheme.onSurface)
+                    }
+                }
+
+                Spacer(Modifier.height(22.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Button(
+                        onClick = { onStartCall(uid, name, false) },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Green)
+                    ) {
+                        Icon(Icons.Default.Call, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Voice")
+                    }
+                    OutlinedButton(
+                        onClick = { onStartCall(uid, name, true) },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Videocam, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Video")
+                    }
+                }
+
+                Spacer(Modifier.height(18.dp))
+                Card(
+                    Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Column {
+                        ContactInfoActionRow(Icons.Default.Search, "Search in chat", "Find messages in the latest 250 records") {
+                            showSearchDialog = true
+                            loadChatMessages()
+                        }
+                        HorizontalDivider()
+                        ContactInfoActionRow(Icons.Default.PhotoLibrary, "Media, links & docs", "${mediaMessages.size} items in recent messages") {
+                            showMediaDialog = true
+                            loadChatMessages()
+                        }
+                        HorizontalDivider()
+                        ContactInfoActionRow(Icons.Default.Storage, "Manage storage", "Review shared media usage") {
+                            showStorageDialog = true
+                            loadChatMessages()
+                        }
+                        HorizontalDivider()
+                        ContactInfoActionRow(Icons.Default.Star, "Starred messages", "${starredMessages.size} starred in recent messages") {
+                            showStarredDialog = true
+                            loadChatMessages()
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+                Card(
+                    Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Mute notifications", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                                Text("Silence message alerts from this chat", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                            }
+                            Switch(checked = notificationsMuted, onCheckedChange = {
+                                notificationsMuted = it
+                                saveChatSetting("notificationsMuted", it)
+                            })
+                        }
+                        HorizontalDivider()
+                        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Media visibility", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                                Text("Show or hide photo previews in this chat", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                            }
+                            Switch(checked = showMediaPreviews, onCheckedChange = {
+                                showMediaPreviews = it
+                                saveChatSetting("showMediaPreviews", it)
+                            })
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(onClick = { showReportDialog = true }, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.Report, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Report")
+                    }
+                    OutlinedButton(onClick = { showBlockConfirm = true }, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.Block, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Block")
+                    }
+                }
+            }
+        }
+    }
+
+    if (showSearchDialog) {
+        AlertDialog(
+            onDismissRequest = { showSearchDialog = false },
+            title = { Text("Search in chat") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = searchText,
+                        onValueChange = { searchText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("Search messages") }
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    if (loadingMessages) CircularProgressIndicator()
+                    else if (messageLoadError.isNotBlank()) Text(messageLoadError, color = MaterialTheme.colorScheme.error)
+                    else if (searchResults.isEmpty()) Text(if (searchText.isBlank()) "Enter a word to search recent messages." else "No matching messages.")
+                    else LazyColumn(Modifier.heightIn(max = 260.dp)) {
+                        items(searchResults.take(30), key = { it.id }) { message ->
+                            Text(message.text.ifBlank { message.mediaType }, Modifier.fillMaxWidth().padding(vertical = 7.dp), color = MaterialTheme.colorScheme.onSurface)
+                            HorizontalDivider()
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showSearchDialog = false }) { Text("Done") } }
+        )
+    }
+
+    if (showMediaDialog) {
+        AlertDialog(
+            onDismissRequest = { showMediaDialog = false },
+            title = { Text("Media, links & docs") },
+            text = {
+                when {
+                    loadingMessages -> CircularProgressIndicator()
+                    messageLoadError.isNotBlank() -> Text(messageLoadError, color = MaterialTheme.colorScheme.error)
+                    mediaMessages.isEmpty() -> Text("No media or links found in the latest 250 messages.")
+                    else -> LazyColumn(Modifier.heightIn(max = 320.dp)) {
+                        items(mediaMessages, key = { it.id }) { message ->
+                            Text(
+                                "${message.mediaType.replaceFirstChar { it.uppercase() }} • ${message.text.ifBlank { "Shared item" }}",
+                                Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 2
+                            )
+                            HorizontalDivider()
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showMediaDialog = false }) { Text("Done") } }
+        )
+    }
+
+    if (showStarredDialog) {
+        AlertDialog(
+            onDismissRequest = { showStarredDialog = false },
+            title = { Text("Starred messages") },
+            text = {
+                when {
+                    loadingMessages -> CircularProgressIndicator()
+                    messageLoadError.isNotBlank() -> Text(messageLoadError, color = MaterialTheme.colorScheme.error)
+                    starredMessages.isEmpty() -> Text("No starred messages in the latest 250 messages.")
+                    else -> LazyColumn(Modifier.heightIn(max = 320.dp)) {
+                        items(starredMessages, key = { it.id }) { message ->
+                            Text(message.text.ifBlank { message.mediaType }, Modifier.fillMaxWidth().padding(vertical = 8.dp), color = MaterialTheme.colorScheme.onSurface)
+                            HorizontalDivider()
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showStarredDialog = false }) { Text("Done") } }
+        )
+    }
+
+    if (showStorageDialog) {
+        AlertDialog(
+            onDismissRequest = { showStorageDialog = false },
+            title = { Text("Manage storage") },
+            text = {
+                when {
+                    loadingMessages -> CircularProgressIndicator()
+                    messageLoadError.isNotBlank() -> Text(messageLoadError, color = MaterialTheme.colorScheme.error)
+                    else -> Column {
+                        Text("Media and link items in recent messages: ${mediaMessages.size}")
+                        Text(
+                            if (mediaStorageBytes > 0L) "Recorded file size: ${android.text.format.Formatter.formatShortFileSize(context, mediaStorageBytes)}"
+                            else "File sizes are not recorded for these uploads."
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text("This page reviews usage only; it does not delete chat files.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showStorageDialog = false }) { Text("Done") } }
+        )
+    }
+
+    if (showBlockConfirm) {
+        AlertDialog(
+            onDismissRequest = { showBlockConfirm = false },
+            title = { Text("Block $name?") },
+            text = { Text("This account will be added to your blocked list. You can unblock it later from Settings.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (currentUid.isBlank()) return@TextButton
+                    db.collection("users").document(currentUid).collection("blocked").document(uid)
+                        .set(mapOf("uid" to uid, "name" to name, "createdAt" to System.currentTimeMillis()))
+                        .addOnSuccessListener {
+                            showBlockConfirm = false
+                            Toast.makeText(context, "Account blocked", Toast.LENGTH_SHORT).show()
+                            onBack()
+                        }
+                        .addOnFailureListener { Toast.makeText(context, "Block failed: ${it.message}", Toast.LENGTH_LONG).show() }
+                }) { Text("Block", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { showBlockConfirm = false }) { Text("Cancel") } }
+        )
+    }
+
+    if (showReportDialog) {
+        AlertDialog(
+            onDismissRequest = { showReportDialog = false },
+            title = { Text("Report account") },
+            text = {
+                Column {
+                    Text("Why are you reporting this account?", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    listOf("Spam or unwanted content", "Harassment or bullying", "Fake or impersonation account", "Inappropriate content", "Other").forEach { reason ->
+                        Row(Modifier.fillMaxWidth().clickable { reportReason = reason }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selected = reportReason == reason, onClick = { reportReason = reason })
+                            Text(reason, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (currentUid.isBlank()) return@TextButton
+                    db.collection("reports").add(mapOf(
+                        "type" to "user",
+                        "targetUid" to uid,
+                        "targetName" to name,
+                        "reporterUid" to currentUid,
+                        "reason" to reportReason,
+                        "status" to "pending",
+                        "createdAt" to System.currentTimeMillis()
+                    )).addOnSuccessListener {
+                        showReportDialog = false
+                        Toast.makeText(context, "Report submitted for review.", Toast.LENGTH_SHORT).show()
+                    }.addOnFailureListener { Toast.makeText(context, "Report failed: ${it.message}", Toast.LENGTH_LONG).show() }
+                }) { Text("Submit report") }
+            },
+            dismissButton = { TextButton(onClick = { showReportDialog = false }) { Text("Cancel") } }
+        )
+    }
+
+    if (showPicture && photo.isNotBlank()) Dialog(
+        onDismissRequest = { showPicture = false },
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(Modifier.fillMaxWidth().fillMaxHeight(.85f).background(Color.Black), contentAlignment = Alignment.Center) {
+            AsyncImage(model = photo, contentDescription = "Profile picture", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+            IconButton(onClick = { showPicture = false }, modifier = Modifier.align(Alignment.TopEnd)) {
+                Icon(Icons.Default.Close, "Close", tint = Color.White)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ContactInfoActionRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, null, tint = Green, modifier = Modifier.size(24.dp))
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+        }
+        Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
