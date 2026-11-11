@@ -22,6 +22,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -348,14 +352,75 @@ fun KhahishSettingsScreen(
             Text("Log out")
         }
         Spacer(Modifier.height(12.dp))
-        Text(
-            "Developed by Nikka Ali",
-            modifier = Modifier.fillMaxWidth().padding(bottom = 18.dp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 12.sp,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            fontWeight = FontWeight.Medium
-        )
+        // Signature-style Khahish developer credit footer.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(158.dp)
+                .background(
+                    brush = Brush.linearGradient(
+                        colors = listOf(Color(0xFFD7FFF0), Color(0xFFF5FFFB), Color(0xFFB8F3DE))
+                    ),
+                    shape = RoundedCornerShape(28.dp)
+                )
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            // Soft emerald wave accents along the lower edge.
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(34.dp)
+                    .align(Alignment.BottomCenter)
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(Color(0xFF18A889), Color(0xFF70E3C1), Color(0xFF087F68))
+                        ),
+                        RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp, bottomStart = 18.dp, bottomEnd = 18.dp)
+                    )
+            )
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Box(Modifier.width(42.dp).height(2.dp).background(Color(0xFF159B7C)))
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        "Developed by",
+                        color = Color(0xFF152B35),
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Box(Modifier.width(42.dp).height(2.dp).background(Color(0xFF159B7C)))
+                }
+                Text("👑", fontSize = 25.sp, modifier = Modifier.padding(top = 1.dp))
+                Text(
+                    "Nikka Ali",
+                    color = Color(0xFF073F38),
+                    fontSize = 31.sp,
+                    fontFamily = FontFamily.Cursive,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 0.dp)
+                )
+                Text(
+                    "♥     Khahish  •  Connect  •  Share  •  Together     ♥",
+                    color = Color(0xFF087F68),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 3.dp)
+                )
+            }
+        }
         Spacer(Modifier.height(28.dp))
     }
 
