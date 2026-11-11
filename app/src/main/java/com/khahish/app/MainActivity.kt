@@ -3244,44 +3244,139 @@ fun ConversationScreen(
     if (showForwardDialog) {
         LaunchedEffect(showForwardDialog, forwardSearch) {
             val term = normalizeKhahishUsername(forwardSearch)
-            if (!showForwardDialog || term.length < 3 || !isValidKhahishUsername(term)) { forwardUsers = emptyList(); loadingForwardUsers = false }
-            else {
+            if (!showForwardDialog || term.length < 3 || !isValidKhahishUsername(term)) {
+                forwardUsers = emptyList()
+                loadingForwardUsers = false
+            } else {
                 loadingForwardUsers = true
                 db.collection("usernames").document(term).get().addOnSuccessListener { claim ->
                     val targetUid = claim.getString("uid").orEmpty()
-                    if (targetUid.isBlank() || targetUid == currentUserId) { forwardUsers = emptyList(); loadingForwardUsers = false }
-                    else db.collection("publicProfiles").document(targetUid).get().addOnSuccessListener { profile ->
-                        forwardUsers = listOfNotNull(profile.toObject(AppUser::class.java)?.takeIf { it.uid == targetUid }); loadingForwardUsers = false
-                    }.addOnFailureListener { loadingForwardUsers = false; showToast(context, "Profile lookup failed: ${it.message}") }
-                }.addOnFailureListener { loadingForwardUsers = false; showToast(context, "Username lookup failed: ${it.message}") }
+                    if (targetUid.isBlank() || targetUid == currentUserId) {
+                        forwardUsers = emptyList()
+                        loadingForwardUsers = false
+                    } else db.collection("publicProfiles").document(targetUid).get().addOnSuccessListener { profile ->
+                        forwardUsers = listOfNotNull(profile.toObject(AppUser::class.java)?.takeIf { it.uid == targetUid })
+                        loadingForwardUsers = false
+                    }.addOnFailureListener {
+                        loadingForwardUsers = false
+                        showToast(context, "Profile lookup failed: ${it.message}")
+                    }
+                }.addOnFailureListener {
+                    loadingForwardUsers = false
+                    showToast(context, "Username lookup failed: ${it.message}")
+                }
             }
         }
-        AlertDialog(onDismissRequest = { if (!forwarding) showForwardDialog = false }, title = { Text("Forward selected messages") }, text = {
-            Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
-                OutlinedTextField(value = forwardSearch, onValueChange = { forwardSearch = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Recipient username") }, placeholder = { Text("Enter exact username") }, singleLine = true)
-                if (loadingForwardUsers) CircularProgressIndicator(color = Green)
-                else forwardUsers.forEach { target ->
-                    TextButton(enabled = !forwarding, onClick = {
-                        forwarding = true
-                        val targetRef = db.collection("chats").document(privateChatId(currentUserId, target.uid))
-                        targetRef.get().addOnSuccessListener { existing ->
-                            if (!existing.exists()) { forwarding = false; showToast(context, "Send a message request and wait for acceptance before forwarding."); return@addOnSuccessListener }
-                            val batch = db.batch()
-                            messages.filter { it.id in selectedMessageIds }.forEach { original ->
-                                val ref = targetRef.collection("messages").document()
-                                batch.set(ref, mapOf("senderId" to currentUserId, "text" to original.text, "imageUrl" to original.imageUrl, "mediaType" to original.mediaType, "timestamp" to System.currentTimeMillis(), "deliveredTo" to emptyList<String>(), "readBy" to listOf(currentUserId), "forwarded" to true))
+        Dialog(
+            onDismissRequest = { if (!forwarding) showForwardDialog = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(
+                Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.28f)),
+                contentAlignment = Alignment.TopCenter
+            ) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 34.dp).heightIn(max = 560.dp),
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    shadowElevation = 18.dp
+                ) {
+                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Forward message", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                                Text("${selectedMessageIds.size} selected", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            batch.commit().addOnSuccessListener {
-                                targetRef.update(mapOf("lastMessage" to "Forwarded message", "lastMessageAt" to System.currentTimeMillis(), "updatedAt" to System.currentTimeMillis()))
-                                forwarding = false; showForwardDialog = false; selectedMessageIds = emptySet()
-                                showToast(context, "Messages forwarded to ${target.name}")
-                            }.addOnFailureListener { forwarding = false; showToast(context, "Forward failed: ${it.message}") }
-                        }.addOnFailureListener { forwarding = false; showToast(context, "Could not open chat: ${it.message}") }
-                    }) { Text(target.name, color = MaterialTheme.colorScheme.onSurface) }
+                            IconButton(onClick = { if (!forwarding) showForwardDialog = false }) {
+                                Icon(Icons.Default.Close, "Close")
+                            }
+                        }
+                        OutlinedTextField(
+                            value = forwardSearch,
+                            onValueChange = { forwardSearch = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Recipient username") },
+                            placeholder = { Text("Enter exact username") },
+                            singleLine = true
+                        )
+                        if (loadingForwardUsers) {
+                            Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(color = Green)
+                            }
+                        } else if (forwardUsers.isEmpty()) {
+                            Text(
+                                "Search for a Khahish user by username. The chat must already be available.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 13.sp
+                            )
+                            Spacer(Modifier.weight(1f))
+                        } else {
+                            Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                                forwardUsers.forEach { target ->
+                                    TextButton(
+                                        enabled = !forwarding,
+                                        onClick = {
+                                            forwarding = true
+                                            val targetRef = db.collection("chats").document(privateChatId(currentUserId, target.uid))
+                                            targetRef.get().addOnSuccessListener { existing ->
+                                                if (!existing.exists()) {
+                                                    forwarding = false
+                                                    showToast(context, "Send a message request and wait for acceptance before forwarding.")
+                                                    return@addOnSuccessListener
+                                                }
+                                                val batch = db.batch()
+                                                messages.filter { it.id in selectedMessageIds }.forEach { original ->
+                                                    val ref = targetRef.collection("messages").document()
+                                                    batch.set(ref, mapOf(
+                                                        "senderId" to currentUserId,
+                                                        "text" to original.text,
+                                                        "imageUrl" to original.imageUrl,
+                                                        "mediaType" to original.mediaType,
+                                                        "timestamp" to System.currentTimeMillis(),
+                                                        "deliveredTo" to emptyList<String>(),
+                                                        "readBy" to listOf(currentUserId),
+                                                        "forwarded" to true
+                                                    ))
+                                                }
+                                                batch.commit().addOnSuccessListener {
+                                                    targetRef.update(mapOf(
+                                                        "lastMessage" to "Forwarded message",
+                                                        "lastMessageAt" to System.currentTimeMillis(),
+                                                        "updatedAt" to System.currentTimeMillis()
+                                                    ))
+                                                    forwarding = false
+                                                    showForwardDialog = false
+                                                    selectedMessageIds = emptySet()
+                                                    forwardSearch = ""
+                                                    showToast(context, "Messages forwarded to ${target.name}")
+                                                }.addOnFailureListener {
+                                                    forwarding = false
+                                                    showToast(context, "Forward failed: ${it.message}")
+                                                }
+                                            }.addOnFailureListener {
+                                                forwarding = false
+                                                showToast(context, "Could not open chat: ${it.message}")
+                                            }
+                                        }
+                                    ) {
+                                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(Icons.Default.Person, null, tint = Green)
+                                            Spacer(Modifier.width(10.dp))
+                                            Text(target.name, color = MaterialTheme.colorScheme.onSurface)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            TextButton(onClick = { if (!forwarding) showForwardDialog = false }, enabled = !forwarding) {
+                                Text("Close")
+                            }
+                        }
+                    }
                 }
-                if (!loadingForwardUsers && forwardUsers.isEmpty()) Text("Enter an existing user's exact username.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        }, confirmButton = { TextButton(onClick = { showForwardDialog = false }, enabled = !forwarding) { Text("Close") } })
+        }
     }
     if (showAddGroupMembers && chat.isGroup) {
         AlertDialog(
