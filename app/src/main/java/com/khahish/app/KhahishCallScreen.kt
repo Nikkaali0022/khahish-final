@@ -59,7 +59,7 @@ fun KhahishCallScreen(
     var isJoined by remember(call.id) { mutableStateOf(false) }
     var isMuted by remember(call.id) { mutableStateOf(false) }
     var cameraEnabled by remember(call.id) { mutableStateOf(true) }
-    var speakerEnabled by remember(call.id) { mutableStateOf(true) }
+    var speakerEnabled by remember(call.id) { mutableStateOf(false) }
     var credentials by remember(call.id) { mutableStateOf<AgoraRtcCredentials?>(null) }
     var session by remember(call.id) { mutableStateOf<KhahishAgoraSession?>(null) }
     var connectionStarted by remember(call.id) { mutableStateOf(false) }
@@ -91,8 +91,8 @@ fun KhahishCallScreen(
                     context = context,
                     credentials = token,
                     isVideoCall = currentCall.isVideo,
-                    onJoined = { isJoined = true; statusText = "Connected" },
-                    onRemoteUserJoined = { uid -> remoteUid = uid; statusText = "Connected" },
+                    onJoined = { isJoined = true; statusText = "Connected"; errorText = "" },
+                    onRemoteUserJoined = { uid -> remoteUid = uid; statusText = "Connected"; errorText = "" },
                     onRemoteUserLeft = { statusText = "The other person left the call" },
                     onFailure = { errorText = it }
                 )
@@ -291,7 +291,7 @@ fun KhahishCallScreen(
             }
         }
 
-        if (errorText.isNotBlank()) {
+        if (errorText.isNotBlank() && !isConnected) {
             Spacer(Modifier.height(12.dp))
             Text(
                 errorText,
