@@ -186,12 +186,10 @@ test("secret-locked chat previews are excluded by the per-user server index", as
 
   const aliceQuery = query(
     collection(db("alice"), "chats"),
-    where("members", "array-contains", "alice"),
     where("visibleToUids", "array-contains", "alice")
   );
   const bobQuery = query(
     collection(db("bob"), "chats"),
-    where("members", "array-contains", "bob"),
     where("visibleToUids", "array-contains", "bob")
   );
   await assertSucceeds(getDocs(aliceQuery));
