@@ -170,6 +170,36 @@ test("group creation requires at least three members", async () => {
   }));
 });
 
+test("group membership changes keep the visible user index synchronized", async () => {
+  await seed("chats/group-members", {
+    members: ["alice", "bob", "carol"],
+    memberNames: { alice: "Alice", bob: "Bob", carol: "Carol" },
+    isGroup: true,
+    groupName: "Friends",
+    groupAdmins: ["alice"],
+    createdBy: "alice",
+    createdAt: Date.now(),
+    lastMessage: "Group created",
+    lastMessageAt: Date.now(),
+    updatedAt: Date.now(),
+    visibleToUids: ["alice", "bob", "carol"]
+  });
+
+  await assertSucceeds(updateDoc(doc(db("alice"), "chats/group-members"), {
+    members: ["alice", "bob", "carol", "dave"],
+    visibleToUids: ["alice", "bob", "carol", "dave"],
+    memberNames: { alice: "Alice", bob: "Bob", carol: "Carol", dave: "Dave" },
+    updatedAt: Date.now()
+  }));
+
+  // A regular member can leave only while the group remains at least three members.
+  await assertSucceeds(updateDoc(doc(db("bob"), "chats/group-members"), {
+    members: ["alice", "carol", "dave"],
+    visibleToUids: ["alice", "carol", "dave"],
+    updatedAt: Date.now()
+  }));
+});
+
 test("secret-locked chat previews are excluded by the per-user server index", async () => {
   await seed("users/alice/secretChatLock/config", {
     passwordHash: "not-a-real-hash",
