@@ -41,7 +41,6 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.ui.input.pointer.awaitFirstDown
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.ui.input.pointer.pointerInput
@@ -3813,7 +3812,8 @@ fun ConversationScreen(
                     .pointerInput(isUploading, isSending, text) {
                         if (!isUploading && !isSending && text.isBlank()) {
                             awaitEachGesture {
-                                val down = awaitFirstDown(requireUnconsumed = false)
+                                val firstEvent = awaitPointerEvent()
+                                val down = firstEvent.changes.firstOrNull { it.pressed } ?: return@awaitEachGesture
                                 if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                                     voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                     return@awaitEachGesture
