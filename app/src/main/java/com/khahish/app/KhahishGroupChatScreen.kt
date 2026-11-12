@@ -167,7 +167,8 @@ fun KhahishGroupChatScreen(
                     "lastMessageAt" to now,
                     "updatedAt" to now,
                     "disappearingDurationMs" to 0L
-                ) + members.associate { memberUid -> "secretLockedFor_$memberUid" to false }
+                    "visibleToUids" to members
+                )
                 chatRef.set(data)
                     .addOnSuccessListener {
                         creating = false
