@@ -4045,6 +4045,7 @@ fun ConversationScreen(
                                 TextButton(onClick = {
                                     chatRef.update(
                                         "members", FieldValue.arrayUnion(candidate.uid),
+                                        "visibleToUids", FieldValue.arrayUnion(candidate.uid),
                                         "memberNames.${candidate.uid}", candidate.name.ifBlank { "Khahish User" }
                                     ).addOnSuccessListener {
                                         groupMemberSearch = ""
@@ -4133,6 +4134,7 @@ fun ConversationScreen(
                                 TextButton(onClick = {
                                     chatRef.update(
                                         "members", FieldValue.arrayRemove(memberUid),
+                                        "visibleToUids", FieldValue.arrayRemove(memberUid),
                                         "groupAdmins", FieldValue.arrayRemove(memberUid),
                                         "memberNames.$memberUid", FieldValue.delete()
                                     ).addOnSuccessListener { showToast(context, "Participant removed") }
@@ -4145,6 +4147,7 @@ fun ConversationScreen(
                     TextButton(enabled = canLeave, onClick = {
                         chatRef.update(
                             "members", FieldValue.arrayRemove(currentUserId),
+                            "visibleToUids", FieldValue.arrayRemove(currentUserId),
                             "groupAdmins", FieldValue.arrayRemove(currentUserId),
                             "memberNames.$currentUserId", FieldValue.delete()
                         ).addOnSuccessListener { showGroupInfo = false; onBack() }
