@@ -40,6 +40,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.ui.input.pointer.awaitFirstDown
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.ui.input.pointer.pointerInput
@@ -3808,64 +3810,66 @@ fun ConversationScreen(
                         if (voiceCancelGesture) MaterialTheme.colorScheme.error else Green,
                         CircleShape
                     )
-                    .pointerInput(isUploading, isSending, text, isRecordingVoice) {
-                        if (!isUploading && !isSending) {
-                            detectDragGestures(
-                                onDragStart = {
-                                    if (text.isBlank() &&
-                                        ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-                                    ) {
-                                        voiceDragOffset = 0f
-                                        voiceCancelGesture = false
-                                        startVoiceRecording()
-                                    }
-                                },
-                                onDrag = { change, dragAmount ->
-                                    if (isRecordingVoice) {
-                                        change.consume()
-                                        voiceDragOffset = (voiceDragOffset + dragAmount.x).coerceIn(-140f, 20f)
-                                        voiceCancelGesture = voiceDragOffset <= -85f
-                                    }
-                                },
-                                onDragEnd = {
-                                    if (isRecordingVoice) {
-                                        if (voiceCancelGesture) cancelVoiceRecording()
-                                        else stopVoiceRecordingAndSend()
-                                    }
-                                    voiceDragOffset = 0f
-                                    voiceCancelGesture = false
-                                },
-                                onDragCancel = {
-                                    if (isRecordingVoice) cancelVoiceRecording()
-                                    voiceDragOffset = 0f
-                                    voiceCancelGesture = false
+                    .pointerInput(isUploading, isSending, text) {
+                        if (!isUploading && !isSending && text.isBlank()) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                                    voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                    return@awaitEachGesture
                                 }
-                            )
+
+                                voiceDragOffset = 0f
+                                voiceCancelGesture = false
+                                startVoiceRecording()
+                                var releasedNormally = false
+
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                    if (change.pressed) {
+                                        val horizontalDelta = change.position.x - change.previousPosition.x
+                                        if (isRecordingVoice) {
+                                            voiceDragOffset = (voiceDragOffset + horizontalDelta).coerceIn(-140f, 20f)
+                                            voiceCancelGesture = voiceDragOffset <= -85f
+                                        }
+                                        change.consume()
+                                    } else {
+                                        change.consume()
+                                        releasedNormally = true
+                                        if (isRecordingVoice) {
+                                            if (voiceCancelGesture) cancelVoiceRecording()
+                                            else stopVoiceRecordingAndSend()
+                                        }
+                                        break
+                                    }
+                                }
+
+                                if (!releasedNormally && isRecordingVoice) cancelVoiceRecording()
+                                voiceDragOffset = 0f
+                                voiceCancelGesture = false
+                            }
                         }
                     }
                     .pointerInput(isUploading, isSending, text) {
                         detectTapGestures {
-                            if (isUploading || isSending) return@detectTapGestures
-                            if (text.isNotBlank()) {
-                                val message = text.trim()
-                                text = ""
-                                updateTyping(false)
-                                isSending = true
-                                sendChatMessage(
-                                    chatRef,
-                                    currentUserId,
-                                    message,
-                                    "",
-                                    "text",
-                                    context,
-                                    replyToMessageId = replyTarget?.id.orEmpty(),
-                                    replyToText = replyTarget?.text?.ifBlank { replyTarget?.mediaType ?: "Media" }.orEmpty()
-                                ) {
-                                    isSending = false
-                                    replyTarget = null
-                                }
-                            } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                                voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            if (isUploading || isSending || text.isBlank()) return@detectTapGestures
+                            val message = text.trim()
+                            text = ""
+                            updateTyping(false)
+                            isSending = true
+                            sendChatMessage(
+                                chatRef,
+                                currentUserId,
+                                message,
+                                "",
+                                "text",
+                                context,
+                                replyToMessageId = replyTarget?.id.orEmpty(),
+                                replyToText = replyTarget?.text?.ifBlank { replyTarget?.mediaType ?: "Media" }.orEmpty()
+                            ) {
+                                isSending = false
+                                replyTarget = null
                             }
                         }
                     },
