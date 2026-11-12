@@ -294,6 +294,8 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         appInForeground = false
         updateKhahishPresence(presenceUid, false)
+        // Revoke the server-side Secret Locked Chats session as soon as the app leaves foreground.
+        KhahishSecretChatApi.lock()
         super.onStop()
     }
 
