@@ -667,23 +667,27 @@ test("only group admins can add members, while ordinary members can leave", asyn
     createdAt: Date.now(),
     lastMessage: "",
     lastMessageAt: 0,
-    updatedAt: Date.now()
+    updatedAt: Date.now(),
+    visibleToUids: ["alice", "bob", "carol"]
   });
 
   await assertSucceeds(updateDoc(doc(db("alice"), "chats/group-admin-test"), {
     members: arrayUnion("dave"),
+    visibleToUids: arrayUnion("dave"),
     "memberNames.dave": "Dave",
     updatedAt: Date.now()
   }));
 
   await assertFails(updateDoc(doc(db("bob"), "chats/group-admin-test"), {
     members: arrayUnion("erin"),
+    visibleToUids: arrayUnion("erin"),
     "memberNames.erin": "Erin",
     updatedAt: Date.now()
   }));
 
   await assertSucceeds(updateDoc(doc(db("bob"), "chats/group-admin-test"), {
     members: ["alice", "carol", "dave"],
+    visibleToUids: ["alice", "carol", "dave"],
     updatedAt: Date.now()
   }));
 
