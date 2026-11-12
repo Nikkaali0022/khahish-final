@@ -434,10 +434,15 @@ service cloud.firestore {
             resource.data.get('isGroup', false) == true
             && request.auth.uid in resource.data.get('groupAdmins', [])
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-              'members', 'memberNames', 'groupAdmins', 'groupName', 'updatedAt'
+              'members', 'memberNames', 'groupAdmins', 'groupName', 'updatedAt',
+              'visibleToUids'
             ])
             && request.resource.data.members is list
             && request.resource.data.members.size() >= 3
+            && request.resource.data.visibleToUids is list
+            && request.resource.data.visibleToUids.size() == request.resource.data.members.size()
+            && request.resource.data.members.hasAll(request.resource.data.visibleToUids)
+            && request.resource.data.visibleToUids.hasAll(request.resource.data.members)
             && request.resource.data.groupAdmins is list
             && request.auth.uid in request.resource.data.groupAdmins
             && request.resource.data.members.hasAll(request.resource.data.groupAdmins)
@@ -458,8 +463,12 @@ service cloud.firestore {
             && !(request.auth.uid in resource.data.get('groupAdmins', []))
             && request.resource.data.groupAdmins == resource.data.get('groupAdmins', [])
             && request.resource.data.memberNames == resource.data.memberNames
+            && request.resource.data.visibleToUids is list
+            && request.resource.data.visibleToUids.size() == request.resource.data.members.size()
+            && request.resource.data.members.hasAll(request.resource.data.visibleToUids)
+            && request.resource.data.visibleToUids.hasAll(request.resource.data.members)
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-              'members', 'updatedAt'
+              'members', 'updatedAt', 'visibleToUids'
             ])
             && request.resource.data.updatedAt is int
           )
