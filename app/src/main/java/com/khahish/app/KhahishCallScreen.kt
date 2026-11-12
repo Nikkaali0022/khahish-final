@@ -9,6 +9,10 @@ import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.media.projection.MediaProjectionManager
 import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.ResultReceiver
 import android.os.PowerManager
 import android.view.SurfaceView
 import androidx.activity.compose.BackHandler
@@ -159,23 +163,40 @@ fun KhahishCallScreen(
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK && result.data != null) {
             try {
-                val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-                val projection = projectionManager.getMediaProjection(result.resultCode, result.data!!)
-                val startResult = session?.startScreenShare(projection) ?: -1
-                if (startResult == 0) {
-                    isScreenSharing = true
-                    errorText = ""
-                } else {
-                    try { projection.stop() } catch (_: Exception) { }
-                    context.stopService(Intent(context, KhahishScreenShareService::class.java))
-                    errorText = "Could not start screen sharing (Agora code $startResult)."
+                val permissionData = result.data!!
+                val readyReceiver = object : ResultReceiver(Handler(Looper.getMainLooper())) {
+                    override fun onReceiveResult(code: Int, data: Bundle?) {
+                        if (code != Activity.RESULT_OK) {
+                            context.stopService(Intent(context, KhahishScreenShareService::class.java))
+                            errorText = "Screen sharing service could not start."
+                            return
+                        }
+                        try {
+                            val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                            val projection = projectionManager.getMediaProjection(result.resultCode, permissionData)
+                            val startResult = session?.startScreenShare(projection) ?: -1
+                            if (startResult == 0) {
+                                isScreenSharing = true
+                                errorText = ""
+                            } else {
+                                try { projection.stop() } catch (_: Exception) { }
+                                context.stopService(Intent(context, KhahishScreenShareService::class.java))
+                                errorText = "Could not start screen sharing (Agora code $startResult)."
+                            }
+                        } catch (error: Exception) {
+                            context.stopService(Intent(context, KhahishScreenShareService::class.java))
+                            errorText = "Screen sharing could not start: " + (error.message ?: "Permission or device error.")
+                        }
+                    }
                 }
+                val serviceIntent = Intent(context, KhahishScreenShareService::class.java).apply {
+                    putExtra(KhahishScreenShareService.EXTRA_READY_RECEIVER, readyReceiver)
+                }
+                ContextCompat.startForegroundService(context, serviceIntent)
             } catch (error: Exception) {
                 context.stopService(Intent(context, KhahishScreenShareService::class.java))
-                errorText = "Screen sharing could not start: " + (error.message ?: "Permission or device error.")
+                errorText = "Could not start screen sharing: " + (error.message ?: "Unknown error.")
             }
-        } else {
-            context.stopService(Intent(context, KhahishScreenShareService::class.java))
         }
     }
 
@@ -191,12 +212,10 @@ fun KhahishCallScreen(
             if (stopResult < 0) errorText = "Screen sharing stopped with Agora code $stopResult."
         } else {
             try {
-                val serviceIntent = Intent(context, KhahishScreenShareService::class.java)
-                ContextCompat.startForegroundService(context, serviceIntent)
                 val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                // Android 14+ requires consent before the mediaProjection foreground service is created.
                 screenShareLauncher.launch(projectionManager.createScreenCaptureIntent())
             } catch (error: Exception) {
-                context.stopService(Intent(context, KhahishScreenShareService::class.java))
                 errorText = "Could not request screen sharing: " + (error.message ?: "Unknown error.")
             }
         }
