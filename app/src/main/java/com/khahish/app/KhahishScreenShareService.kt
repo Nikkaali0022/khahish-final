@@ -8,6 +8,8 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.Bundle
+import android.os.ResultReceiver
 import androidx.core.app.NotificationCompat
 
 /**
@@ -51,12 +53,18 @@ class KhahishScreenShareService : Service() {
         }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int =
-        START_NOT_STICKY
+    @Suppress("DEPRECATION")
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val receiver = intent?.getParcelableExtra(EXTRA_READY_RECEIVER) as? ResultReceiver
+        // onCreate() has already promoted this service to the mediaProjection foreground type.
+        receiver?.send(RESULT_OK, Bundle())
+        return START_NOT_STICKY
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
+        const val EXTRA_READY_RECEIVER = "com.khahish.app.EXTRA_SCREEN_SHARE_READY_RECEIVER"
         private const val CHANNEL_ID = "khahish_screen_share_service"
         private const val NOTIFICATION_ID = 7412
     }
