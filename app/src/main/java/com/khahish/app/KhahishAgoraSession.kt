@@ -3,8 +3,10 @@ package com.khahish.app
 import android.content.Context
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.media.projection.MediaProjection
 import android.os.Build
 import io.agora.rtc2.ChannelMediaOptions
+import io.agora.rtc2.ScreenCaptureParameters
 import io.agora.rtc2.Constants
 import io.agora.rtc2.IRtcEngineEventHandler
 import io.agora.rtc2.RtcEngine
@@ -29,10 +31,13 @@ class KhahishAgoraSession(
     private val appContext = context.applicationContext
     private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     @Volatile private var released = false
+    @Volatile private var joined = false
+    @Volatile private var screenSharing = false
     private var engine: RtcEngine? = null
 
     private val eventHandler = object : IRtcEngineEventHandler() {
         override fun onJoinChannelSuccess(channel: String?, uid: Int, elapsed: Int) {
+            joined = true
             onJoined()
         }
 
@@ -134,6 +139,81 @@ class KhahishAgoraSession(
         )
     }
 
+    /**
+     * Starts an Android screen-capture stream in the existing call.
+     * The MediaProjection permission must be granted by the system UI first.
+     */
+    fun startScreenShare(projection: MediaProjection): Int {
+        val rtc = engine ?: return -1
+        if (released || !joined) return -2
+        if (screenSharing) return 0
+
+        return try {
+            rtc.enableVideo()
+            rtc.setExternalMediaProjection(projection)
+            val parameters = ScreenCaptureParameters().apply {
+                captureVideo = true
+                captureAudio = false
+                videoCaptureParameters.width = 720
+                videoCaptureParameters.height = 1280
+                videoCaptureParameters.framerate = 15
+            }
+            val startResult = rtc.startScreenCapture(parameters)
+            if (startResult < 0) {
+                rtc.setExternalMediaProjection(null)
+                return startResult
+            }
+
+            val options = ChannelMediaOptions().apply {
+                channelProfile = Constants.CHANNEL_PROFILE_COMMUNICATION
+                clientRoleType = Constants.CLIENT_ROLE_BROADCASTER
+                publishMicrophoneTrack = true
+                publishCameraTrack = false
+                publishScreenCaptureVideo = true
+                publishScreenCaptureAudio = false
+                autoSubscribeAudio = true
+                autoSubscribeVideo = true
+            }
+            val updateResult = rtc.updateChannelMediaOptions(options)
+            if (updateResult < 0) {
+                rtc.stopScreenCapture()
+                rtc.setExternalMediaProjection(null)
+                return updateResult
+            }
+            screenSharing = true
+            0
+        } catch (error: Exception) {
+            try { rtc.stopScreenCapture() } catch (_: Exception) { }
+            try { rtc.setExternalMediaProjection(null) } catch (_: Exception) { }
+            -3
+        }
+    }
+
+    fun stopScreenShare(): Int {
+        val rtc = engine ?: return -1
+        if (!screenSharing) return 0
+        return try {
+            val stopResult = rtc.stopScreenCapture()
+            val options = ChannelMediaOptions().apply {
+                channelProfile = Constants.CHANNEL_PROFILE_COMMUNICATION
+                clientRoleType = Constants.CLIENT_ROLE_BROADCASTER
+                publishMicrophoneTrack = true
+                publishCameraTrack = isVideoCall
+                publishScreenCaptureVideo = false
+                publishScreenCaptureAudio = false
+                autoSubscribeAudio = true
+                autoSubscribeVideo = true
+            }
+            val updateResult = rtc.updateChannelMediaOptions(options)
+            rtc.setExternalMediaProjection(null)
+            screenSharing = false
+            if (stopResult < 0) stopResult else updateResult
+        } catch (_: Exception) {
+            screenSharing = false
+            -3
+        }
+    }
+
     fun setMicrophoneMuted(muted: Boolean) {
         engine?.muteLocalAudioStream(muted)
     }
@@ -207,6 +287,8 @@ class KhahishAgoraSession(
         if (released) return
         released = true
         try {
+            if (screenSharing) engine?.stopScreenCapture()
+            screenSharing = false
             engine?.leaveChannel()
         } catch (_: Exception) {
         }
