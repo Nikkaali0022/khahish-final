@@ -33,6 +33,7 @@ class KhahishAgoraSession(
     @Volatile private var released = false
     @Volatile private var joined = false
     @Volatile private var screenSharing = false
+    @Volatile private var cameraEnabled = true
     private var engine: RtcEngine? = null
 
     private val eventHandler = object : IRtcEngineEventHandler() {
@@ -198,7 +199,7 @@ class KhahishAgoraSession(
                 channelProfile = Constants.CHANNEL_PROFILE_COMMUNICATION
                 clientRoleType = Constants.CLIENT_ROLE_BROADCASTER
                 publishMicrophoneTrack = true
-                publishCameraTrack = isVideoCall
+                publishCameraTrack = isVideoCall && cameraEnabled
                 publishScreenCaptureVideo = false
                 publishScreenCaptureAudio = false
                 autoSubscribeAudio = true
@@ -206,6 +207,7 @@ class KhahishAgoraSession(
             }
             val updateResult = rtc.updateChannelMediaOptions(options)
             rtc.setExternalMediaProjection(null)
+            if (!isVideoCall) rtc.disableVideo()
             screenSharing = false
             if (stopResult < 0) stopResult else updateResult
         } catch (_: Exception) {
@@ -219,6 +221,7 @@ class KhahishAgoraSession(
     }
 
     fun setCameraEnabled(enabled: Boolean) {
+        cameraEnabled = enabled
         if (isVideoCall && !released) {
             if (enabled) {
                 engine?.enableVideo()
