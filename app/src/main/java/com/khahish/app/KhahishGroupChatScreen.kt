@@ -166,7 +166,7 @@ fun KhahishGroupChatScreen(
                     "lastMessage" to "Group created",
                     "lastMessageAt" to now,
                     "updatedAt" to now,
-                    "disappearingDurationMs" to 0L
+                    "disappearingDurationMs" to 0L,
                     "visibleToUids" to members
                 )
                 chatRef.set(data)
