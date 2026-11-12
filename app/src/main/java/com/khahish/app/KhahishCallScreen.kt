@@ -1,10 +1,13 @@
 package com.khahish.app
 
 import android.Manifest
+import android.app.Activity
+import android.content.Intent
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.PowerManager
 import android.view.SurfaceView
@@ -72,6 +75,7 @@ fun KhahishCallScreen(
     var audioRouteMenuExpanded by remember(call.id) { mutableStateOf(false) }
     var callOptionsExpanded by remember(call.id) { mutableStateOf(false) }
     var callOptionMessage by remember(call.id) { mutableStateOf("") }
+    var isScreenSharing by remember(call.id) { mutableStateOf(false) }
     var credentials by remember(call.id) { mutableStateOf<AgoraRtcCredentials?>(null) }
     var session by remember(call.id) { mutableStateOf<KhahishAgoraSession?>(null) }
     var connectionStarted by remember(call.id) { mutableStateOf(false) }
@@ -150,6 +154,54 @@ fun KhahishCallScreen(
         }
     }
 
+    val screenShareLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+            try {
+                val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                val projection = projectionManager.getMediaProjection(result.resultCode, result.data!!)
+                val startResult = session?.startScreenShare(projection) ?: -1
+                if (startResult == 0) {
+                    isScreenSharing = true
+                    errorText = ""
+                } else {
+                    try { projection.stop() } catch (_: Exception) { }
+                    context.stopService(Intent(context, KhahishScreenShareService::class.java))
+                    errorText = "Could not start screen sharing (Agora code $startResult)."
+                }
+            } catch (error: Exception) {
+                context.stopService(Intent(context, KhahishScreenShareService::class.java))
+                errorText = "Screen sharing could not start: " + (error.message ?: "Permission or device error.")
+            }
+        } else {
+            context.stopService(Intent(context, KhahishScreenShareService::class.java))
+        }
+    }
+
+    fun toggleScreenSharing() {
+        if (!isJoined || session == null) {
+            callOptionMessage = "Connect the call before starting screen sharing."
+            return
+        }
+        if (isScreenSharing) {
+            val stopResult = session?.stopScreenShare() ?: -1
+            isScreenSharing = false
+            context.stopService(Intent(context, KhahishScreenShareService::class.java))
+            if (stopResult < 0) errorText = "Screen sharing stopped with Agora code $stopResult."
+        } else {
+            try {
+                val serviceIntent = Intent(context, KhahishScreenShareService::class.java)
+                ContextCompat.startForegroundService(context, serviceIntent)
+                val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                screenShareLauncher.launch(projectionManager.createScreenCaptureIntent())
+            } catch (error: Exception) {
+                context.stopService(Intent(context, KhahishScreenShareService::class.java))
+                errorText = "Could not request screen sharing: " + (error.message ?: "Unknown error.")
+            }
+        }
+    }
+
     fun connectIfAllowed() {
         if (connectionStarted) return
         connectionStarted = true
@@ -194,6 +246,7 @@ fun KhahishCallScreen(
         onDispose {
             registration.remove()
             latestSession?.leave()
+            context.stopService(Intent(context, KhahishScreenShareService::class.java))
         }
     }
 
@@ -232,6 +285,7 @@ fun KhahishCallScreen(
     BackHandler(enabled = true) {
         repository.endCall(call.id) { errorText = it }
         session?.leave()
+        context.stopService(Intent(context, KhahishScreenShareService::class.java))
         onExit()
     }
 
@@ -283,9 +337,9 @@ fun KhahishCallScreen(
                     Icon(Icons.Default.MoreVert, contentDescription = "More call options", tint = colors.onSurface)
                 }
                 DropdownMenu(expanded = callOptionsExpanded, onDismissRequest = { callOptionsExpanded = false }) {
-                    DropdownMenuItem(text = { Text("Screen Share") }, onClick = {
+                    DropdownMenuItem(text = { Text(if (isScreenSharing) "Stop Screen Share" else "Share Screen") }, onClick = {
                         callOptionsExpanded = false
-                        callOptionMessage = "Screen sharing needs Android screen-capture permission and a published screen-sharing stream."
+                        toggleScreenSharing()
                     })
                     DropdownMenuItem(text = { Text("Add Participant") }, onClick = {
                         callOptionsExpanded = false
@@ -369,7 +423,7 @@ fun KhahishCallScreen(
             Text(statusText, color = colors.onSurfaceVariant, fontSize = 15.sp)
         }
 
-        if (call.isVideo && credentials != null) {
+        if ((call.isVideo || remoteUid != null) && credentials != null) {
             Spacer(Modifier.height(18.dp))
             Box(
                 modifier = Modifier
@@ -394,7 +448,7 @@ fun KhahishCallScreen(
                         Text("Waiting for the other person's video…", color = Color.White, textAlign = TextAlign.Center)
                     }
                 }
-                Surface(
+                if (call.isVideo && !isScreenSharing) Surface(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(12.dp)
