@@ -2,11 +2,14 @@ package com.khahish.app
 
 import android.content.Context
 import android.content.Intent
+import android.os.Build
+import android.app.NotificationManager
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
@@ -22,6 +25,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -65,6 +72,7 @@ fun KhahishSettingsScreen(
     var savingProfile by remember { mutableStateOf(false) }
     var showBlocked by remember { mutableStateOf(false) }
     var showPrivacy by remember { mutableStateOf(false) }
+    var showLockChatPasswordDialog by remember { mutableStateOf(false) }
     var showAppearance by remember { mutableStateOf(false) }
     var showStorage by remember { mutableStateOf(false) }
     var showSupport by remember { mutableStateOf(false) }
@@ -167,14 +175,99 @@ fun KhahishSettingsScreen(
     }
 
     Column(
-        modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
-            .verticalScroll(rememberScrollState()).padding(16.dp)
+        modifier.fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color(0xFFF2FFFA), Color(0xFFF8FFFC), Color(0xFFEFFFF8))
+                )
+            )
+            .verticalScroll(rememberScrollState())
     ) {
-        Text("Settings", color = MaterialTheme.colorScheme.onSurface, fontSize = 25.sp, fontWeight = FontWeight.Bold)
-        Text("Manage your Khahish account and app experience", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-        Spacer(Modifier.height(18.dp))
+        // Premium emerald header with the circular Khahish mark.
+        Box(
+            Modifier.fillMaxWidth()
+                .background(
+                    Brush.linearGradient(listOf(Color(0xFF087F68), Color(0xFF05A77D), Color(0xFF18A889))),
+                    RoundedCornerShape(bottomStart = 34.dp, bottomEnd = 34.dp)
+                )
+                .padding(start = 22.dp, end = 22.dp, top = 24.dp, bottom = 30.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(76.dp)
+                        .background(Color(0xFF075C4E), CircleShape)
+                        .padding(4.dp)
+                        .background(Color(0xFF18A889), CircleShape)
+                        .padding(3.dp)
+                        .background(Color(0xFF073F38), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("K", color = Color.White, fontSize = 48.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.SansSerif)
+                }
+                Spacer(Modifier.width(17.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Settings", color = Color.White, fontSize = 29.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("Manage your account & preferences", color = Color(0xFFE0FFF3), fontSize = 12.sp)
+                }
+                Icon(Icons.Default.Tune, contentDescription = "Settings", tint = Color.White, modifier = Modifier.size(25.dp))
+            }
+        }
 
-        KhahishSettingsGroup("ACCOUNT") {
+        // Account identity card; tapping it opens the existing Edit Profile flow.
+        Row(
+            Modifier.fillMaxWidth()
+                .padding(horizontal = 18.dp)
+                .offset(y = (-18).dp)
+                .background(
+                    Brush.linearGradient(listOf(Color.White, Color(0xFFF1FFF9))),
+                    RoundedCornerShape(26.dp)
+                )
+                .clickable { showEditProfile = true }
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(contentAlignment = Alignment.BottomEnd) {
+                if (profilePhotoUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = profilePhotoUrl,
+                        contentDescription = "Profile picture",
+                        modifier = Modifier.size(82.dp).clip(CircleShape)
+                            .background(Color(0xFFD9F8EB))
+                            .padding(3.dp).clip(CircleShape),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Box(
+                        Modifier.size(82.dp).background(Color(0xFF18A889), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Person, null, tint = Color.White, modifier = Modifier.size(44.dp))
+                    }
+                }
+                Box(
+                    Modifier.size(20.dp).background(Color(0xFF05B86E), CircleShape)
+                        .padding(3.dp).background(Color.White, CircleShape)
+                )
+            }
+            Spacer(Modifier.width(15.dp))
+            Column(Modifier.weight(1f)) {
+                Text(editName.ifBlank { user?.displayName ?: "Khahish User" }, color = Color(0xFF172B3A), fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    if (editUsername.isNotBlank()) "@$editUsername" else user?.email.orEmpty(),
+                    color = Color(0xFF526779), fontSize = 13.sp
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(8.dp).background(Color(0xFF05B86E), CircleShape))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Online", color = Color(0xFF145B4A), fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+            Icon(Icons.Default.ChevronRight, null, tint = Color(0xFF31495A), modifier = Modifier.size(28.dp))
+        }
+        Spacer(Modifier.height(0.dp))
+        Column(Modifier.padding(horizontal = 16.dp)) {
+
+        KhahishSettingsGroup("ACCOUNT SETTINGS") {
             KhahishSettingsItem(Icons.Default.Person, "Account information", user?.email ?: "Email unavailable") {
                 Toast.makeText(context, user?.email ?: "Account information unavailable", Toast.LENGTH_LONG).show()
             }
@@ -209,6 +302,9 @@ fun KhahishSettingsScreen(
         KhahishSettingsGroup("PRIVACY & SECURITY") {
             KhahishSettingsItem(Icons.Default.Security, "Privacy controls", "Manage privacy preferences") {
                 showPrivacy = !showPrivacy
+            }
+            KhahishSettingsItem(Icons.Default.Lock, "Lock Chat Passwords", "Create or change your secret Locked Chats password") {
+                showLockChatPasswordDialog = true
             }
             if (showPrivacy) {
                 KhahishSettingsSwitch(
@@ -265,7 +361,7 @@ fun KhahishSettingsScreen(
         }
 
         Spacer(Modifier.height(14.dp))
-        KhahishSettingsGroup("CHAT & APPEARANCE") {
+        KhahishSettingsGroup("NOTIFICATIONS & APPEARANCE") {
             var themeMenuExpanded by remember { mutableStateOf(false) }
             KhahishSettingsItem(
                 Icons.Default.DarkMode,
@@ -316,19 +412,39 @@ fun KhahishSettingsScreen(
                     Toast.makeText(context, "Unable to open notification settings", Toast.LENGTH_SHORT).show()
                 }
             }
+            if (Build.VERSION.SDK_INT >= 34) {
+                KhahishSettingsItem(Icons.Default.Call, "Full-screen call alerts", "Allow incoming calls to appear over the lock screen") {
+                    try {
+                        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                        if (!notificationManager.canUseFullScreenIntent()) {
+                            context.startActivity(
+                                Intent(android.provider.Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
+                                    data = Uri.parse("package:${context.packageName}")
+                                }
+                            )
+                        } else {
+                            context.startActivity(Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+                            })
+                        }
+                    } catch (_: Exception) {
+                        Toast.makeText(context, "Unable to open full-screen call settings", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
             KhahishSettingsItem(Icons.Default.Storage, "Storage and media", "Manage downloads and clear temporary cache") {
                 showStorage = true
             }
         }
 
         Spacer(Modifier.height(14.dp))
-        KhahishSettingsGroup("ADVANCED FEATURES") {
+        KhahishSettingsGroup("MORE SETTINGS") {
             KhahishSettingsItem(Icons.Default.Tune, "Advanced settings", "Accessibility, account controls, trusted devices, privacy and data tools") {
                 showAdvanced = true
             }
         }
 
-        KhahishSettingsGroup("HELP & ABOUT") {
+        KhahishSettingsGroup("SUPPORT & MORE") {
             KhahishSettingsItem(Icons.Default.Help, "Help and support", "Contact and support information") {
                 showSupport = true
             }
@@ -348,15 +464,81 @@ fun KhahishSettingsScreen(
             Text("Log out")
         }
         Spacer(Modifier.height(12.dp))
-        Text(
-            "Developed by Nikka Ali",
-            modifier = Modifier.fillMaxWidth().padding(bottom = 18.dp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 12.sp,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            fontWeight = FontWeight.Medium
-        )
+        // Signature-style Khahish developer credit footer.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(158.dp)
+                .background(
+                    brush = Brush.linearGradient(
+                        colors = listOf(Color(0xFFD7FFF0), Color(0xFFF5FFFB), Color(0xFFB8F3DE))
+                    ),
+                    shape = RoundedCornerShape(28.dp)
+                )
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            // Soft emerald wave accents along the lower edge.
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(34.dp)
+                    .align(Alignment.BottomCenter)
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(Color(0xFF18A889), Color(0xFF70E3C1), Color(0xFF087F68))
+                        ),
+                        RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp, bottomStart = 18.dp, bottomEnd = 18.dp)
+                    )
+            )
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Box(Modifier.width(42.dp).height(2.dp).background(Color(0xFF159B7C)))
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        "Developed by",
+                        color = Color(0xFF152B35),
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Box(Modifier.width(42.dp).height(2.dp).background(Color(0xFF159B7C)))
+                }
+                Text("👑", fontSize = 25.sp, modifier = Modifier.padding(top = 1.dp))
+                Text(
+                    "Nikka Ali",
+                    color = Color(0xFF073F38),
+                    fontSize = 31.sp,
+                    fontFamily = FontFamily.Cursive,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 0.dp)
+                )
+                Text(
+                    "♥     Khahish  •  Connect  •  Share  •  Together     ♥",
+                    color = Color(0xFF087F68),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 3.dp)
+                )
+            }
+        }
         Spacer(Modifier.height(28.dp))
+        }
+    }
+
+    if (showLockChatPasswordDialog) {
+        LockChatPasswordSettingsDialog(uid) { showLockChatPasswordDialog = false }
     }
 
     if (showSupport) {
@@ -513,10 +695,33 @@ private fun KhahishSettingsGroup(
     title: String,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp)).padding(14.dp)) {
-        Text(title, color = Green, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-        Spacer(Modifier.height(8.dp))
-        content()
+    val sectionIcon = when {
+        title.contains("ACCOUNT") -> Icons.Default.Person
+        title.contains("PRIVACY") -> Icons.Default.Security
+        title.contains("APPEARANCE") -> Icons.Default.Notifications
+        title.contains("MORE") || title.contains("SUPPORT") -> Icons.Default.SupportAgent
+        else -> Icons.Default.Tune
+    }
+    Column(
+        Modifier.fillMaxWidth()
+            .padding(bottom = 16.dp)
+            .background(Color(0xFFE8FFF5), RoundedCornerShape(27.dp))
+            .padding(top = 10.dp, start = 10.dp, end = 10.dp, bottom = 9.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 5.dp, bottom = 8.dp)) {
+            Box(Modifier.size(38.dp).background(Color(0xFFBDF8E1), CircleShape), contentAlignment = Alignment.Center) {
+                Icon(sectionIcon, null, tint = Color(0xFF087F68), modifier = Modifier.size(22.dp))
+            }
+            Spacer(Modifier.width(10.dp))
+            Text(title, color = Color(0xFF103F36), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Spacer(Modifier.width(10.dp))
+            Box(Modifier.weight(1f).height(1.dp).background(Color(0xFFB9EBDD)))
+        }
+        Column(
+            Modifier.fillMaxWidth()
+                .background(Color.White, RoundedCornerShape(24.dp))
+                .padding(horizontal = 15.dp, vertical = 5.dp)
+        ) { content() }
     }
 }
 
@@ -531,13 +736,18 @@ private fun KhahishSettingsItem(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, null, tint = Green, modifier = Modifier.size(23.dp))
+        Box(
+            Modifier.size(43.dp).background(Color(0xFFE8FFF5), CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, null, tint = Color(0xFF079B70), modifier = Modifier.size(23.dp))
+        }
         Spacer(Modifier.width(13.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
-            Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+            Text(title, color = Color(0xFF172B3A), fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text(subtitle, color = Color(0xFF607386), fontSize = 11.sp)
         }
-        Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Icon(Icons.Default.ChevronRight, null, tint = Color(0xFF41586A), modifier = Modifier.size(23.dp))
     }
 }
 

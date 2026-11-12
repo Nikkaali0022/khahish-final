@@ -15,10 +15,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material.icons.filled.VolumeUp
@@ -65,6 +70,7 @@ fun KhahishCallScreen(
     var cameraEnabled by remember(call.id) { mutableStateOf(true) }
     var selectedAudioRoute by remember(call.id) { mutableStateOf(if (call.isVideo) "speaker" else "earpiece") }
     var audioRouteMenuExpanded by remember(call.id) { mutableStateOf(false) }
+    var callOptionsExpanded by remember(call.id) { mutableStateOf(false) }
     var credentials by remember(call.id) { mutableStateOf<AgoraRtcCredentials?>(null) }
     var session by remember(call.id) { mutableStateOf<KhahishAgoraSession?>(null) }
     var connectionStarted by remember(call.id) { mutableStateOf(false) }
@@ -101,7 +107,16 @@ fun KhahishCallScreen(
                     onJoined = { isJoined = true; statusText = "Connected"; errorText = "" },
                     onRemoteUserJoined = { uid -> remoteUid = uid; statusText = "Connected"; errorText = "" },
                     onRemoteUserLeft = { statusText = "The other person left the call" },
-                    onFailure = { message -> statusText = "Connection failed"; errorText = message }
+                    onFailure = { message -> statusText = "Connection failed"; errorText = message },
+                    onTokenRenewalFailure = { message ->
+                        if (isJoined) {
+                            statusText = "Connected"
+                            errorText = "Your call is still connected, but its calling credentials could not be renewed. Check the calling server configuration for longer calls."
+                        } else {
+                            statusText = "Connection failed"
+                            errorText = message
+                        }
+                    }
                 )
                 session = rtc
                 rtc.setAudioRoute(selectedAudioRoute)
@@ -250,13 +265,30 @@ fun KhahishCallScreen(
             .padding(horizontal = 24.dp, vertical = 18.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            if (currentCall.isVideo) "KHAHISH  •  VIDEO CALL" else "KHAHISH  •  VOICE CALL",
-            color = colors.onSurfaceVariant,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold,
-            letterSpacing = 2.sp
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                if (currentCall.isVideo) "KHAHISH  •  VIDEO CALL" else "KHAHISH  •  VOICE CALL",
+                modifier = Modifier.weight(1f),
+                color = colors.onSurfaceVariant,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 2.sp
+            )
+            Box {
+                IconButton(onClick = { callOptionsExpanded = true }) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "More call options", tint = colors.onSurface)
+                }
+                DropdownMenu(expanded = callOptionsExpanded, onDismissRequest = { callOptionsExpanded = false }) {
+                    DropdownMenuItem(text = { Text("Audio Devices") }, onClick = {
+                        callOptionsExpanded = false
+                        audioRouteMenuExpanded = true
+                    })
+                }
+            }
+        }
 
         Spacer(Modifier.height(42.dp))
 
@@ -312,28 +344,47 @@ fun KhahishCallScreen(
             Text(statusText, color = colors.onSurfaceVariant, fontSize = 15.sp)
         }
 
-        if (call.isVideo && credentials != null) {
-            Spacer(Modifier.height(24.dp))
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+        if ((call.isVideo || remoteUid != null) && credentials != null) {
+            Spacer(Modifier.height(18.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 300.dp, max = 430.dp)
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(Color.Black)
             ) {
-                AndroidView(
-                    modifier = Modifier.weight(1f).height(190.dp),
-                    factory = { viewContext ->
-                        SurfaceView(viewContext).also { surface ->
-                            session?.setupLocalVideo(surface)
-                        }
-                    }
-                )
                 if (remoteUid != null) {
+                    key(call.id, remoteUid) {
+                        AndroidView(
+                            modifier = Modifier.fillMaxSize(),
+                            factory = { viewContext ->
+                                SurfaceView(viewContext).also { surface ->
+                                    session?.setupRemoteVideo(surface, remoteUid!!)
+                                }
+                            },
+                        )
+                    }
+                } else {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Waiting for the other person's video…", color = Color.White, textAlign = TextAlign.Center)
+                    }
+                }
+                if (call.isVideo) Surface(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(12.dp)
+                        .width(112.dp)
+                        .height(158.dp)
+                        .border(2.dp, colors.primary, RoundedCornerShape(16.dp)),
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color.DarkGray,
+                    shadowElevation = 8.dp
+                ) {
                     AndroidView(
-                        modifier = Modifier.weight(1f).height(190.dp),
+                        modifier = Modifier.fillMaxSize(),
                         factory = { viewContext ->
-                            SurfaceView(viewContext).also { surface ->
-                                session?.setupRemoteVideo(surface, remoteUid!!)
-                            }
-                        }
+                            SurfaceView(viewContext).also { surface -> session?.setupLocalVideo(surface) }
+                        },
                     )
                 }
             }
@@ -471,6 +522,7 @@ fun KhahishCallScreen(
             ) { Text("Cancel call") }
         }
     }
+
 }
 
 @Composable

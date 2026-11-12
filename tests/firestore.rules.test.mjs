@@ -158,7 +158,8 @@ test("group creation requires at least three members", async () => {
     lastMessage: "Group created",
     lastMessageAt: Date.now(),
     updatedAt: Date.now(),
-    disappearingDurationMs: 0
+    disappearingDurationMs: 0,
+    visibleToUids: ["alice", "bob", "carol"]
   };
   await assertSucceeds(setDoc(doc(db("alice"), "chats/group-three"), group));
 
@@ -166,6 +167,79 @@ test("group creation requires at least three members", async () => {
     ...group,
     members: ["alice", "bob"],
     memberNames: { alice: "Alice", bob: "Bob" }
+  }));
+});
+
+test("group membership changes keep the visible user index synchronized", async () => {
+  await seed("chats/group-members", {
+    members: ["alice", "bob", "carol"],
+    memberNames: { alice: "Alice", bob: "Bob", carol: "Carol" },
+    isGroup: true,
+    groupName: "Friends",
+    groupAdmins: ["alice"],
+    createdBy: "alice",
+    createdAt: Date.now(),
+    lastMessage: "Group created",
+    lastMessageAt: Date.now(),
+    updatedAt: Date.now(),
+    visibleToUids: ["alice", "bob", "carol"]
+  });
+
+  await assertSucceeds(updateDoc(doc(db("alice"), "chats/group-members"), {
+    members: ["alice", "bob", "carol", "dave"],
+    visibleToUids: ["alice", "bob", "carol", "dave"],
+    memberNames: { alice: "Alice", bob: "Bob", carol: "Carol", dave: "Dave" },
+    updatedAt: Date.now()
+  }));
+
+  // A regular member can leave only while the group remains at least three members.
+  await assertSucceeds(updateDoc(doc(db("bob"), "chats/group-members"), {
+    members: ["alice", "carol", "dave"],
+    visibleToUids: ["alice", "carol", "dave"],
+    updatedAt: Date.now()
+  }));
+});
+
+test("secret-locked chat previews are excluded by the per-user server index", async () => {
+  await seed("users/alice/secretChatLock/config", {
+    passwordHash: "not-a-real-hash",
+    lockedContactUids: ["bob"]
+  });
+  await seed("chats/alice_bob", {
+    members: ["alice", "bob"],
+    memberNames: { alice: "Alice", bob: "Bob" },
+    lastMessage: "Private preview",
+    lastMessageAt: Date.now(),
+    updatedAt: Date.now(),
+    visibleToUids: ["bob"]
+  });
+
+  const aliceQuery = query(
+    collection(db("alice"), "chats"),
+    where("visibleToUids", "array-contains", "alice")
+  );
+  const bobQuery = query(
+    collection(db("bob"), "chats"),
+    where("visibleToUids", "array-contains", "bob")
+  );
+  await assertSucceeds(getDocs(aliceQuery));
+  await assertSucceeds(getDocs(bobQuery));
+  const aliceResults = await getDocs(aliceQuery);
+  const bobResults = await getDocs(bobQuery);
+  assert.equal(aliceResults.size, 0);
+  assert.equal(bobResults.size, 1);
+
+  await assertFails(getDoc(doc(db("alice"), "chats/alice_bob")));
+  await assertSucceeds(getDoc(doc(db("bob"), "chats/alice_bob")));
+
+  // The Locked Chats hub uses direct document reads, gated by the server session.
+  await seed("users/alice/secretChatLock/config/sessions/current", {
+    expiresAt: new Date(Date.now() + 10 * 60 * 1000)
+  });
+  await assertSucceeds(getDoc(doc(db("alice"), "chats/alice_bob")));
+
+  await assertFails(updateDoc(doc(db("alice"), "chats/alice_bob"), {
+    visibleToUids: ["alice", "bob"]
   }));
 });
 
@@ -196,7 +270,10 @@ test("private chat is created only in the same batch that accepts its request", 
     updatedAt: now,
     createdAt: now,
     createdBy: "bob",
-    disappearingDurationMs: 0
+    disappearingDurationMs: 0,
+    // A newly created private chat is hidden from both users until the Worker
+    // reads both lock configs and writes the final per-user visibility index.
+    visibleToUids: []
   });
   await assertSucceeds(batch.commit());
 
@@ -208,7 +285,8 @@ test("private chat is created only in the same batch that accepts its request", 
     updatedAt: now,
     createdAt: now,
     createdBy: "alice",
-    disappearingDurationMs: 0
+    disappearingDurationMs: 0,
+    visibleToUids: []
   }));
 });
 
@@ -589,23 +667,27 @@ test("only group admins can add members, while ordinary members can leave", asyn
     createdAt: Date.now(),
     lastMessage: "",
     lastMessageAt: 0,
-    updatedAt: Date.now()
+    updatedAt: Date.now(),
+    visibleToUids: ["alice", "bob", "carol"]
   });
 
   await assertSucceeds(updateDoc(doc(db("alice"), "chats/group-admin-test"), {
     members: arrayUnion("dave"),
+    visibleToUids: arrayUnion("dave"),
     "memberNames.dave": "Dave",
     updatedAt: Date.now()
   }));
 
   await assertFails(updateDoc(doc(db("bob"), "chats/group-admin-test"), {
     members: arrayUnion("erin"),
+    visibleToUids: arrayUnion("erin"),
     "memberNames.erin": "Erin",
     updatedAt: Date.now()
   }));
 
   await assertSucceeds(updateDoc(doc(db("bob"), "chats/group-admin-test"), {
     members: ["alice", "carol", "dave"],
+    visibleToUids: ["alice", "carol", "dave"],
     updatedAt: Date.now()
   }));
 

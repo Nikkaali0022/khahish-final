@@ -6,7 +6,7 @@ concurrency:
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, work/consolidated-nov-2026]
     paths:
       - "firestore.rules"
       - "firestore.indexes.json"
@@ -15,7 +15,7 @@ on:
       - "package.json"
       - ".github/workflows/firestore-rules.yml"
   push:
-    branches: [feature/agora-calling]
+    branches: [feature/agora-calling, work/khahish-consolidated-final]
     paths:
       - "firestore.rules"
       - "firestore.indexes.json"

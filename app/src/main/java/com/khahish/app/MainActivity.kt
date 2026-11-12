@@ -30,12 +30,17 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.ui.input.pointer.pointerInput
@@ -214,6 +219,7 @@ private fun saveUserToFirestore(
         .set(publicData, SetOptions.merge())
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 class MainActivity : ComponentActivity() {
     var pendingNotificationIntent by mutableStateOf<Intent?>(null)
         private set
@@ -238,6 +244,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
+        // Request the display's high refresh rate when the device supports it. Android may
+        // still choose a lower rate based on device policy, battery saver, or display settings.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            window.attributes = window.attributes.apply { preferredRefreshRate = 120f }
+        }
         if (Build.VERSION.SDK_INT >= 27) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
@@ -284,6 +295,8 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         appInForeground = false
         updateKhahishPresence(presenceUid, false)
+        // Revoke the server-side Secret Locked Chats session as soon as the app leaves foreground.
+        KhahishSecretChatApi.lock()
         super.onStop()
     }
 
@@ -320,6 +333,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun KhahishApp() {
     val auth = remember { FirebaseAuth.getInstance() }
@@ -354,6 +368,43 @@ fun KhahishApp() {
     val tabOrder = listOf("Chats", "Contacts", "Updates", "Calls", "Settings")
     var selectedChat by remember { mutableStateOf<Chat?>(null) }
     var profileTargetUid by remember { mutableStateOf("") }
+    var lockedContactUids by remember(currentUser?.uid) {
+        mutableStateOf(KhahishSecretChatLock.lockedUids(appContext, currentUser?.uid.orEmpty()))
+    }
+    var secretPasswordHasPassword by remember { mutableStateOf(false) }
+    var secretUnlockExpiresAtMs by remember { mutableStateOf(0L) }
+    var showLockedChats by remember { mutableStateOf(false) }
+    var showSecretPasswordDialog by remember { mutableStateOf(false) }
+    var secretPasswordCreateMode by remember { mutableStateOf(false) }
+    var pendingLockedChat by remember { mutableStateOf<Chat?>(null) }
+    var openedChatFromLockedChats by remember { mutableStateOf(false) }
+    var showLockPasswordSettings by remember { mutableStateOf(false) }
+    var brandTapCount by remember { mutableStateOf(0) }
+    var lastBrandTapAt by remember { mutableStateOf(0L) }
+
+    fun openChatWithLockCheck(chat: Chat) {
+        if (!chat.isGroup && chat.peerUid in lockedContactUids) {
+            pendingLockedChat = chat
+            secretPasswordCreateMode = false
+            showSecretPasswordDialog = true
+        } else {
+            openedChatFromLockedChats = false
+            selectedChat = chat
+        }
+    }
+
+    fun handleKhahishBrandTap() {
+        val now = System.currentTimeMillis()
+        if (now - lastBrandTapAt > 2200L) brandTapCount = 0
+        lastBrandTapAt = now
+        brandTapCount += 1
+        if (brandTapCount >= 4) {
+            brandTapCount = 0
+            secretPasswordCreateMode = !secretPasswordHasPassword
+            pendingLockedChat = null
+            showSecretPasswordDialog = true
+        }
+    }
     var showNewChat by remember { mutableStateOf(false) }
     var showNewGroup by remember { mutableStateOf(false) }
     var activeCall by remember { mutableStateOf<KhahishCall?>(null) }
@@ -367,6 +418,42 @@ fun KhahishApp() {
         }
         auth.addAuthStateListener(listener)
         onDispose { auth.removeAuthStateListener(listener) }
+    }
+
+    LaunchedEffect(currentUser?.uid) {
+        val uid = currentUser?.uid
+        if (uid.isNullOrBlank()) {
+            lockedContactUids = emptySet()
+            secretPasswordHasPassword = false
+            secretUnlockExpiresAtMs = 0L
+        } else {
+            KhahishSecretChatApi.loadConfig(
+                onSuccess = { config ->
+                    lockedContactUids = config.lockedContactUids
+                    secretPasswordHasPassword = config.hasPassword
+                    KhahishSecretChatLock.saveLockedUids(appContext, uid, config.lockedContactUids)
+                },
+                onError = { message ->
+                    Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
+                }
+            )
+        }
+    }
+
+    LaunchedEffect(secretUnlockExpiresAtMs) {
+        val expiry = secretUnlockExpiresAtMs
+        if (expiry > 0L) {
+            val waitMs = (expiry - System.currentTimeMillis()).coerceAtLeast(0L)
+            kotlinx.coroutines.delay(waitMs)
+            if (secretUnlockExpiresAtMs == expiry) {
+                if (selectedChat?.peerUid in lockedContactUids) selectedChat = null
+                showLockedChats = false
+                openedChatFromLockedChats = false
+                secretUnlockExpiresAtMs = 0L
+                KhahishSecretChatApi.lock()
+                Toast.makeText(appContext, "Locked Chats were secured again.", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     val hostActivity = appContext as? MainActivity
@@ -432,7 +519,7 @@ fun KhahishApp() {
 
                 fun openChat(name: String) {
                     val cleanName = name.ifBlank { if (isGroup) "Group chat" else "Khahish User" }
-                    selectedChat = Chat(
+                    val notificationChat = Chat(
                         id = chatId,
                         peerUid = if (isGroup) "" else peerUid,
                         name = cleanName,
@@ -442,6 +529,13 @@ fun KhahishApp() {
                         isGroup = isGroup,
                         memberUids = members
                     )
+                    if (!isGroup && peerUid in lockedContactUids) {
+                        pendingLockedChat = notificationChat
+                        secretPasswordCreateMode = false
+                        showSecretPasswordDialog = true
+                    } else {
+                        selectedChat = notificationChat
+                    }
                     tab = "Chats"
                     showNewChat = false
                     showNewGroup = false
@@ -534,7 +628,7 @@ fun KhahishApp() {
 
     BackHandler(
         enabled = currentUser != null &&
-            (selectedChat != null || showNewChat || showNewGroup || profileTargetUid.isNotBlank() || tab != "Chats")
+            (selectedChat != null || showNewChat || showNewGroup || showLockedChats || profileTargetUid.isNotBlank() || tab != "Chats")
     ) {
         when {
             profileTargetUid.isNotBlank() -> profileTargetUid = ""
@@ -542,7 +636,22 @@ fun KhahishApp() {
                 activeCall = null
                 incomingCall = false
             }
-            selectedChat != null -> selectedChat = null
+            selectedChat != null -> {
+                val wasLockedChat = selectedChat?.peerUid in lockedContactUids
+                selectedChat = null
+                if (openedChatFromLockedChats) {
+                    showLockedChats = true
+                } else if (wasLockedChat) {
+                    secretUnlockExpiresAtMs = 0L
+                    KhahishSecretChatApi.lock()
+                }
+                openedChatFromLockedChats = false
+            }
+            showLockedChats -> {
+                showLockedChats = false
+                secretUnlockExpiresAtMs = 0L
+                KhahishSecretChatApi.lock()
+            }
             showNewGroup -> showNewGroup = false
             showNewChat -> showNewChat = false
             tab != "Chats" -> tab = "Chats"
@@ -602,17 +711,22 @@ fun KhahishApp() {
         }
         AnimatedContent(
             targetState = currentUser != null,
-            transitionSpec = { fadeIn() togetherWith fadeOut() },
+            transitionSpec = {
+                fadeIn(animationSpec = tween(durationMillis = 130)) togetherWith
+                    fadeOut(animationSpec = tween(durationMillis = 110))
+            },
             label = "authentication_transition"
         ) { loggedIn ->
             if (!loggedIn) {
                 AuthScreen { currentUser = auth.currentUser }
             } else {
                 val user = currentUser
-
                 if (user == null) {
                     AuthScreen { currentUser = auth.currentUser }
-                } else if (activeCall != null) {
+                    return@AnimatedContent
+                }
+
+                if (activeCall != null) {
                     KhahishCallScreen(
                         call = activeCall!!,
                         isIncoming = incomingCall,
@@ -647,7 +761,17 @@ fun KhahishApp() {
                 } else if (selectedChat != null) {
                     ConversationScreen(
                         chat = selectedChat!!,
-                        onBack = { selectedChat = null },
+                        onBack = {
+                            val wasLockedChat = selectedChat?.peerUid in lockedContactUids
+                            selectedChat = null
+                            if (openedChatFromLockedChats) {
+                                showLockedChats = true
+                            } else if (wasLockedChat) {
+                                secretUnlockExpiresAtMs = 0L
+                                KhahishSecretChatApi.lock()
+                            }
+                            openedChatFromLockedChats = false
+                        },
                         onViewProfile = { profileTargetUid = it },
                         onStartCall = { isVideo ->
                             KhahishCallRepository().createOutgoingCall(
@@ -671,7 +795,7 @@ fun KhahishApp() {
                         currentUid = user.uid,
                         onBack = { showNewGroup = false },
                         onCreated = {
-                            selectedChat = it
+                            openChatWithLockCheck(it)
                             showNewGroup = false
                         }
                     )
@@ -681,10 +805,42 @@ fun KhahishApp() {
                         onBack = { showNewChat = false },
                         onCreateGroup = { showNewChat = false; showNewGroup = true },
                         onChatCreated = {
-                            selectedChat = it
+                            openChatWithLockCheck(it)
                             showNewChat = false
                         }
                     )
+                } else if (showLockedChats) {
+                    LockedChatsHub(
+                        currentUid = user.uid,
+                        lockedContactUids = lockedContactUids,
+                        onBack = {
+                            showLockedChats = false
+                            tab = "Chats"
+                            secretUnlockExpiresAtMs = 0L
+                            KhahishSecretChatApi.lock()
+                        },
+                        onAddContact = { contactUid, onResult ->
+                            KhahishSecretChatApi.updateContact(
+                                action = "add",
+                                contactUid = contactUid,
+                                onSuccess = { updated ->
+                                    lockedContactUids = updated
+                                    KhahishSecretChatLock.saveLockedUids(appContext, user.uid, updated)
+                                    onResult(updated, null)
+                                },
+                                onError = { message -> onResult(null, message) }
+                            )
+                        },
+                        onOpenChat = {
+                            openedChatFromLockedChats = true
+                            selectedChat = it
+                            showLockedChats = false
+                        },
+                        onChangePassword = { showLockPasswordSettings = true }
+                    )
+                    if (showLockPasswordSettings) {
+                        LockChatPasswordSettingsDialog(user.uid) { showLockPasswordSettings = false }
+                    }
                 } else {
                     Scaffold(
                         containerColor = MaterialTheme.colorScheme.background,
@@ -708,19 +864,20 @@ fun KhahishApp() {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Image(
-                                        painter = painterResource(R.drawable.khahish_logo),
-                                        contentDescription = "Khahish logo",
-                                        modifier = Modifier.size(38.dp),
-                                        contentScale = ContentScale.Fit
-                                    )
-
-                                    Spacer(Modifier.width(12.dp))
-
                                     Row(
-                                        modifier = Modifier.weight(1f),
+                                        modifier = Modifier.weight(1f).combinedClickable(
+                                            onClick = { handleKhahishBrandTap() },
+                                            onLongClick = { }
+                                        ),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
+                                        Image(
+                                            painter = painterResource(R.drawable.khahish_launcher),
+                                            contentDescription = "Khahish logo",
+                                            modifier = Modifier.size(38.dp),
+                                            contentScale = ContentScale.Fit
+                                        )
+                                        Spacer(Modifier.width(12.dp))
                                         Text(
                                             "Khahish",
                                             fontSize = 24.sp,
@@ -802,10 +959,13 @@ fun KhahishApp() {
                                 when {
                                     animationsEnabled && slideTransitionsEnabled -> {
                                         val movingForward = tabOrder.indexOf(targetState) > tabOrder.indexOf(initialState)
-                                        (slideInHorizontally { width -> if (movingForward) width / 3 else -width / 3 } + fadeIn()) togetherWith
-                                            (slideOutHorizontally { width -> if (movingForward) -width / 3 else width / 3 } + fadeOut())
+                                        (slideInHorizontally(animationSpec = tween(durationMillis = 160)) { width -> if (movingForward) width / 3 else -width / 3 } +
+                                            fadeIn(animationSpec = tween(durationMillis = 130))) togetherWith
+                                            (slideOutHorizontally(animationSpec = tween(durationMillis = 140)) { width -> if (movingForward) -width / 3 else width / 3 } +
+                                                fadeOut(animationSpec = tween(durationMillis = 110)))
                                     }
-                                    animationsEnabled -> fadeIn() togetherWith fadeOut()
+                                    animationsEnabled -> fadeIn(animationSpec = tween(durationMillis = 130)) togetherWith
+                                        fadeOut(animationSpec = tween(durationMillis = 110))
                                     else -> EnterTransition.None togetherWith ExitTransition.None
                                 }
                             },
@@ -815,14 +975,15 @@ fun KhahishApp() {
                                 "Chats" -> ChatList(
                                     modifier = Modifier.padding(padding),
                                     currentUid = user.uid,
-                                    onOpen = { selectedChat = it },
-                                    onViewProfile = { profileTargetUid = it }
+                                    onOpen = { openChatWithLockCheck(it) },
+                                    onViewProfile = { profileTargetUid = it },
+                                    lockedContactUids = lockedContactUids
                                 )
 
                                 "Contacts" -> KhahishContactsScreen(
                                     currentUid = user.uid,
                                     modifier = Modifier.padding(padding),
-                                    onOpenChat = { selectedChat = it },
+                                    onOpenChat = { openChatWithLockCheck(it) },
                                     onViewProfile = { profileTargetUid = it }
                                 )
 
@@ -877,6 +1038,30 @@ fun KhahishApp() {
                         }
                     }
                 }
+                if (showSecretPasswordDialog) {
+                    SecretChatPasswordDialog(
+                        uid = user.uid,
+                        createMode = secretPasswordCreateMode,
+                        onDismiss = {
+                            showSecretPasswordDialog = false
+                            pendingLockedChat = null
+                        },
+                        onUnlocked = { expiresAt ->
+                            showSecretPasswordDialog = false
+                            secretPasswordHasPassword = true
+                            secretUnlockExpiresAtMs = expiresAt
+                            val requestedChat = pendingLockedChat
+                            pendingLockedChat = null
+                            if (requestedChat != null) {
+                                selectedChat = requestedChat
+                                openedChatFromLockedChats = false
+                                showLockedChats = false
+                            } else {
+                                showLockedChats = true
+                            }
+                        }
+                    )
+                }
             }
         }
     }
@@ -905,7 +1090,7 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Image(
-            painter = painterResource(R.drawable.khahish_logo),
+            painter = painterResource(R.drawable.khahish_launcher),
             contentDescription = "Khahish logo",
             modifier = Modifier.size(88.dp),
             contentScale = ContentScale.Fit
@@ -1386,7 +1571,9 @@ fun ChatList(
     modifier: Modifier = Modifier,
     currentUid: String,
     onOpen: (Chat) -> Unit,
-    onViewProfile: (String) -> Unit
+    onViewProfile: (String) -> Unit,
+    lockedContactUids: Set<String> = emptySet(),
+    showOnlyLockedChats: Boolean = false
 ) {
     val db = remember { FirebaseFirestore.getInstance() }
     val context = LocalContext.current
@@ -1395,6 +1582,7 @@ fun ChatList(
     var incomingRequests by remember { mutableStateOf(listOf<MessageRequestItem>()) }
     var outgoingRequests by remember { mutableStateOf(listOf<MessageRequestItem>()) }
     var showRequestsScreen by remember { mutableStateOf(false) }
+    var showPeopleSearchDialog by remember { mutableStateOf(false) }
     var requestsTab by remember { mutableStateOf("Received") }
     var unreadCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     var loading by remember { mutableStateOf(true) }
@@ -1408,48 +1596,105 @@ fun ChatList(
     var hasMoreMessageSearchPages by remember { mutableStateOf(false) }
     var isLoadingMoreMessageSearch by remember { mutableStateOf(false) }
 
-    DisposableEffect(currentUid) {
-        val registration = db.collection("chats")
-            .whereArrayContains("members", currentUid)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    loading = false
-                    return@addSnapshotListener
+    DisposableEffect(currentUid, lockedContactUids.joinToString("|"), showOnlyLockedChats) {
+        var active = true
+        loading = true
+
+        if (showOnlyLockedChats) {
+            if (lockedContactUids.isEmpty()) {
+                chats = emptyList()
+                loading = false
+            } else {
+                // Locked chats are fetched by deterministic document ID, not by a
+                // collection query. Firestore get rules require the active unlock session.
+                val tasks = lockedContactUids.map { peerUid ->
+                    db.collection("chats").document(privateChatId(currentUid, peerUid)).get()
                 }
-
-                if (snapshot != null) {
-                    val docs = snapshot.documents
-
-                    chats = docs.mapNotNull { doc ->
-                        val members = doc.get("members") as? List<*>
-                        val memberUids = members?.filterIsInstance<String>() ?: emptyList()
-                        val peerUid = memberUids.firstOrNull { it != currentUid }
-                            ?: return@mapNotNull null
-                        val names = doc.get("memberNames") as? Map<*, *>
-                        val isGroup = doc.getBoolean("isGroup") == true
-                        val peerName = names?.get(peerUid) as? String ?: "Khahish User"
-                        val displayName = if (isGroup) doc.getString("groupName") ?: "Group chat" else peerName
-
-                        Chat(
-                            id = doc.id,
-                            peerUid = peerUid,
-                            name = displayName,
-                            message = doc.getString("lastMessage") ?: "",
-                            time = "",
-                            initials = displayName.firstOrNull()?.uppercase() ?: "K",
-                            isGroup = isGroup,
-                            memberUids = memberUids
-                        )
-                    }.sortedByDescending { chat ->
-                        docs.firstOrNull { it.id == chat.id }
-                            ?.getLong("lastMessageAt") ?: 0L
+                com.google.android.gms.tasks.Tasks
+                    .whenAllSuccess<com.google.firebase.firestore.DocumentSnapshot>(tasks)
+                    .addOnSuccessListener { documents ->
+                        if (active) {
+                            chats = documents.mapNotNull { doc ->
+                                if (!doc.exists()) return@mapNotNull null
+                                val members = doc.get("members") as? List<*>
+                                val memberUids = members?.filterIsInstance<String>() ?: emptyList()
+                                val peerUid = memberUids.firstOrNull { it != currentUid }
+                                    ?: return@mapNotNull null
+                                if (peerUid !in lockedContactUids || doc.getBoolean("isGroup") == true) {
+                                    return@mapNotNull null
+                                }
+                                val names = doc.get("memberNames") as? Map<*, *>
+                                val peerName = names?.get(peerUid) as? String ?: "Khahish User"
+                                Chat(
+                                    id = doc.id,
+                                    peerUid = peerUid,
+                                    name = peerName,
+                                    message = doc.getString("lastMessage") ?: "",
+                                    time = "",
+                                    initials = peerName.firstOrNull()?.uppercase() ?: "K",
+                                    isGroup = false,
+                                    memberUids = memberUids
+                                )
+                            }.sortedByDescending { chat ->
+                                documents.firstOrNull { it.id == chat.id }?.getLong("lastMessageAt") ?: 0L
+                            }
+                            loading = false
+                        }
+                    }
+                    .addOnFailureListener {
+                        if (active) {
+                            chats = emptyList()
+                            loading = false
+                            showToast(context, "Could not load Locked Chats: ${it.message}")
+                        }
+                    }
+            }
+            onDispose { active = false }
+        } else {
+            val registration = db.collection("chats")
+                .whereArrayContains("visibleToUids", currentUid)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        loading = false
+                        return@addSnapshotListener
                     }
 
-                    loading = false
-                }
-            }
+                    if (snapshot != null) {
+                        val docs = snapshot.documents
+                        chats = docs.mapNotNull { doc ->
+                            val members = doc.get("members") as? List<*>
+                            val memberUids = members?.filterIsInstance<String>() ?: emptyList()
+                            val peerUid = memberUids.firstOrNull { it != currentUid }
+                                ?: return@mapNotNull null
+                            val names = doc.get("memberNames") as? Map<*, *>
+                            val isGroup = doc.getBoolean("isGroup") == true
+                            val peerName = names?.get(peerUid) as? String ?: "Khahish User"
+                            val displayName = if (isGroup) doc.getString("groupName") ?: "Group chat" else peerName
 
-        onDispose { registration.remove() }
+                            Chat(
+                                id = doc.id,
+                                peerUid = peerUid,
+                                name = displayName,
+                                message = doc.getString("lastMessage") ?: "",
+                                time = "",
+                                initials = displayName.firstOrNull()?.uppercase() ?: "K",
+                                isGroup = isGroup,
+                                memberUids = memberUids
+                            )
+                        }.filter { chat ->
+                            if (chat.isGroup) true else chat.peerUid !in lockedContactUids
+                        }.sortedByDescending { chat ->
+                            docs.firstOrNull { it.id == chat.id }?.getLong("lastMessageAt") ?: 0L
+                        }
+                        loading = false
+                    }
+                }
+
+            onDispose {
+                active = false
+                registration.remove()
+            }
+        }
     }
 
     DisposableEffect(currentUid) {
@@ -1640,6 +1885,17 @@ fun ChatList(
             IconButton(onClick = { selectedPictureUrl = "" }, modifier = Modifier.align(Alignment.TopEnd)) { Icon(Icons.Default.Close, "Close", tint = Color.White) }
         }
     }
+    if (showPeopleSearchDialog) {
+        PeopleSearchDialog(
+            currentUid = currentUid,
+            existingContacts = chats.filter { !it.isGroup },
+            onDismiss = { showPeopleSearchDialog = false },
+            onOpenChat = {
+                showPeopleSearchDialog = false
+                onOpen(it)
+            }
+        )
+    }
     if (showRequestsScreen) {
         Column(modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1674,11 +1930,20 @@ fun ChatList(
                                         val members = listOf(currentUid, request.senderUid).sorted()
                                         val batch = db.batch()
                                         batch.update(reqRef, mapOf("status" to "accepted", "acceptedBy" to currentUid, "handledBy" to currentUid, "acceptedAt" to now))
-                                        batch.set(chatRef, mapOf("members" to members, "memberNames" to mapOf(currentUid to (FirebaseAuth.getInstance().currentUser?.displayName ?: "You"), request.senderUid to request.senderName), "lastMessage" to "", "lastMessageAt" to 0L, "updatedAt" to now, "createdAt" to now, "createdBy" to currentUid, "disappearingDurationMs" to 0L))
+                                        batch.set(chatRef, mapOf("members" to members, "memberNames" to mapOf(currentUid to (FirebaseAuth.getInstance().currentUser?.displayName ?: "You"), request.senderUid to request.senderName), "lastMessage" to "", "lastMessageAt" to 0L, "updatedAt" to now, "createdAt" to now, "createdBy" to currentUid, "disappearingDurationMs" to 0L, "visibleToUids" to emptyList<String>()))
                                         batch.commit().addOnSuccessListener {
-                                            showToast(context, "Request accepted. Chat is ready.")
-                                            showRequestsScreen = false
-                                            onOpen(Chat(request.id, request.senderUid, request.senderName, "", "", request.senderName.firstOrNull()?.uppercase() ?: "K"))
+                                            KhahishSecretChatApi.syncChatVisibility(
+                                                request.id,
+                                                onSuccess = {
+                                                    showToast(context, "Request accepted. Chat is ready.")
+                                                    showRequestsScreen = false
+                                                    onOpen(Chat(request.id, request.senderUid, request.senderName, "", "", request.senderName.firstOrNull()?.uppercase() ?: "K"))
+                                                },
+                                                onError = { message ->
+                                                    showToast(context, "Chat created but privacy sync is pending. It remains hidden until synchronization succeeds. $message")
+                                                    showRequestsScreen = false
+                                                }
+                                            )
                                         }.addOnFailureListener { showToast(context, "Could not accept request: ${it.message}") }
                                     }, colors = ButtonDefaults.buttonColors(containerColor = Green)) { Text("Accept", color = Color.White) }
                                 }
@@ -1715,6 +1980,9 @@ fun ChatList(
                 Box(Modifier.clip(RoundedCornerShape(50)).background(Green.copy(alpha = 0.12f)).clickable { requestsTab = "Received"; showRequestsScreen = true }.padding(horizontal = 12.dp, vertical = 6.dp)) {
                     Text("Requests ${incomingRequests.size}", color = Green, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 }
+            }
+            IconButton(onClick = { showPeopleSearchDialog = true }) {
+                Icon(Icons.Default.Search, contentDescription = "Find people", tint = MaterialTheme.colorScheme.primary)
             }
         }
         OutlinedTextField(
@@ -1899,6 +2167,341 @@ fun ChatList(
 }
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
+private fun PeopleSearchDialog(
+    currentUid: String,
+    existingContacts: List<Chat>,
+    onDismiss: () -> Unit,
+    onOpenChat: (Chat) -> Unit
+) {
+    val db = remember { FirebaseFirestore.getInstance() }
+    val context = LocalContext.current
+    var selectedTab by remember { mutableStateOf("Username") }
+    var username by remember { mutableStateOf("") }
+    var contactQuery by remember { mutableStateOf("") }
+    var result by remember { mutableStateOf<AppUser?>(null) }
+    var searching by remember { mutableStateOf(false) }
+    var searchMessage by remember { mutableStateOf("Search by an exact username to find someone on Khahish.") }
+    val searchPrefs = remember { context.getSharedPreferences("khahish_people_search", Context.MODE_PRIVATE) }
+    var recentSearches by remember { mutableStateOf(searchPrefs.getStringSet("recent_usernames", emptySet())?.toList().orEmpty()) }
+
+    val filteredContacts = remember(existingContacts, contactQuery) {
+        existingContacts.filter {
+            it.name.contains(contactQuery.trim(), ignoreCase = true)
+        }
+    }
+
+    fun searchUsername(value: String = username) {
+        val term = normalizeKhahishUsername(value)
+        if (!isValidKhahishUsername(term)) {
+            searchMessage = "Username must be 3–20 characters: letters, numbers or _."
+            result = null
+            return
+        }
+        searching = true
+        result = null
+        searchMessage = "Searching…"
+        db.collection("usernames").document(term).get()
+            .addOnSuccessListener { claim ->
+                val targetUid = claim.getString("uid").orEmpty()
+                if (targetUid.isBlank() || targetUid == currentUid) {
+                    searching = false
+                    searchMessage = if (targetUid == currentUid) "This is your own username." else "No account found with @$term."
+                } else {
+                    db.collection("publicProfiles").document(targetUid).get()
+                        .addOnSuccessListener { profile ->
+                            searching = false
+                            val found = profile.toObject(AppUser::class.java)
+                            if (profile.exists() && found != null && found.uid == targetUid) {
+                                result = found
+                                searchMessage = ""
+                                val updatedRecent = (listOf(term) + recentSearches.filterNot { it == term }).take(6)
+                                recentSearches = updatedRecent
+                                searchPrefs.edit().putStringSet("recent_usernames", updatedRecent.toSet()).apply()
+                            } else {
+                                searchMessage = "This profile is not available."
+                            }
+                        }
+                        .addOnFailureListener {
+                            searching = false
+                            searchMessage = "Profile lookup failed: ${it.message ?: "Please try again."}"
+                        }
+                }
+            }
+            .addOnFailureListener {
+                searching = false
+                searchMessage = "Username search failed: ${it.message ?: "Please try again."}"
+            }
+    }
+
+    fun openOrRequestChat(user: AppUser) {
+        val chatId = privateChatId(currentUid, user.uid)
+        val chatRef = db.collection("chats").document(chatId)
+        chatRef.get()
+            .addOnSuccessListener { existing ->
+                val members = (existing.get("members") as? List<*>)?.filterIsInstance<String>().orEmpty()
+                if (existing.exists() && currentUid in members && user.uid in members) {
+                    onOpenChat(
+                        Chat(
+                            id = chatId,
+                            peerUid = user.uid,
+                            name = user.name.ifBlank { "Khahish User" },
+                            message = existing.getString("lastMessage").orEmpty(),
+                            time = "",
+                            initials = user.name.firstOrNull()?.uppercase() ?: "K"
+                        )
+                    )
+                    return@addOnSuccessListener
+                }
+
+                val requestRef = db.collection("messageRequests").document(chatId)
+                requestRef.get()
+                    .addOnSuccessListener { request ->
+                        val status = request.getString("status").orEmpty()
+                        when {
+                            !request.exists() || status == "cancelled" -> {
+                                val now = System.currentTimeMillis()
+                                val senderName = FirebaseAuth.getInstance().currentUser?.displayName
+                                    ?.takeIf { it.isNotBlank() } ?: "Khahish User"
+                                requestRef.set(
+                                    mapOf(
+                                        "senderUid" to currentUid,
+                                        "receiverUid" to user.uid,
+                                        "senderName" to senderName,
+                                        "senderUsername" to "",
+                                        "receiverName" to user.name,
+                                        "status" to "pending",
+                                        "createdAt" to now
+                                    )
+                                ).addOnSuccessListener {
+                                    showToast(context, "Message request sent. Chat opens after acceptance.")
+                                    onDismiss()
+                                }.addOnFailureListener {
+                                    showToast(context, "Request failed: ${it.message}")
+                                }
+                            }
+                            status == "pending" && request.getString("senderUid") == currentUid ->
+                                showToast(context, "Your message request is already pending.")
+                            status == "pending" ->
+                                showToast(context, "This person has already requested to chat. Accept it from Chats.")
+                            status == "rejected" ->
+                                showToast(context, "This person rejected the request. Chat cannot start.")
+                            status == "accepted" ->
+                                showToast(context, "This request was accepted. Open your Chats list to continue.")
+                            else -> showToast(context, "A chat request already exists.")
+                        }
+                    }
+                    .addOnFailureListener {
+                        showToast(context, "Request lookup failed: ${it.message}")
+                    }
+            }
+            .addOnFailureListener {
+                showToast(context, "Chat lookup failed: ${it.message}")
+            }
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.94f)
+                .heightIn(max = 700.dp),
+            shape = RoundedCornerShape(28.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 16.dp)
+        ) {
+            Column(Modifier.fillMaxWidth()) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(
+                            Brush.linearGradient(
+                                listOf(Color(0xFF063D35), Color(0xFF087C65), Color(0xFF18A889))
+                            )
+                        )
+                        .padding(start = 20.dp, end = 12.dp, top = 18.dp, bottom = 20.dp)
+                ) {
+                    Column(Modifier.align(Alignment.CenterStart)) {
+                        Text("Find People", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(4.dp))
+                        Text("Connect with people on Khahish", color = Color.White.copy(alpha = 0.86f), fontSize = 12.sp)
+                    }
+                    IconButton(onClick = onDismiss, modifier = Modifier.align(Alignment.TopEnd)) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                    }
+                }
+
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp))
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    listOf("Username", "New Contact").forEach { tab ->
+                        val selected = selectedTab == tab
+                        Box(
+                            Modifier.weight(1f)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (selected) Green else Color.Transparent)
+                                .clickable { selectedTab = tab }
+                                .padding(vertical = 11.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                tab,
+                                color = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+                }
+
+                if (selectedTab == "Username") {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp)) {
+                        OutlinedTextField(
+                            value = username,
+                            onValueChange = {
+                                username = it.lowercase(Locale.ROOT)
+                                    .filter { ch -> ch in 'a'..'z' || ch in '0'..'9' || ch == '_' }
+                                    .take(20)
+                                result = null
+                                searchMessage = "Tap Search to find this username."
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            placeholder = { Text("Enter username") },
+                            leadingIcon = { Text("@", color = Green, fontWeight = FontWeight.Bold) },
+                            shape = RoundedCornerShape(18.dp)
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Button(
+                            onClick = { searchUsername() },
+                            enabled = !searching,
+                            modifier = Modifier.fillMaxWidth().height(50.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Green)
+                        ) {
+                            if (searching) {
+                                CircularProgressIndicator(Modifier.size(19.dp), color = Color.White, strokeWidth = 2.dp)
+                                Spacer(Modifier.width(9.dp))
+                            }
+                            Text(if (searching) "Searching…" else "Search", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        if (result != null) {
+                            val found = result!!
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .clickable { openOrRequestChat(found) }
+                                    .padding(13.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (found.photoUrl.isNotBlank()) {
+                                        AsyncImage(found.photoUrl, contentDescription = "Profile photo", modifier = Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop)
+                                    } else {
+                                        Text(found.name.firstOrNull()?.uppercase() ?: "K", color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(found.name.ifBlank { "Khahish User" }, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                                    Text("@${found.username.ifBlank { normalizeKhahishUsername(username) }}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                                }
+                                Icon(Icons.Default.Chat, contentDescription = "Open or request chat", tint = Green)
+                            }
+                        } else if (searchMessage.isNotBlank()) {
+                            Text(
+                                searchMessage,
+                                Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 12.sp,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                        if (recentSearches.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            Text("Recent Searches", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                            recentSearches.forEach { recent ->
+                                Row(
+                                    Modifier.fillMaxWidth().clickable {
+                                        username = recent
+                                        searchUsername(recent)
+                                    }.padding(vertical = 9.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.History, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Spacer(Modifier.width(10.dp))
+                                    Text("@$recent", Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
+                                    Icon(Icons.Default.NorthWest, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(17.dp))
+                                }
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                            }
+                        }
+                    }
+                } else {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp)) {
+                        OutlinedTextField(
+                            value = contactQuery,
+                            onValueChange = { contactQuery = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            placeholder = { Text("Search your contacts") },
+                            leadingIcon = { Icon(Icons.Default.Search, null) },
+                            shape = RoundedCornerShape(18.dp)
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        if (filteredContacts.isEmpty()) {
+                            Text(
+                                "Your existing private-chat contacts will appear here.",
+                                Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                                fontSize = 12.sp
+                            )
+                        } else {
+                            LazyColumn(Modifier.heightIn(max = 330.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                items(filteredContacts, key = { it.peerUid }) { contact ->
+                                    Row(
+                                        Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp))
+                                            .clickable { onOpenChat(contact) }
+                                            .padding(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Box(
+                                            Modifier.size(42.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(contact.initials, color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold)
+                                        }
+                                        Spacer(Modifier.width(11.dp))
+                                        Column(Modifier.weight(1f)) {
+                                            Text(contact.name, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                                            Text("Open conversation", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                                        }
+                                        Icon(Icons.Default.ChevronRight, null, tint = Green)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+        }
+    }
+}
+
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
 fun ConversationScreen(
     chat: Chat,
     onBack: () -> Unit,
@@ -1931,6 +2534,9 @@ fun ConversationScreen(
         }
     }
     var isUploading by remember { mutableStateOf(false) }
+    var pendingChatMediaUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingChatMediaType by remember { mutableStateOf("") }
+    var pendingChatMediaCaption by remember { mutableStateOf("") }
     var isSending by remember { mutableStateOf(false) }
     var peerTyping by remember { mutableStateOf(false) }
     var peerOnline by remember { mutableStateOf(false) }
@@ -2025,21 +2631,9 @@ fun ConversationScreen(
         ActivityResultContracts.GetContent()
     ) { uri ->
         if (uri != null) {
-            isUploading = true
-            uploadToCloudinary(
-                context, uri, "image",
-                onSuccess = { url ->
-                    isUploading = false
-                    isSending = true
-                    sendChatMessage(
-                        chatRef, currentUserId, "", url, "image", context
-                    ) { isSending = false }
-                },
-                onError = {
-                    isUploading = false
-                    showToast(context, it)
-                }
-            )
+            pendingChatMediaUri = uri
+            pendingChatMediaType = "image"
+            pendingChatMediaCaption = ""
         }
     }
 
@@ -2069,21 +2663,9 @@ fun ConversationScreen(
         ActivityResultContracts.GetContent()
     ) { uri ->
         if (uri != null) {
-            isUploading = true
-            uploadToCloudinary(
-                context, uri, "video",
-                onSuccess = { url ->
-                    isUploading = false
-                    isSending = true
-                    sendChatMessage(
-                        chatRef, currentUserId, "", url, "video", context
-                    ) { isSending = false }
-                },
-                onError = {
-                    isUploading = false
-                    showToast(context, it)
-                }
-            )
+            pendingChatMediaUri = uri
+            pendingChatMediaType = "video"
+            pendingChatMediaCaption = ""
         }
     }
 
@@ -2235,7 +2817,7 @@ fun ConversationScreen(
             voiceRecorder = recorder
             voiceRecordingFile = output
             isRecordingVoice = true
-            showToast(context, "Recording… tap the mic again to send")
+            showToast(context, "Recording… slide left to cancel, release to send")
         } catch (error: Exception) {
             voiceRecorder?.release()
             voiceRecorder = null
@@ -3040,7 +3622,7 @@ fun ConversationScreen(
                                 color = bubbleSecondaryTextColor
                             )
                             if (msg.editedAt > 0L) {
-                                Text(" · edited", fontSize = 9.sp, color = bubbleSecondaryTextColor
+                                Text(" · edited", fontSize = 9.sp, color = bubbleSecondaryTextColor)
                             }
 
 
@@ -3110,15 +3692,12 @@ fun ConversationScreen(
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 10.dp, vertical = 8.dp)
+                .padding(bottom = 6.dp)
                 .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(30.dp))
                 .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(30.dp))
                 .padding(horizontal = 5.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = { text += "😊" }) {
-                Icon(Icons.Default.EmojiEmotions, "Insert emoji", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-
             Box {
                 IconButton(onClick = { attachmentMenu = true }) {
                     Icon(Icons.Default.AttachFile, "Attachments", tint = Green)
@@ -3224,70 +3803,72 @@ fun ConversationScreen(
                 modifier = Modifier
                     .padding(start = 4.dp)
                     .size(54.dp)
-                    .graphicsLayer { translationX = voiceDragOffset }
                     .shadow(8.dp, CircleShape)
                     .background(
                         if (voiceCancelGesture) MaterialTheme.colorScheme.error else Green,
                         CircleShape
                     )
-                    .pointerInput(isUploading, isSending, text, isRecordingVoice) {
-                        if (!isUploading && !isSending) {
-                            detectDragGestures(
-                                onDragStart = {
-                                    if (text.isBlank() &&
-                                        ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-                                    ) {
-                                        voiceDragOffset = 0f
-                                        voiceCancelGesture = false
-                                        startVoiceRecording()
-                                    }
-                                },
-                                onDrag = { change, dragAmount ->
-                                    if (isRecordingVoice) {
-                                        change.consume()
-                                        voiceDragOffset = (voiceDragOffset + dragAmount.x).coerceIn(-140f, 20f)
-                                        voiceCancelGesture = voiceDragOffset <= -85f
-                                    }
-                                },
-                                onDragEnd = {
-                                    if (isRecordingVoice) {
-                                        if (voiceCancelGesture) cancelVoiceRecording()
-                                        else stopVoiceRecordingAndSend()
-                                    }
-                                    voiceDragOffset = 0f
-                                    voiceCancelGesture = false
-                                },
-                                onDragCancel = {
-                                    if (isRecordingVoice) cancelVoiceRecording()
-                                    voiceDragOffset = 0f
-                                    voiceCancelGesture = false
+                    .pointerInput(isUploading, isSending, text) {
+                        if (!isUploading && !isSending && text.isBlank()) {
+                            awaitEachGesture {
+                                val firstEvent = awaitPointerEvent()
+                                val down = firstEvent.changes.firstOrNull { it.pressed } ?: return@awaitEachGesture
+                                if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                                    voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                    return@awaitEachGesture
                                 }
-                            )
+
+                                voiceDragOffset = 0f
+                                voiceCancelGesture = false
+                                startVoiceRecording()
+                                var releasedNormally = false
+
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                    if (change.pressed) {
+                                        val horizontalDelta = change.position.x - change.previousPosition.x
+                                        if (isRecordingVoice) {
+                                            voiceDragOffset = (voiceDragOffset + horizontalDelta).coerceIn(-140f, 20f)
+                                            voiceCancelGesture = voiceDragOffset <= -85f
+                                        }
+                                        change.consume()
+                                    } else {
+                                        change.consume()
+                                        releasedNormally = true
+                                        if (isRecordingVoice) {
+                                            if (voiceCancelGesture) cancelVoiceRecording()
+                                            else stopVoiceRecordingAndSend()
+                                        }
+                                        break
+                                    }
+                                }
+
+                                if (!releasedNormally && isRecordingVoice) cancelVoiceRecording()
+                                voiceDragOffset = 0f
+                                voiceCancelGesture = false
+                            }
                         }
                     }
                     .pointerInput(isUploading, isSending, text) {
                         detectTapGestures {
-                            if (isUploading || isSending) return@detectTapGestures
-                            if (text.isNotBlank()) {
-                                val message = text.trim()
-                                text = ""
-                                updateTyping(false)
-                                isSending = true
-                                sendChatMessage(
-                                    chatRef,
-                                    currentUserId,
-                                    message,
-                                    "",
-                                    "text",
-                                    context,
-                                    replyToMessageId = replyTarget?.id.orEmpty(),
-                                    replyToText = replyTarget?.text?.ifBlank { replyTarget?.mediaType ?: "Media" }.orEmpty()
-                                ) {
-                                    isSending = false
-                                    replyTarget = null
-                                }
-                            } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                                voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            if (isUploading || isSending || text.isBlank()) return@detectTapGestures
+                            val message = text.trim()
+                            text = ""
+                            updateTyping(false)
+                            isSending = true
+                            sendChatMessage(
+                                chatRef,
+                                currentUserId,
+                                message,
+                                "",
+                                "text",
+                                context,
+                                replyToMessageId = replyTarget?.id.orEmpty(),
+                                replyToText = replyTarget?.text?.ifBlank { replyTarget?.mediaType ?: "Media" }.orEmpty()
+                            ) {
+                                isSending = false
+                                replyTarget = null
                             }
                         }
                     },
@@ -3467,6 +4048,7 @@ fun ConversationScreen(
                                 TextButton(onClick = {
                                     chatRef.update(
                                         "members", FieldValue.arrayUnion(candidate.uid),
+                                        "visibleToUids", FieldValue.arrayUnion(candidate.uid),
                                         "memberNames.${candidate.uid}", candidate.name.ifBlank { "Khahish User" }
                                     ).addOnSuccessListener {
                                         groupMemberSearch = ""
@@ -3555,6 +4137,7 @@ fun ConversationScreen(
                                 TextButton(onClick = {
                                     chatRef.update(
                                         "members", FieldValue.arrayRemove(memberUid),
+                                        "visibleToUids", FieldValue.arrayRemove(memberUid),
                                         "groupAdmins", FieldValue.arrayRemove(memberUid),
                                         "memberNames.$memberUid", FieldValue.delete()
                                     ).addOnSuccessListener { showToast(context, "Participant removed") }
@@ -3567,6 +4150,7 @@ fun ConversationScreen(
                     TextButton(enabled = canLeave, onClick = {
                         chatRef.update(
                             "members", FieldValue.arrayRemove(currentUserId),
+                            "visibleToUids", FieldValue.arrayRemove(currentUserId),
                             "groupAdmins", FieldValue.arrayRemove(currentUserId),
                             "memberNames.$currentUserId", FieldValue.delete()
                         ).addOnSuccessListener { showGroupInfo = false; onBack() }
@@ -3800,6 +4384,121 @@ fun ConversationScreen(
             ) { Icon(Icons.Default.Close, "Close photo", tint = Color.White) }
         }
     }
+    if (pendingChatMediaUri != null) {
+        Dialog(
+            onDismissRequest = {
+                if (!isUploading) {
+                    pendingChatMediaUri = null
+                    pendingChatMediaType = ""
+                    pendingChatMediaCaption = ""
+                }
+            },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (pendingChatMediaType == "video") "Preview video" else "Preview photo",
+                        modifier = Modifier.weight(1f),
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 18.sp
+                    )
+                    IconButton(
+                        enabled = !isUploading,
+                        onClick = {
+                            pendingChatMediaUri = null
+                            pendingChatMediaType = ""
+                            pendingChatMediaCaption = ""
+                        }
+                    ) { Icon(Icons.Default.Close, "Cancel media") }
+                }
+                if (pendingChatMediaType == "video") {
+                    KhahishVideoPlayer(
+                        url = pendingChatMediaUri.toString(),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 220.dp, max = 420.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                    )
+                } else {
+                    AsyncImage(
+                        model = pendingChatMediaUri,
+                        contentDescription = "Selected photo preview",
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 220.dp, max = 420.dp)
+                            .clip(RoundedCornerShape(14.dp)),
+                        contentScale = ContentScale.Fit
+                    )
+                }
+                OutlinedTextField(
+                    value = pendingChatMediaCaption,
+                    onValueChange = { pendingChatMediaCaption = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Add a caption...") },
+                    maxLines = 3,
+                    enabled = !isUploading
+                )
+                if (isUploading) {
+                    LinearProgressIndicator(Modifier.fillMaxWidth(), color = Green)
+                    Text("Uploading media…", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        modifier = Modifier.weight(1f),
+                        enabled = !isUploading,
+                        onClick = {
+                            pendingChatMediaUri = null
+                            pendingChatMediaType = ""
+                            pendingChatMediaCaption = ""
+                        }
+                    ) { Text("Cancel") }
+                    Button(
+                        modifier = Modifier.weight(1f),
+                        enabled = !isUploading && !isSending,
+                        onClick = {
+                            val uri = pendingChatMediaUri ?: return@Button
+                            val type = pendingChatMediaType
+                            val caption = pendingChatMediaCaption.trim()
+                            isUploading = true
+                            uploadToCloudinary(
+                                context,
+                                uri,
+                                if (type == "video") "video" else "image",
+                                onSuccess = { url ->
+                                    isUploading = false
+                                    isSending = true
+                                    pendingChatMediaUri = null
+                                    pendingChatMediaType = ""
+                                    pendingChatMediaCaption = ""
+                                    sendChatMessage(
+                                        chatRef, currentUserId, caption, url, type, context
+                                    ) { isSending = false }
+                                },
+                                onError = {
+                                    isUploading = false
+                                    showToast(context, it)
+                                }
+                            )
+                        }
+                    ) {
+                        Icon(Icons.Default.Send, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Send")
+                    }
+                }
+            }
+        }
+    }
+
     if (videoToPlay.isNotBlank()) Dialog(
         onDismissRequest = { videoToPlay = "" },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)

@@ -59,8 +59,37 @@ class KhahishMessagingService : FirebaseMessagingService() {
             }
         }
 
-        val title = payload["title"] ?: message.notification?.title ?: "Khahish"
-        val body = payload["body"] ?: message.notification?.body ?: "You have a new notification."
+        val currentUid = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
+        val lockedContactUids = if (currentUid.isNotBlank() && notificationType != "call") {
+            KhahishSecretChatLock.lockedUids(this, currentUid)
+        } else emptySet()
+        val notificationBelongsToLockedChat = if (
+            chatId.isNotBlank() && currentUid.isNotBlank() &&
+            lockedContactUids.isNotEmpty() && notificationType != "call"
+        ) {
+            try {
+                val chatSnapshot = Tasks.await(
+                    FirebaseFirestore.getInstance().collection("chats").document(chatId).get(),
+                    3,
+                    TimeUnit.SECONDS
+                )
+                val members = (chatSnapshot.get("members") as? List<*>)?.filterIsInstance<String>().orEmpty()
+                members.any { it != currentUid && it in lockedContactUids }
+            } catch (_: Exception) {
+                false
+            }
+        } else false
+
+        val title = if (notificationBelongsToLockedChat) {
+            "Khahish • Locked Chat"
+        } else {
+            payload["title"] ?: message.notification?.title ?: "Khahish"
+        }
+        val body = if (notificationBelongsToLockedChat) {
+            "New message in a locked chat. Unlock Khahish to view it."
+        } else {
+            payload["body"] ?: message.notification?.body ?: "You have a new notification."
+        }
         val callId = payload["callId"].orEmpty()
         val isIncomingCall = notificationType == "call" && callId.isNotBlank()
         ensureNotificationChannels()
@@ -78,7 +107,8 @@ class KhahishMessagingService : FirebaseMessagingService() {
             this, requestBase, activityIntent(),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val notificationId = (payload["notificationId"] ?: System.currentTimeMillis().toString()).hashCode()
+        // Use the call ID for incoming-call notifications so every cancel path targets the same ID.
+        val notificationId = if (isIncomingCall) callId.hashCode() else (payload["notificationId"] ?: System.currentTimeMillis().toString()).hashCode()
         val channelId = if (isIncomingCall) CALL_CHANNEL_ID else CHANNEL_ID
         val builder = NotificationCompat.Builder(this, channelId)
             .setSmallIcon(android.R.drawable.sym_action_chat)

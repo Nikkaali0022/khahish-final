@@ -23,15 +23,19 @@ class KhahishAgoraSession(
     private val onJoined: () -> Unit,
     private val onRemoteUserJoined: (Int) -> Unit,
     private val onRemoteUserLeft: (Int) -> Unit,
-    private val onFailure: (String) -> Unit
+    private val onFailure: (String) -> Unit,
+    private val onTokenRenewalFailure: (String) -> Unit = onFailure
 ) {
     private val appContext = context.applicationContext
     private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     @Volatile private var released = false
+    @Volatile private var joined = false
+    @Volatile private var cameraEnabled = true
     private var engine: RtcEngine? = null
 
     private val eventHandler = object : IRtcEngineEventHandler() {
         override fun onJoinChannelSuccess(channel: String?, uid: Int, elapsed: Int) {
+            joined = true
             onJoined()
         }
 
@@ -56,7 +60,10 @@ class KhahishAgoraSession(
                         engine?.renewToken(renewed.token)
                     }
                 },
-                onError = { message -> onFailure(message) }
+                onError = { message ->
+                    android.util.Log.e("KhahishAgoraSession", "RTC token renewal failed: $message")
+                    onTokenRenewalFailure(message)
+                }
             )
         }
     }
@@ -83,6 +90,8 @@ class KhahishAgoraSession(
 
             if (isVideoCall) {
                 rtc.enableVideo()
+                rtc.enableLocalVideo(true)
+                rtc.muteLocalVideoStream(false)
             } else {
                 rtc.disableVideo()
             }
@@ -112,7 +121,9 @@ class KhahishAgoraSession(
     }
 
     fun setupLocalVideo(surfaceView: SurfaceView) {
-        if (!isVideoCall) return
+        if (!isVideoCall || released) return
+        engine?.enableVideo()
+        engine?.enableLocalVideo(true)
         engine?.setupLocalVideo(
             VideoCanvas(surfaceView, VideoCanvas.RENDER_MODE_HIDDEN, credentials.uid)
         )
@@ -131,8 +142,18 @@ class KhahishAgoraSession(
     }
 
     fun setCameraEnabled(enabled: Boolean) {
-        if (isVideoCall) {
-            engine?.enableLocalVideo(enabled)
+        cameraEnabled = enabled
+        if (isVideoCall && !released) {
+            if (enabled) {
+                engine?.enableVideo()
+                engine?.enableLocalVideo(true)
+                engine?.muteLocalVideoStream(false)
+                engine?.startPreview()
+            } else {
+                engine?.muteLocalVideoStream(true)
+                engine?.enableLocalVideo(false)
+                engine?.stopPreview()
+            }
         }
     }
 

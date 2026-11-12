@@ -2,6 +2,7 @@ package com.khahish.app
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.content.Intent
 import android.media.MediaRecorder
 import android.media.MediaPlayer
 import android.net.Uri
@@ -16,6 +17,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -71,7 +73,8 @@ private data class KhahishStory(
     val mediaType: String,
     val createdAt: Long,
     val expiresAt: Long,
-    val audience: String = "everyone"
+    val audience: String = "everyone",
+    val linkUrl: String = ""
 )
 
 @Composable
@@ -88,9 +91,12 @@ fun KhahishUpdatesScreen(
     var showStoryChooser by remember { mutableStateOf(false) }
     var showMediaEditor by remember { mutableStateOf(false) }
     var showVoiceEditor by remember { mutableStateOf(false) }
+    var voiceAudienceMenuExpanded by remember { mutableStateOf(false) }
     var pendingMediaUri by remember { mutableStateOf<Uri?>(null) }
     var pendingMediaType by remember { mutableStateOf("image") }
     var storyCaption by remember { mutableStateOf("") }
+    var storyLinkUrl by remember { mutableStateOf("") }
+    var pendingExternalLink by remember { mutableStateOf("") }
     var storyText by remember { mutableStateOf("") }
     var uploading by remember { mutableStateOf(false) }
     var voiceRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
@@ -169,7 +175,7 @@ fun KhahishUpdatesScreen(
         }.addOnFailureListener { audienceAdding = false; Toast.makeText(context, "Username lookup failed: ${it.message}", Toast.LENGTH_LONG).show() }
     }
 
-    fun publishStory(text: String, mediaUrl: String = "", mediaType: String = "text") {
+    fun publishStory(text: String, mediaUrl: String = "", mediaType: String = "text", linkUrl: String = storyLinkUrl) {
         val now = System.currentTimeMillis()
         val data = hashMapOf<String, Any>(
             "ownerUid" to currentUid,
@@ -181,6 +187,12 @@ fun KhahishUpdatesScreen(
             "expiresAt" to now + 24L * 60L * 60L * 1000L,
             "audience" to storyAudience
         )
+        val normalizedLink = normalizeKhahishStoryLink(linkUrl)
+        if (normalizedLink == null) {
+            Toast.makeText(context, "Please enter a valid website link.", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (normalizedLink.isNotBlank()) data["linkUrl"] = normalizedLink
 
         fun saveForAudience(uids: List<String>) {
             val allowed = uids.filter { it.isNotBlank() && it != currentUid }.distinct().take(500)
@@ -203,7 +215,7 @@ fun KhahishUpdatesScreen(
                     .addOnFailureListener { Toast.makeText(context, "Could not load audience: ${it.message}", Toast.LENGTH_LONG).show() }
             }
             "my_contacts" -> {
-                db.collection("chats").whereArrayContains("members", currentUid).get()
+                db.collection("chats").whereArrayContains("visibleToUids", currentUid).get()
                     .addOnSuccessListener { snapshot ->
                         val recipients = snapshot.documents.flatMap { doc ->
                             val members = doc.get("members") as? List<*> ?: emptyList<Any>()
@@ -219,6 +231,10 @@ fun KhahishUpdatesScreen(
     }
 
     fun uploadStory(uri: Uri, type: String, caption: String = storyCaption) {
+        if (normalizeKhahishStoryLink(storyLinkUrl) == null) {
+            Toast.makeText(context, "Please enter a valid website link.", Toast.LENGTH_LONG).show()
+            return
+        }
         uploading = true
         uploadToCloudinary(
             context = context,
@@ -228,6 +244,7 @@ fun KhahishUpdatesScreen(
                 uploading = false
                 publishStory(caption, url, type)
                 storyCaption = ""
+                storyLinkUrl = ""
                 pendingMediaUri = null
                 showMediaEditor = false
             },
@@ -300,11 +317,16 @@ fun KhahishUpdatesScreen(
 
     fun publishVoiceStory() {
         val file = voicePreviewFile ?: return
+        if (normalizeKhahishStoryLink(storyLinkUrl) == null) {
+            Toast.makeText(context, "Please enter a valid website link.", Toast.LENGTH_LONG).show()
+            return
+        }
         uploading = true
         uploadToCloudinary(context, Uri.fromFile(file), "video", onSuccess = { url ->
             uploading = false
             publishStory(storyCaption, url, "voice")
             storyCaption = ""
+            storyLinkUrl = ""
             showVoiceEditor = false
             voicePreviewFile?.delete()
             voicePreviewFile = null
@@ -409,7 +431,8 @@ fun KhahishUpdatesScreen(
                         mediaType = doc.getString("mediaType") ?: "text",
                         createdAt = doc.getLong("createdAt") ?: 0L,
                         expiresAt = expires,
-                        audience = audience
+                        audience = audience,
+                        linkUrl = doc.getString("linkUrl").orEmpty()
                     )
                 }.sortedByDescending { it.createdAt }
             loading = false
@@ -775,6 +798,14 @@ fun KhahishUpdatesScreen(
                             )
                         }
                     }
+                    if (story.linkUrl.isNotBlank()) {
+                        TextButton(
+                            onClick = { pendingExternalLink = story.linkUrl },
+                            modifier = Modifier.padding(top = 6.dp)
+                        ) {
+                            Text("Open link  ↗", color = Color(0xFF70D7B8), fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                     Text(
                         relativeStoryTime(story.createdAt),
                         color = Color.White.copy(alpha = 0.75f),
@@ -880,7 +911,7 @@ fun KhahishUpdatesScreen(
                                         "Photo" -> imagePicker.launch("image/*")
                                         "Video" -> videoPicker.launch("video/*")
                                         "Text" -> { storyText = ""; showTextDialog = true }
-                                        "Voice" -> { storyCaption = ""; voicePreviewFile = null; showVoiceEditor = true }
+                                        "Voice" -> { storyCaption = ""; storyLinkUrl = ""; voicePreviewFile = null; showVoiceEditor = true }
                                     }
                                 }
                                 .padding(vertical = 9.dp, horizontal = 4.dp),
@@ -983,9 +1014,44 @@ fun KhahishUpdatesScreen(
                         onClick = { pendingMediaUri?.let { uploadStory(it, pendingMediaType, storyCaption) } }
                     ) { Icon(Icons.Default.Send, "Publish story", tint = Color(0xFF70D7B8)) }
                 }
+                OutlinedTextField(
+                    value = storyLinkUrl,
+                    onValueChange = { storyLinkUrl = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Add a website link (optional)") },
+                    singleLine = true,
+                    leadingIcon = { Text("↗") }
+                )
                 if (uploading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Green)
             }
         }
+    }
+
+    if (pendingExternalLink.isNotBlank()) {
+        AlertDialog(
+            onDismissRequest = { pendingExternalLink = "" },
+            title = { Text("Open external link?") },
+            text = { Text(pendingExternalLink) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val safeUri = runCatching {
+                        val parsed = Uri.parse(pendingExternalLink.trim())
+                        require(parsed.scheme.equals("https", ignoreCase = true) || parsed.scheme.equals("http", ignoreCase = true))
+                        require(!parsed.host.isNullOrBlank())
+                        require(parsed.userInfo == null)
+                        parsed
+                    }.getOrNull()
+                    if (safeUri != null) {
+                        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, safeUri)) }
+                            .onFailure { Toast.makeText(context, "Could not open this link.", Toast.LENGTH_LONG).show() }
+                    } else {
+                        Toast.makeText(context, "This link is not valid.", Toast.LENGTH_LONG).show()
+                    }
+                    pendingExternalLink = ""
+                }) { Text("Open") }
+            },
+            dismissButton = { TextButton(onClick = { pendingExternalLink = "" }) { Text("Cancel") } }
+        )
     }
 
     if (showVoiceEditor) {
@@ -994,11 +1060,44 @@ fun KhahishUpdatesScreen(
                 if (isRecordingVoice) cancelVoiceRecording()
                 voicePreviewFile?.delete()
                 voicePreviewFile = null
+                storyLinkUrl = ""
                 showVoiceEditor = false
             },
             title = { Text("Voice story") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Share with", color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+                        Box {
+                            TextButton(onClick = { voiceAudienceMenuExpanded = true }) {
+                                Text(
+                                    when (storyAudience) {
+                                        "close_friends" -> "Close Friends"
+                                        "my_contacts" -> "My Contacts"
+                                        "my_friends" -> "My Friends"
+                                        else -> "Everyone"
+                                    },
+                                    color = Green
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = voiceAudienceMenuExpanded,
+                                onDismissRequest = { voiceAudienceMenuExpanded = false }
+                            ) {
+                                listOf(
+                                    "close_friends" to "Close Friends",
+                                    "my_contacts" to "My Contacts",
+                                    "my_friends" to "My Friends",
+                                    "everyone" to "Everyone"
+                                ).forEach { (value, label) ->
+                                    DropdownMenuItem(
+                                        text = { Text(label) },
+                                        onClick = { storyAudience = value; voiceAudienceMenuExpanded = false }
+                                    )
+                                }
+                            }
+                        }
+                    }
                     Text(
                         when {
                             isRecordingVoice -> "Recording your voice story…"
@@ -1013,6 +1112,13 @@ fun KhahishUpdatesScreen(
                         modifier = Modifier.fillMaxWidth(),
                         placeholder = { Text("Add a caption...") },
                         maxLines = 2
+                    )
+                    OutlinedTextField(
+                        value = storyLinkUrl,
+                        onValueChange = { storyLinkUrl = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Add a website link (optional)") },
+                        singleLine = true
                     )
                     if (isRecordingVoice) {
                         LinearProgressIndicator(Modifier.fillMaxWidth(), color = Green)
@@ -1068,6 +1174,7 @@ fun KhahishUpdatesScreen(
                     if (isRecordingVoice) cancelVoiceRecording()
                     voicePreviewFile?.delete()
                     voicePreviewFile = null
+                    storyLinkUrl = ""
                     showVoiceEditor = false
                 }) { Text("Cancel") }
             }
@@ -1086,13 +1193,25 @@ fun KhahishUpdatesScreen(
                     placeholder = { Text("What's on your mind?") },
                     minLines = 3
                 )
+                OutlinedTextField(
+                    value = storyLinkUrl,
+                    onValueChange = { storyLinkUrl = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Add a website link (optional)") },
+                    singleLine = true
+                )
             },
             confirmButton = {
                 TextButton(onClick = {
                     if (storyText.isNotBlank()) {
-                        publishStory(storyText)
-                        storyText = ""
-                        showTextDialog = false
+                        if (normalizeKhahishStoryLink(storyLinkUrl) == null) {
+                            Toast.makeText(context, "Please enter a valid website link.", Toast.LENGTH_LONG).show()
+                        } else {
+                            publishStory(storyText)
+                            storyText = ""
+                            storyLinkUrl = ""
+                            showTextDialog = false
+                        }
                     }
                 }) { Text("Share") }
             },
@@ -1104,6 +1223,24 @@ fun KhahishUpdatesScreen(
 }
 
 
+
+private fun normalizeKhahishStoryLink(raw: String): String? {
+    val value = raw.trim()
+    if (value.isBlank()) return ""
+    if (value.length > 2048 || value.any { it.isWhitespace() || it.isISOControl() }) return null
+
+    val candidate = if (
+        value.startsWith("http://", true) || value.startsWith("https://", true)
+    ) value else "https://$value"
+    val parsed = runCatching { Uri.parse(candidate) }.getOrNull() ?: return null
+    val scheme = parsed.scheme?.lowercase()
+    if (
+        scheme !in setOf("http", "https") ||
+        parsed.host.isNullOrBlank() ||
+        parsed.userInfo != null
+    ) return null
+    return candidate
+}
 
 private fun relativeStoryTime(timestamp: Long): String {
     if (timestamp <= 0L) return "just now"

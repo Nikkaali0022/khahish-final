@@ -1,0 +1,47 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Soft emerald glow halo -->
+    <path
+        android:fillColor="#B3B8F3D8"
+        android:pathData="M54,2a52,52 0,1 0,0 104a52,52 0,1 0,0 -104" />
+    <path
+        android:fillColor="#6618A889"
+        android:pathData="M54,6a48,48 0,1 0,0 96a48,48 0,1 0,0 -96" />
+
+    <!-- Circular emerald badge with bright outline -->
+    <path
+        android:fillColor="#18A889"
+        android:pathData="M54,10a44,44 0,1 0,0 88a44,44 0,1 0,0 -88" />
+    <path
+        android:fillColor="#075C4E"
+        android:pathData="M54,15a39,39 0,1 0,0 78a39,39 0,1 0,0 -78" />
+
+    <!-- Subtle upper highlight -->
+    <path
+        android:fillColor="#1837D6A5"
+        android:pathData="M27,27c15,-14 39,-17 56,-5c-9,0 -18,5 -26,13C45,47 33,48 22,45c0,-7 2,-13 5,-18z" />
+
+    <!-- Bold white K centered in the circle -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M29,31h10v20l20,-20h15L51,54l25,24H61L39,58v20H29z" />
+
+    <!-- Chat bubble at the upper-right of the K -->
+    <path
+        android:fillColor="#F4FFF9"
+        android:pathData="M65,20c0,-4 3,-7 7,-7h17c4,0 7,3 7,7v10c0,4 -3,7 -7,7H82l-8,6v-6c-5,-1 -9,-4 -9,-9z" />
+
+    <!-- Three emerald message dots -->
+    <path
+        android:fillColor="#087F68"
+        android:pathData="M74,23a2,2 0,1 0,0 4a2,2 0,1 0,0 -4M81,23a2,2 0,1 0,0 4a2,2 0,1 0,0 -4M88,23a2,2 0,1 0,0 4a2,2 0,1 0,0 -4" />
+
+    <!-- Mint motion swoosh -->
+    <path
+        android:fillColor="#B8F3D8"
+        android:pathData="M23,79c19,8 42,8 63,-1c-16,13 -43,17 -63,1z" />
+</vector>
