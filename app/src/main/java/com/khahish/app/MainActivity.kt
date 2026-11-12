@@ -2817,7 +2817,7 @@ fun ConversationScreen(
             voiceRecorder = recorder
             voiceRecordingFile = output
             isRecordingVoice = true
-            showToast(context, "Recording… tap the mic again to send")
+            showToast(context, "Recording… slide left to cancel, release to send")
         } catch (error: Exception) {
             voiceRecorder?.release()
             voiceRecorder = null
