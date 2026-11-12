@@ -2,6 +2,8 @@ package com.khahish.app
 
 import android.content.Context
 import android.content.Intent
+import android.os.Build
+import android.app.NotificationManager
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -408,6 +410,26 @@ fun KhahishSettingsScreen(
                     })
                 } catch (_: Exception) {
                     Toast.makeText(context, "Unable to open notification settings", Toast.LENGTH_SHORT).show()
+                }
+            }
+            if (Build.VERSION.SDK_INT >= 34) {
+                KhahishSettingsItem(Icons.Default.Call, "Full-screen call alerts", "Allow incoming calls to appear over the lock screen") {
+                    try {
+                        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                        if (!notificationManager.canUseFullScreenIntent()) {
+                            context.startActivity(
+                                Intent(android.provider.Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
+                                    data = Uri.parse("package:${context.packageName}")
+                                }
+                            )
+                        } else {
+                            context.startActivity(Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+                            })
+                        }
+                    } catch (_: Exception) {
+                        Toast.makeText(context, "Unable to open full-screen call settings", Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
             KhahishSettingsItem(Icons.Default.Storage, "Storage and media", "Manage downloads and clear temporary cache") {
