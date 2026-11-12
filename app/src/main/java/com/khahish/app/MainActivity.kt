@@ -1877,11 +1877,20 @@ fun ChatList(
                                         val members = listOf(currentUid, request.senderUid).sorted()
                                         val batch = db.batch()
                                         batch.update(reqRef, mapOf("status" to "accepted", "acceptedBy" to currentUid, "handledBy" to currentUid, "acceptedAt" to now))
-                                        batch.set(chatRef, mapOf("members" to members, "memberNames" to mapOf(currentUid to (FirebaseAuth.getInstance().currentUser?.displayName ?: "You"), request.senderUid to request.senderName), "lastMessage" to "", "lastMessageAt" to 0L, "updatedAt" to now, "createdAt" to now, "createdBy" to currentUid, "disappearingDurationMs" to 0L, "secretLockedForUids" to emptyList<String>()))
+                                        batch.set(chatRef, mapOf("members" to members, "memberNames" to mapOf(currentUid to (FirebaseAuth.getInstance().currentUser?.displayName ?: "You"), request.senderUid to request.senderName), "lastMessage" to "", "lastMessageAt" to 0L, "updatedAt" to now, "createdAt" to now, "createdBy" to currentUid, "disappearingDurationMs" to 0L, "secretLockedForUids" to members))
                                         batch.commit().addOnSuccessListener {
-                                            showToast(context, "Request accepted. Chat is ready.")
-                                            showRequestsScreen = false
-                                            onOpen(Chat(request.id, request.senderUid, request.senderName, "", "", request.senderName.firstOrNull()?.uppercase() ?: "K"))
+                                            KhahishSecretChatApi.syncChatVisibility(
+                                                request.id,
+                                                onSuccess = {
+                                                    showToast(context, "Request accepted. Chat is ready.")
+                                                    showRequestsScreen = false
+                                                    onOpen(Chat(request.id, request.senderUid, request.senderName, "", "", request.senderName.firstOrNull()?.uppercase() ?: "K"))
+                                                },
+                                                onError = { message ->
+                                                    showToast(context, "Chat created but privacy sync is pending. It remains hidden until synchronization succeeds. $message")
+                                                    showRequestsScreen = false
+                                                }
+                                            )
                                         }.addOnFailureListener { showToast(context, "Could not accept request: ${it.message}") }
                                     }, colors = ButtonDefaults.buttonColors(containerColor = Green)) { Text("Accept", color = Color.White) }
                                 }
