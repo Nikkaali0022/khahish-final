@@ -103,6 +103,20 @@ internal object KhahishSecretChatApi {
         request("POST", "/lock", JSONObject(), { onComplete() }, { onComplete() })
     }
 
+    fun syncChatVisibility(
+        chatId: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        request(
+            "POST",
+            "/sync-chat",
+            JSONObject().put("chatId", chatId),
+            { onSuccess() },
+            onError
+        )
+    }
+
     private fun parseExpiry(json: JSONObject): Long {
         val raw = json.optString("expiresAt")
         return try {
