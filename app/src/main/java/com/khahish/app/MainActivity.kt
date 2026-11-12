@@ -1598,6 +1598,7 @@ fun ChatList(
     DisposableEffect(currentUid, lockedContactUids.joinToString("|"), showOnlyLockedChats) {
         val registration = db.collection("chats")
             .whereArrayContains("members", currentUid)
+            .whereArrayDoesNotContain("secretLockedForUids", currentUid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     loading = false
@@ -1876,7 +1877,7 @@ fun ChatList(
                                         val members = listOf(currentUid, request.senderUid).sorted()
                                         val batch = db.batch()
                                         batch.update(reqRef, mapOf("status" to "accepted", "acceptedBy" to currentUid, "handledBy" to currentUid, "acceptedAt" to now))
-                                        batch.set(chatRef, mapOf("members" to members, "memberNames" to mapOf(currentUid to (FirebaseAuth.getInstance().currentUser?.displayName ?: "You"), request.senderUid to request.senderName), "lastMessage" to "", "lastMessageAt" to 0L, "updatedAt" to now, "createdAt" to now, "createdBy" to currentUid, "disappearingDurationMs" to 0L))
+                                        batch.set(chatRef, mapOf("members" to members, "memberNames" to mapOf(currentUid to (FirebaseAuth.getInstance().currentUser?.displayName ?: "You"), request.senderUid to request.senderName), "lastMessage" to "", "lastMessageAt" to 0L, "updatedAt" to now, "createdAt" to now, "createdBy" to currentUid, "disappearingDurationMs" to 0L, "secretLockedForUids" to emptyList<String>()))
                                         batch.commit().addOnSuccessListener {
                                             showToast(context, "Request accepted. Chat is ready.")
                                             showRequestsScreen = false
