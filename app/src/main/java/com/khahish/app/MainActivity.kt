@@ -3803,7 +3803,6 @@ fun ConversationScreen(
                 modifier = Modifier
                     .padding(start = 4.dp)
                     .size(54.dp)
-                    .graphicsLayer { translationX = voiceDragOffset }
                     .shadow(8.dp, CircleShape)
                     .background(
                         if (voiceCancelGesture) MaterialTheme.colorScheme.error else Green,
