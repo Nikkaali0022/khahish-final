@@ -357,7 +357,8 @@ service cloud.firestore {
             && (!isSecretLockedChat(chatId) || hasActiveSecretChatUnlock())
           )
         );
-      allow list: if signedIn() && request.auth.uid in resource.data.members;
+      // Locked private chats are hidden from chat-list queries until the owner unlocks them.
+      allow list: if canAccessChatContent(chatId);
 
       allow create: if signedIn()
         && request.resource.data.members is list
