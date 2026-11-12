@@ -107,7 +107,8 @@ class KhahishMessagingService : FirebaseMessagingService() {
             this, requestBase, activityIntent(),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val notificationId = (payload["notificationId"] ?: System.currentTimeMillis().toString()).hashCode()
+        // Use the call ID for incoming-call notifications so every cancel path targets the same ID.
+        val notificationId = if (isIncomingCall) callId.hashCode() else (payload["notificationId"] ?: System.currentTimeMillis().toString()).hashCode()
         val channelId = if (isIncomingCall) CALL_CHANNEL_ID else CHANNEL_ID
         val builder = NotificationCompat.Builder(this, channelId)
             .setSmallIcon(android.R.drawable.sym_action_chat)
