@@ -158,7 +158,8 @@ test("group creation requires at least three members", async () => {
     lastMessage: "Group created",
     lastMessageAt: Date.now(),
     updatedAt: Date.now(),
-    disappearingDurationMs: 0
+    disappearingDurationMs: 0,
+    secretLockedForUids: []
   };
   await assertSucceeds(setDoc(doc(db("alice"), "chats/group-three"), group));
 
@@ -166,6 +167,44 @@ test("group creation requires at least three members", async () => {
     ...group,
     members: ["alice", "bob"],
     memberNames: { alice: "Alice", bob: "Bob" }
+  }));
+});
+
+test("secret-locked chat previews are excluded by the per-user server index", async () => {
+  await seed("users/alice/secretChatLock/config", {
+    passwordHash: "not-a-real-hash",
+    lockedContactUids: ["bob"]
+  });
+  await seed("chats/alice_bob", {
+    members: ["alice", "bob"],
+    memberNames: { alice: "Alice", bob: "Bob" },
+    lastMessage: "Private preview",
+    lastMessageAt: Date.now(),
+    updatedAt: Date.now(),
+    secretLockedForUids: ["alice"]
+  });
+
+  const aliceQuery = query(
+    collection(db("alice"), "chats"),
+    where("members", "array-contains", "alice"),
+    where("secretLockedForUids", "not-in", ["alice"])
+  );
+  const bobQuery = query(
+    collection(db("bob"), "chats"),
+    where("members", "array-contains", "bob"),
+    where("secretLockedForUids", "not-in", ["bob"])
+  );
+  await assertSucceeds(getDocs(aliceQuery));
+  await assertSucceeds(getDocs(bobQuery));
+  const aliceResults = await getDocs(aliceQuery);
+  const bobResults = await getDocs(bobQuery);
+  assert.equal(aliceResults.size, 0);
+  assert.equal(bobResults.size, 1);
+
+  await assertFails(getDoc(doc(db("alice"), "chats/alice_bob")));
+  await assertSucceeds(getDoc(doc(db("bob"), "chats/alice_bob")));
+  await assertFails(updateDoc(doc(db("alice"), "chats/alice_bob"), {
+    secretLockedForUids: []
   }));
 });
 
@@ -196,7 +235,10 @@ test("private chat is created only in the same batch that accepts its request", 
     updatedAt: now,
     createdAt: now,
     createdBy: "bob",
-    disappearingDurationMs: 0
+    disappearingDurationMs: 0,
+    // A newly created private chat is hidden from both users until the Worker
+    // reads both lock configs and writes the final per-user visibility index.
+    secretLockedForUids: ["alice", "bob"]
   });
   await assertSucceeds(batch.commit());
 
@@ -208,7 +250,8 @@ test("private chat is created only in the same batch that accepts its request", 
     updatedAt: now,
     createdAt: now,
     createdBy: "alice",
-    disappearingDurationMs: 0
+    disappearingDurationMs: 0,
+    secretLockedForUids: ["alice", "carol"]
   }));
 });
 
