@@ -1,5 +1,6 @@
 package com.khahish.app
 
+import android.app.Activity
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
@@ -57,7 +58,7 @@ class KhahishScreenShareService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val receiver = intent?.getParcelableExtra(EXTRA_READY_RECEIVER) as? ResultReceiver
         // onCreate() has already promoted this service to the mediaProjection foreground type.
-        receiver?.send(RESULT_OK, Bundle())
+        receiver?.send(Activity.RESULT_OK, Bundle())
         return START_NOT_STICKY
     }
 
