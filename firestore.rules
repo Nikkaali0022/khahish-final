@@ -59,13 +59,13 @@ service cloud.firestore {
     function hasActiveSecretChatUnlock() {
       return signedIn()
         && exists(
-          /databases/$(database)/documents/users/$(request.auth.uid)/secretChatLock/sessions/current
+          /databases/$(database)/documents/users/$(request.auth.uid)/secretChatLock/config/sessions/current
         )
         && get(
-          /databases/$(database)/documents/users/$(request.auth.uid)/secretChatLock/sessions/current
+          /databases/$(database)/documents/users/$(request.auth.uid)/secretChatLock/config/sessions/current
         ).data.get('expiresAt', null) is timestamp
         && get(
-          /databases/$(database)/documents/users/$(request.auth.uid)/secretChatLock/sessions/current
+          /databases/$(database)/documents/users/$(request.auth.uid)/secretChatLock/config/sessions/current
         ).data.expiresAt > request.time;
     }
 
