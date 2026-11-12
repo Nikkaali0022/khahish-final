@@ -357,10 +357,9 @@ service cloud.firestore {
             && (!isSecretLockedChat(chatId) || hasActiveSecretChatUnlock())
           )
         );
-      // The Cloudflare Worker maintains this server-controlled index per user.
-      // The chat list queries only the server-maintained visibleToUids array.
-      // The Worker alone maintains visibleToUids after validating every member's lock config.
-      // This single array index supports a secure, index-friendly chat-list query.
+      // Private-chat visibility is Worker-managed; group visibility mirrors the
+      // member list and is validated on every group membership change.
+      // The single visibleToUids array supports a secure, index-friendly query.
       allow list: if signedIn()
         && request.auth.uid in resource.data.get('visibleToUids', []);
 
@@ -377,6 +376,7 @@ service cloud.firestore {
             && request.resource.data.visibleToUids is list
             && request.resource.data.visibleToUids.size() == request.resource.data.members.size()
             && request.resource.data.members.hasAll(request.resource.data.visibleToUids)
+            && request.resource.data.visibleToUids.hasAll(request.resource.data.members)
             && request.resource.data.members.size() >= 3
             && request.resource.data.groupName is string
             && request.resource.data.groupAdmins is list
