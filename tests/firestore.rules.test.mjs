@@ -233,7 +233,7 @@ test("secret-locked chat previews are excluded by the per-user server index", as
   await assertSucceeds(getDoc(doc(db("bob"), "chats/alice_bob")));
 
   // The Locked Chats hub uses direct document reads, gated by the server session.
-  await seed("users/alice/secretChatLock/sessions/current", {
+  await seed("users/alice/secretChatLock/config/sessions/current", {
     expiresAt: new Date(Date.now() + 10 * 60 * 1000)
   });
   await assertSucceeds(getDoc(doc(db("alice"), "chats/alice_bob")));
