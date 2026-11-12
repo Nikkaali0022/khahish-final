@@ -359,8 +359,9 @@ service cloud.firestore {
         );
       // The Cloudflare Worker maintains this server-controlled index per user.
       // The matching array-not-contains query keeps locked chat previews out of list results.
-      allow list: if isChatMember(chatId)
-        && resource.data.get('secretLockedFor_' + request.auth.uid, false) == false;
+      // The Worker alone maintains visibleToUids after validating every member's lock config.
+      // This single array index supports a secure, index-friendly chat-list query.
+      allow list: if request.auth.uid in resource.data.get('visibleToUids', []);
 
       allow create: if signedIn()
         && request.resource.data.members is list
@@ -372,7 +373,9 @@ service cloud.firestore {
         && (
           (
             request.resource.data.get('isGroup', false) == true
-            && request.resource.data.get('secretLockedFor_' + request.auth.uid, false) == false
+            && request.resource.data.visibleToUids is list
+            && request.resource.data.visibleToUids.size() == request.resource.data.members.size()
+            && request.resource.data.members.hasAll(request.resource.data.visibleToUids)
             && request.resource.data.members.size() >= 3
             && request.resource.data.groupName is string
             && request.resource.data.groupAdmins is list
@@ -387,8 +390,8 @@ service cloud.firestore {
             && request.resource.data.members[0] != request.resource.data.members[1]
             // New private chats start hidden from both participants until the
             // authenticated Worker computes each participant's actual lock state.
-            && request.resource.data.get('secretLockedFor_' + request.resource.data.members[0], false) == true
-            && request.resource.data.get('secretLockedFor_' + request.resource.data.members[1], false) == true
+            && request.resource.data.visibleToUids is list
+            && request.resource.data.visibleToUids.size() == 0
             && request.resource.data.createdBy == request.auth.uid
             && requestParticipantsMatchChat(chatId, request.resource.data.members)
             && privateChatIsUnblocked(request.resource.data.members)
