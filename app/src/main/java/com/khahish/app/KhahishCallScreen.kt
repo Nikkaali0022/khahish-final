@@ -78,7 +78,6 @@ fun KhahishCallScreen(
     var selectedAudioRoute by remember(call.id) { mutableStateOf(if (call.isVideo) "speaker" else "earpiece") }
     var audioRouteMenuExpanded by remember(call.id) { mutableStateOf(false) }
     var callOptionsExpanded by remember(call.id) { mutableStateOf(false) }
-    var callOptionMessage by remember(call.id) { mutableStateOf("") }
     var isScreenSharing by remember(call.id) { mutableStateOf(false) }
     var credentials by remember(call.id) { mutableStateOf<AgoraRtcCredentials?>(null) }
     var session by remember(call.id) { mutableStateOf<KhahishAgoraSession?>(null) }
@@ -356,33 +355,9 @@ fun KhahishCallScreen(
                     Icon(Icons.Default.MoreVert, contentDescription = "More call options", tint = colors.onSurface)
                 }
                 DropdownMenu(expanded = callOptionsExpanded, onDismissRequest = { callOptionsExpanded = false }) {
-                    DropdownMenuItem(text = { Text(if (isScreenSharing) "Stop Screen Share" else "Share Screen") }, onClick = {
-                        callOptionsExpanded = false
-                        toggleScreenSharing()
-                    })
-                    DropdownMenuItem(text = { Text("Add Participant") }, onClick = {
-                        callOptionsExpanded = false
-                        callOptionMessage = "Group calling is not enabled for this call yet."
-                    })
-                    DropdownMenuItem(text = { Text("Open Chat") }, onClick = {
-                        callOptionsExpanded = false
-                        callOptionMessage = "In-call chat is not enabled yet. Your call will remain connected."
-                    })
                     DropdownMenuItem(text = { Text("Audio Devices") }, onClick = {
                         callOptionsExpanded = false
                         audioRouteMenuExpanded = true
-                    })
-                    DropdownMenuItem(text = { Text("Live Captions") }, onClick = {
-                        callOptionsExpanded = false
-                        callOptionMessage = "Live captions are not enabled yet."
-                    })
-                    DropdownMenuItem(text = { Text("Call Security") }, onClick = {
-                        callOptionsExpanded = false
-                        callOptionMessage = "Call security verification is not available for this session yet."
-                    })
-                    DropdownMenuItem(text = { Text("Call Settings") }, onClick = {
-                        callOptionsExpanded = false
-                        callOptionMessage = "Use the existing microphone, camera and audio-device controls on this screen."
                     })
                 }
             }
@@ -621,14 +596,6 @@ fun KhahishCallScreen(
         }
     }
 
-    if (callOptionMessage.isNotBlank()) {
-        AlertDialog(
-            onDismissRequest = { callOptionMessage = "" },
-            title = { Text("Call option") },
-            text = { Text(callOptionMessage) },
-            confirmButton = { TextButton(onClick = { callOptionMessage = "" }) { Text("OK") } }
-        )
-    }
 }
 
 @Composable
