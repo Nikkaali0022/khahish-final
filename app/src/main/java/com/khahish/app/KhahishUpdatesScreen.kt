@@ -186,8 +186,26 @@ fun KhahishUpdatesScreen(
             "expiresAt" to now + 24L * 60L * 60L * 1000L,
             "audience" to storyAudience
         )
-        val normalizedLink = linkUrl.trim().let { value ->
-            if (value.isBlank()) "" else if (value.startsWith("http://", true) || value.startsWith("https://", true)) value else "https://$value"
+        val rawLink = linkUrl.trim()
+        val normalizedLink = if (rawLink.isBlank()) {
+            ""
+        } else {
+            val candidate = if (
+                rawLink.startsWith("http://", true) || rawLink.startsWith("https://", true)
+            ) rawLink else "https://$rawLink"
+            val parsed = runCatching { Uri.parse(candidate) }.getOrNull()
+            val scheme = parsed?.scheme?.lowercase()
+            if (
+                candidate.length > 2048 ||
+                rawLink.any { it.isWhitespace() || it.isISOControl() } ||
+                scheme !in setOf("http", "https") ||
+                parsed?.host.isNullOrBlank() ||
+                parsed?.userInfo != null
+            ) {
+                Toast.makeText(context, "Please enter a valid website link.", Toast.LENGTH_LONG).show()
+                return
+            }
+            candidate
         }
         if (normalizedLink.isNotBlank()) data["linkUrl"] = normalizedLink
 
@@ -212,7 +230,7 @@ fun KhahishUpdatesScreen(
                     .addOnFailureListener { Toast.makeText(context, "Could not load audience: ${it.message}", Toast.LENGTH_LONG).show() }
             }
             "my_contacts" -> {
-                db.collection("chats").whereArrayContains("members", currentUid).get()
+                db.collection("chats").whereArrayContains("visibleToUids", currentUid).get()
                     .addOnSuccessListener { snapshot ->
                         val recipients = snapshot.documents.flatMap { doc ->
                             val members = doc.get("members") as? List<*> ?: emptyList<Any>()
@@ -1024,8 +1042,9 @@ fun KhahishUpdatesScreen(
                 TextButton(onClick = {
                     val safeUri = runCatching {
                         val parsed = Uri.parse(pendingExternalLink.trim())
-                        require(parsed.scheme == "https" || parsed.scheme == "http")
+                        require(parsed.scheme.equals("https", ignoreCase = true) || parsed.scheme.equals("http", ignoreCase = true))
                         require(!parsed.host.isNullOrBlank())
+                        require(parsed.userInfo == null)
                         parsed
                     }.getOrNull()
                     if (safeUri != null) {
