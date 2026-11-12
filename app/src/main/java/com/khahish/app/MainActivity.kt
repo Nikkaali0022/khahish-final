@@ -1597,7 +1597,6 @@ fun ChatList(
 
     DisposableEffect(currentUid, lockedContactUids.joinToString("|"), showOnlyLockedChats) {
         val registration = db.collection("chats")
-            .whereArrayContains("members", currentUid)
             .whereArrayContains("visibleToUids", currentUid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
