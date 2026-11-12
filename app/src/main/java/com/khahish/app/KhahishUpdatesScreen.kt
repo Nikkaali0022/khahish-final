@@ -1204,10 +1204,14 @@ fun KhahishUpdatesScreen(
             confirmButton = {
                 TextButton(onClick = {
                     if (storyText.isNotBlank()) {
-                        publishStory(storyText)
-                        storyText = ""
-                        storyLinkUrl = ""
-                        showTextDialog = false
+                        if (normalizeKhahishStoryLink(storyLinkUrl) == null) {
+                            Toast.makeText(context, "Please enter a valid website link.", Toast.LENGTH_LONG).show()
+                        } else {
+                            publishStory(storyText)
+                            storyText = ""
+                            storyLinkUrl = ""
+                            showTextDialog = false
+                        }
                     }
                 }) { Text("Share") }
             },
