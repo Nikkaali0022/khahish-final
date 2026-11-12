@@ -187,26 +187,10 @@ fun KhahishUpdatesScreen(
             "expiresAt" to now + 24L * 60L * 60L * 1000L,
             "audience" to storyAudience
         )
-        val rawLink = linkUrl.trim()
-        val normalizedLink = if (rawLink.isBlank()) {
-            ""
-        } else {
-            val candidate = if (
-                rawLink.startsWith("http://", true) || rawLink.startsWith("https://", true)
-            ) rawLink else "https://$rawLink"
-            val parsed = runCatching { Uri.parse(candidate) }.getOrNull()
-            val scheme = parsed?.scheme?.lowercase()
-            if (
-                candidate.length > 2048 ||
-                rawLink.any { it.isWhitespace() || it.isISOControl() } ||
-                scheme !in setOf("http", "https") ||
-                parsed?.host.isNullOrBlank() ||
-                parsed?.userInfo != null
-            ) {
-                Toast.makeText(context, "Please enter a valid website link.", Toast.LENGTH_LONG).show()
-                return
-            }
-            candidate
+        val normalizedLink = normalizeKhahishStoryLink(linkUrl)
+        if (normalizedLink == null) {
+            Toast.makeText(context, "Please enter a valid website link.", Toast.LENGTH_LONG).show()
+            return
         }
         if (normalizedLink.isNotBlank()) data["linkUrl"] = normalizedLink
 
@@ -247,6 +231,10 @@ fun KhahishUpdatesScreen(
     }
 
     fun uploadStory(uri: Uri, type: String, caption: String = storyCaption) {
+        if (normalizeKhahishStoryLink(storyLinkUrl) == null) {
+            Toast.makeText(context, "Please enter a valid website link.", Toast.LENGTH_LONG).show()
+            return
+        }
         uploading = true
         uploadToCloudinary(
             context = context,
@@ -329,6 +317,10 @@ fun KhahishUpdatesScreen(
 
     fun publishVoiceStory() {
         val file = voicePreviewFile ?: return
+        if (normalizeKhahishStoryLink(storyLinkUrl) == null) {
+            Toast.makeText(context, "Please enter a valid website link.", Toast.LENGTH_LONG).show()
+            return
+        }
         uploading = true
         uploadToCloudinary(context, Uri.fromFile(file), "video", onSuccess = { url ->
             uploading = false
@@ -1227,6 +1219,24 @@ fun KhahishUpdatesScreen(
 }
 
 
+
+private fun normalizeKhahishStoryLink(raw: String): String? {
+    val value = raw.trim()
+    if (value.isBlank()) return ""
+    if (value.length > 2048 || value.any { it.isWhitespace() || it.isISOControl() }) return null
+
+    val candidate = if (
+        value.startsWith("http://", true) || value.startsWith("https://", true)
+    ) value else "https://$value"
+    val parsed = runCatching { Uri.parse(candidate) }.getOrNull() ?: return null
+    val scheme = parsed.scheme?.lowercase()
+    if (
+        scheme !in setOf("http", "https") ||
+        parsed.host.isNullOrBlank() ||
+        parsed.userInfo != null
+    ) return null
+    return candidate
+}
 
 private fun relativeStoryTime(timestamp: Long): String {
     if (timestamp <= 0L) return "just now"
