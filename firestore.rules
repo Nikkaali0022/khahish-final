@@ -361,7 +361,8 @@ service cloud.firestore {
       // The chat list queries only the server-maintained visibleToUids array.
       // The Worker alone maintains visibleToUids after validating every member's lock config.
       // This single array index supports a secure, index-friendly chat-list query.
-      allow list: if request.auth.uid in resource.data.get('visibleToUids', []);
+      allow list: if signedIn()
+        && request.auth.uid in resource.data.get('visibleToUids', []);
 
       allow create: if signedIn()
         && request.resource.data.members is list
