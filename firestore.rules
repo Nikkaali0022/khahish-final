@@ -364,7 +364,6 @@ service cloud.firestore {
 
       allow create: if signedIn()
         && request.resource.data.secretLockedForUids is list
-        && request.resource.data.secretLockedForUids.size() == 0
         && request.resource.data.members is list
         && request.auth.uid in request.resource.data.members
         && request.resource.data.memberNames is map
@@ -374,6 +373,7 @@ service cloud.firestore {
         && (
           (
             request.resource.data.get('isGroup', false) == true
+            && request.resource.data.secretLockedForUids.size() == 0
             && request.resource.data.members.size() >= 3
             && request.resource.data.groupName is string
             && request.resource.data.groupAdmins is list
@@ -385,6 +385,11 @@ service cloud.firestore {
           || (
             request.resource.data.get('isGroup', false) != true
             && request.resource.data.members.size() == 2
+            && request.resource.data.members[0] != request.resource.data.members[1]
+            // New private chats start hidden from both participants until the
+            // authenticated Worker computes each participant's actual lock state.
+            && request.resource.data.secretLockedForUids.size() == 2
+            && request.resource.data.members.hasAll(request.resource.data.secretLockedForUids)
             && request.resource.data.createdBy == request.auth.uid
             && requestParticipantsMatchChat(chatId, request.resource.data.members)
             && privateChatIsUnblocked(request.resource.data.members)
