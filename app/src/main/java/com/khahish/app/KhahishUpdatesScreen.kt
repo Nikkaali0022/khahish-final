@@ -1068,6 +1068,7 @@ fun KhahishUpdatesScreen(
                 if (isRecordingVoice) cancelVoiceRecording()
                 voicePreviewFile?.delete()
                 voicePreviewFile = null
+                storyLinkUrl = ""
                 showVoiceEditor = false
             },
             title = { Text("Voice story") },
