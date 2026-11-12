@@ -91,6 +91,7 @@ fun KhahishUpdatesScreen(
     var showStoryChooser by remember { mutableStateOf(false) }
     var showMediaEditor by remember { mutableStateOf(false) }
     var showVoiceEditor by remember { mutableStateOf(false) }
+    var voiceAudienceMenuExpanded by remember { mutableStateOf(false) }
     var pendingMediaUri by remember { mutableStateOf<Uri?>(null) }
     var pendingMediaType by remember { mutableStateOf("image") }
     var storyCaption by remember { mutableStateOf("") }
@@ -333,6 +334,7 @@ fun KhahishUpdatesScreen(
             uploading = false
             publishStory(storyCaption, url, "voice")
             storyCaption = ""
+            storyLinkUrl = ""
             showVoiceEditor = false
             voicePreviewFile?.delete()
             voicePreviewFile = null
@@ -917,7 +919,7 @@ fun KhahishUpdatesScreen(
                                         "Photo" -> imagePicker.launch("image/*")
                                         "Video" -> videoPicker.launch("video/*")
                                         "Text" -> { storyText = ""; showTextDialog = true }
-                                        "Voice" -> { storyCaption = ""; voicePreviewFile = null; showVoiceEditor = true }
+                                        "Voice" -> { storyCaption = ""; storyLinkUrl = ""; voicePreviewFile = null; showVoiceEditor = true }
                                     }
                                 }
                                 .padding(vertical = 9.dp, horizontal = 4.dp),
@@ -1071,6 +1073,38 @@ fun KhahishUpdatesScreen(
             title = { Text("Voice story") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Share with", color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+                        Box {
+                            TextButton(onClick = { voiceAudienceMenuExpanded = true }) {
+                                Text(
+                                    when (storyAudience) {
+                                        "close_friends" -> "Close Friends"
+                                        "my_contacts" -> "My Contacts"
+                                        "my_friends" -> "My Friends"
+                                        else -> "Everyone"
+                                    },
+                                    color = Green
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = voiceAudienceMenuExpanded,
+                                onDismissRequest = { voiceAudienceMenuExpanded = false }
+                            ) {
+                                listOf(
+                                    "close_friends" to "Close Friends",
+                                    "my_contacts" to "My Contacts",
+                                    "my_friends" to "My Friends",
+                                    "everyone" to "Everyone"
+                                ).forEach { (value, label) ->
+                                    DropdownMenuItem(
+                                        text = { Text(label) },
+                                        onClick = { storyAudience = value; voiceAudienceMenuExpanded = false }
+                                    )
+                                }
+                            }
+                        }
+                    }
                     Text(
                         when {
                             isRecordingVoice -> "Recording your voice story…"
@@ -1085,6 +1119,13 @@ fun KhahishUpdatesScreen(
                         modifier = Modifier.fillMaxWidth(),
                         placeholder = { Text("Add a caption...") },
                         maxLines = 2
+                    )
+                    OutlinedTextField(
+                        value = storyLinkUrl,
+                        onValueChange = { storyLinkUrl = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Add a website link (optional)") },
+                        singleLine = true
                     )
                     if (isRecordingVoice) {
                         LinearProgressIndicator(Modifier.fillMaxWidth(), color = Green)
