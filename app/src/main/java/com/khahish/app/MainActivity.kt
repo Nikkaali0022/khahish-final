@@ -347,7 +347,12 @@ fun KhahishApp() {
     var showNewGroup by remember { mutableStateOf(false) }
     var activeCall by remember { mutableStateOf<KhahishCall?>(null) }
     var incomingCall by remember { mutableStateOf(false) }
+    var isCallMinimized by remember { mutableStateOf(false) }
     val latestActiveCall by rememberUpdatedState(activeCall)
+
+    LaunchedEffect(activeCall?.id) {
+        if (activeCall != null) isCallMinimized = false
+    }
 
     DisposableEffect(auth) {
         val listener = FirebaseAuth.AuthStateListener {
@@ -365,6 +370,27 @@ fun KhahishApp() {
         val notificationIntent = hostActivity?.consumePendingNotificationIntent()
             ?: return@LaunchedEffect
         val callId = notificationIntent.getStringExtra("khahish_call_id").orEmpty()
+        if (notificationIntent.getBooleanExtra("khahish_resume_call", false) && callId.isNotBlank()) {
+            if (activeCall?.id == callId) {
+                isCallMinimized = false
+                return@LaunchedEffect
+            }
+            FirebaseFirestore.getInstance().collection("calls").document(callId).get()
+                .addOnSuccessListener { snapshot ->
+                    val call = if (snapshot.exists()) KhahishCall.from(snapshot) else null
+                    if (call != null && call.status == "accepted" &&
+                        (call.callerUid == uid || call.calleeUid == uid)
+                    ) {
+                        activeCall = call
+                        incomingCall = call.calleeUid == uid
+                        isCallMinimized = false
+                        tab = "Calls"
+                    } else {
+                        Toast.makeText(appContext, "This call is no longer active.", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            return@LaunchedEffect
+        }
         if (callId.isNotBlank()) {
             FirebaseFirestore.getInstance().collection("calls").document(callId).get()
                 .addOnSuccessListener { snapshot ->
@@ -512,14 +538,11 @@ fun KhahishApp() {
 
     BackHandler(
         enabled = currentUser != null &&
-            (selectedChat != null || showNewChat || showNewGroup || profileTargetUid.isNotBlank() || tab != "Chats")
+            (selectedChat != null || showNewChat || showNewGroup || profileTargetUid.isNotBlank() || tab != "Chats" || (activeCall != null && isCallMinimized))
     ) {
         when {
+            activeCall != null && isCallMinimized -> isCallMinimized = false
             profileTargetUid.isNotBlank() -> profileTargetUid = ""
-            activeCall != null -> {
-                activeCall = null
-                incomingCall = false
-            }
             selectedChat != null -> selectedChat = null
             showNewGroup -> showNewGroup = false
             showNewChat -> showNewChat = false
@@ -578,6 +601,7 @@ fun KhahishApp() {
                 }
             }
         }
+        Box(Modifier.fillMaxSize()) {
         AnimatedContent(
             targetState = currentUser != null,
             transitionSpec = { fadeIn() togetherWith fadeOut() },
@@ -590,15 +614,6 @@ fun KhahishApp() {
 
                 if (user == null) {
                     AuthScreen { currentUser = auth.currentUser }
-                } else if (activeCall != null) {
-                    KhahishCallScreen(
-                        call = activeCall!!,
-                        isIncoming = incomingCall,
-                        onExit = {
-                            activeCall = null
-                            incomingCall = false
-                        }
-                    )
                 } else if (profileTargetUid.isNotBlank()) {
                     KhahishUserProfileScreen(
                         uid = profileTargetUid,
@@ -854,6 +869,21 @@ fun KhahishApp() {
                     }
                 }
             }
+        }
+        if (currentUser != null && activeCall != null) {
+            KhahishCallScreen(
+                call = activeCall!!,
+                isIncoming = incomingCall,
+                isMinimized = isCallMinimized,
+                onMinimize = { isCallMinimized = true },
+                onRestore = { isCallMinimized = false },
+                onExit = {
+                    activeCall = null
+                    incomingCall = false
+                    isCallMinimized = false
+                }
+            )
+        }
         }
     }
 }
