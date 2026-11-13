@@ -1401,6 +1401,8 @@ fun ChatList(
     val context = LocalContext.current
 
     var chats by remember { mutableStateOf(listOf<Chat>()) }
+    var chatListError by remember { mutableStateOf("") }
+    var chatListRetry by remember { mutableIntStateOf(0) }
     var incomingRequests by remember { mutableStateOf(listOf<MessageRequestItem>()) }
     var unreadCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     var loading by remember { mutableStateOf(true) }
@@ -1414,16 +1416,18 @@ fun ChatList(
     var hasMoreMessageSearchPages by remember { mutableStateOf(false) }
     var isLoadingMoreMessageSearch by remember { mutableStateOf(false) }
 
-    DisposableEffect(currentUid) {
+    DisposableEffect(currentUid, chatListRetry) {
         val registration = db.collection("chats")
             .whereArrayContains("members", currentUid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
+                    chatListError = error.message ?: "Could not load conversations."
                     loading = false
                     return@addSnapshotListener
                 }
 
                 if (snapshot != null) {
+                    chatListError = ""
                     val docs = snapshot.documents
 
                     chats = docs.mapNotNull { doc ->
@@ -1647,6 +1651,28 @@ fun ChatList(
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator(color = Green)
+            }
+
+            chatListError.isNotBlank() && chats.isEmpty() -> Box(
+                Modifier.fillMaxSize().padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.CloudOff, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(42.dp))
+                    Spacer(Modifier.height(12.dp))
+                    Text("Chats could not load", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                    Text(chatListError, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, textAlign = TextAlign.Center)
+                    Spacer(Modifier.height(12.dp))
+                    Button(onClick = {
+                        loading = true
+                        chatListError = ""
+                        chatListRetry++
+                    }, colors = ButtonDefaults.buttonColors(containerColor = Green)) {
+                        Icon(Icons.Default.Refresh, null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Try again")
+                    }
+                }
             }
 
             filtered.isEmpty() && incomingRequests.isEmpty() && messageSearchResults.isEmpty() && !isSearchingMessages -> Box(
