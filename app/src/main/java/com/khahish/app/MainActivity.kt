@@ -176,7 +176,8 @@ data class MessageItem(
     val uploadProgress: Int = -1,
     val localPreviewUri: String = "",
     val uploadUri: String = "",
-    val uploadFailed: Boolean = false
+    val uploadFailed: Boolean = false,
+    val deleteLocalFileAfterUpload: Boolean = false
 )
 
 private fun privateChatId(uid1: String, uid2: String): String =
@@ -2031,6 +2032,9 @@ fun ConversationScreen(
                 sendChatMessage(
                     chatRef, currentUserId, "", url, pendingMessage.mediaType, context
                 ) {
+                    if (pendingMessage.deleteLocalFileAfterUpload) {
+                        runCatching { File(Uri.parse(pendingMessage.uploadUri).path.orEmpty()).delete() }
+                    }
                     pendingMediaMessages = pendingMediaMessages.filterNot { it.id == pendingMessage.id }
                 }
             },
@@ -2245,23 +2249,23 @@ fun ConversationScreen(
             file?.delete()
             return
         }
-        isUploading = true
-        uploadToCloudinary(
-            context, Uri.fromFile(file), "video",
-            onSuccess = { url ->
-                isUploading = false
-                isSending = true
-                sendChatMessage(chatRef, currentUserId, "", url, "audio", context) {
-                    isSending = false
-                    file.delete()
-                }
-            },
-            onError = {
-                isUploading = false
-                file.delete()
-                showToast(context, it)
-            }
+        val voiceUri = Uri.fromFile(file)
+        val pendingVoice = MessageItem(
+            id = "local_upload_${java.util.UUID.randomUUID()}",
+            senderId = currentUserId,
+            mediaType = "audio",
+            timestamp = System.currentTimeMillis(),
+            uploadProgress = 0,
+            uploadUri = voiceUri.toString(),
+            deleteLocalFileAfterUpload = true
         )
+        pendingMediaMessages = pendingMediaMessages + pendingVoice
+        messageScrollScope.launch {
+            delay(120L)
+            val lastIndex = displayedMessages.lastIndex
+            if (lastIndex >= 0) messageListState.animateScrollToItem(lastIndex)
+        }
+        performChatMediaUpload(pendingVoice)
     }
 
     val voicePermissionLauncher = rememberLauncherForActivityResult(
@@ -2790,7 +2794,7 @@ fun ConversationScreen(
                                     Row(
                                         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
                                             .background(MaterialTheme.colorScheme.surfaceVariant)
-                                            .clickable { photoToView = msg.imageUrl }.padding(12.dp),
+                                            .clickable(enabled = msg.uploadProgress < 0) { photoToView = msg.imageUrl }.padding(12.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Icon(Icons.Default.VisibilityOff, null, tint = Green)
