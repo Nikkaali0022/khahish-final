@@ -432,7 +432,7 @@ fun KhahishCallScreen(
             )
         }
 
-        Spacer(Modifier.weight(1f))
+        if (call.isVideo) Spacer(Modifier.height(10.dp)) else Spacer(Modifier.weight(1f))
 
         if (isIncoming && currentCall.status == "ringing") {
             Row(
