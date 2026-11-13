@@ -40,14 +40,14 @@ class KhahishCallForegroundService : Service() {
 
         try {
             val notification = buildNotification(callId, peerName, isVideo)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 var types = android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
                 if (isVideo) types = types or android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
                 startForeground(NOTIFICATION_ID, notification, types)
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
-        } catch (_: SecurityException) {
+        } catch (_: Exception) {
             stopSelf()
         }
         return START_STICKY
