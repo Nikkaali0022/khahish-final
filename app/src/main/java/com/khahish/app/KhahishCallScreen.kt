@@ -95,6 +95,7 @@ fun KhahishCallScreen(
             currentCall.channelName,
             onSuccess = { token ->
                 credentials = token
+                KhahishCallForegroundService.start(context, currentCall, currentCall.isVideo)
                 val rtc = KhahishAgoraSession(
                     context = context,
                     credentials = token,
@@ -102,11 +103,13 @@ fun KhahishCallScreen(
                     onJoined = {
                         isJoined = true
                         statusText = "Connected"
-                        KhahishCallForegroundService.start(context, currentCall, currentCall.isVideo)
                     },
                     onRemoteUserJoined = { uid -> remoteUid = uid; statusText = "Connected" },
                     onRemoteUserLeft = { statusText = "The other person left the call" },
-                    onFailure = { errorText = it }
+                    onFailure = {
+                        errorText = it
+                        KhahishCallForegroundService.stop(context)
+                    }
                 )
                 session = rtc
                 rtc.join()
@@ -160,7 +163,7 @@ fun KhahishCallScreen(
                 when (updated.status) {
                     "accepted" -> {
                         statusText = "Connected"
-                        if (!isIncoming && session == null && !connectionStarted) {
+                        if (session == null && !connectionStarted) {
                             connectIfAllowed()
                         }
                     }
