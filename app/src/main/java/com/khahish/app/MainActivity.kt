@@ -33,9 +33,13 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -91,6 +95,7 @@ import java.io.File
 import java.util.Locale
 import kotlin.math.abs
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import java.util.concurrent.TimeUnit
 
 private const val CLOUDINARY_CLOUD_NAME = "koctiaes"
@@ -1938,8 +1943,18 @@ fun ConversationScreen(
     }
     var attachmentMenu by remember { mutableStateOf(false) }
     var isRecordingVoice by remember { mutableStateOf(false) }
+    var voiceLocked by remember { mutableStateOf(false) }
+    var voiceElapsedSeconds by remember { mutableLongStateOf(0L) }
     var voiceRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
     var voiceRecordingFile by remember { mutableStateOf<File?>(null) }
+    val voiceHaptic = LocalHapticFeedback.current
+
+    LaunchedEffect(isRecordingVoice) {
+        while (isRecordingVoice) {
+            delay(1000L)
+            voiceElapsedSeconds += 1L
+        }
+    }
     var selectedMessageIds by remember { mutableStateOf(setOf<String>()) }
     var editTarget by remember { mutableStateOf<MessageItem?>(null) }
     var editText by remember { mutableStateOf("") }
@@ -2197,31 +2212,37 @@ fun ConversationScreen(
             recorder.start()
             voiceRecorder = recorder
             voiceRecordingFile = output
+            voiceElapsedSeconds = 0L
+            voiceLocked = false
             isRecordingVoice = true
-            showToast(context, "Recording… tap the mic again to send")
         } catch (error: Exception) {
             voiceRecorder?.release()
             voiceRecorder = null
+            voiceRecordingFile = null
+            voiceLocked = false
             isRecordingVoice = false
             showToast(context, "Could not start recording: ${error.message}")
         }
     }
 
-    fun stopVoiceRecordingAndSend() {
+    fun finishVoiceRecording(send: Boolean) {
         val recorder = voiceRecorder
         val file = voiceRecordingFile
+        var stoppedSuccessfully = false
         try {
             recorder?.stop()
+            stoppedSuccessfully = recorder != null
         } catch (_: Exception) {
-            file?.delete()
-            showToast(context, "Voice recording was too short. Please try again.")
+            if (send) showToast(context, "Voice recording was too short. Please try again.")
         } finally {
             recorder?.release()
             voiceRecorder = null
-            isRecordingVoice = false
             voiceRecordingFile = null
+            isRecordingVoice = false
+            voiceLocked = false
+            voiceElapsedSeconds = 0L
         }
-        if (file == null || !file.exists() || file.length() < 1000L) {
+        if (!send || !stoppedSuccessfully || file == null || !file.exists() || file.length() < 1000L) {
             file?.delete()
             return
         }
@@ -2247,8 +2268,11 @@ fun ConversationScreen(
     val voicePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) startVoiceRecording()
-        else showToast(context, "Microphone permission is required for voice messages.")
+        if (granted) {
+            startVoiceRecording()
+            // Permission dialogs interrupt the initial press gesture; start in hands-free mode.
+            voiceLocked = true
+        } else showToast(context, "Microphone permission is required for voice messages.")
     }
 
     DisposableEffect(Unit) {
@@ -3054,71 +3078,126 @@ fun ConversationScreen(
             }
 
             OutlinedTextField(
-                value = text,
+                value = if (isRecordingVoice) {
+                    "●  %02d:%02d  %s".format(
+                        Locale.ROOT,
+                        voiceElapsedSeconds / 60L,
+                        voiceElapsedSeconds % 60L,
+                        if (voiceLocked) "Recording locked" else "Recording…"
+                    )
+                } else text,
                 onValueChange = {
-                    text = it
-                    updateTyping(it.isNotBlank())
+                    if (!isRecordingVoice) {
+                        text = it
+                        updateTyping(it.isNotBlank())
+                    }
                 },
                 modifier = Modifier.weight(1f),
+                readOnly = isRecordingVoice,
                 placeholder = { Text("Message...") },
                 shape = RoundedCornerShape(24.dp),
                 singleLine = true,
+                textStyle = androidx.compose.ui.text.TextStyle(
+                    color = if (isRecordingVoice) Color(0xFFE53935) else MaterialTheme.colorScheme.onSurface,
+                    fontWeight = if (isRecordingVoice) FontWeight.SemiBold else FontWeight.Normal
+                ),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surface,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                    focusedBorderColor = Color.Transparent,
-                    unfocusedBorderColor = Color.Transparent
+                    focusedTextColor = if (isRecordingVoice) Color(0xFFE53935) else MaterialTheme.colorScheme.onSurface,
+                    unfocusedTextColor = if (isRecordingVoice) Color(0xFFE53935) else MaterialTheme.colorScheme.onSurface,
+                    focusedContainerColor = if (isRecordingVoice) Color.White else MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = if (isRecordingVoice) Color.White else MaterialTheme.colorScheme.surface,
+                    focusedBorderColor = if (isRecordingVoice) Color(0xFFE53935).copy(alpha = 0.35f) else Color.Transparent,
+                    unfocusedBorderColor = if (isRecordingVoice) Color(0xFFE53935).copy(alpha = 0.35f) else Color.Transparent,
+                    cursorColor = Color(0xFFE53935)
                 )
             )
 
-            IconButton(
-                enabled = !isUploading && !isSending,
+            Box(
                 modifier = Modifier
                     .padding(start = 4.dp)
-                    .size(54.dp)
+                    .size(if (isRecordingVoice) 60.dp else 54.dp)
+                    .graphicsLayer {
+                        val scale = if (isRecordingVoice) 1.08f else 1f
+                        scaleX = scale
+                        scaleY = scale
+                    }
                     .shadow(8.dp, CircleShape)
-                    .background(Green, CircleShape),
-                onClick = {
-                    val message = text.trim()
-                    when {
-                        isRecordingVoice -> stopVoiceRecordingAndSend()
-                        message.isNotBlank() -> {
-                            text = ""
-                            updateTyping(false)
-                            isSending = true
-                            sendChatMessage(
-                                chatRef,
-                                currentUserId,
-                                message,
-                                "",
-                                "text",
-                                context,
-                                replyToMessageId = replyTarget?.id.orEmpty(),
-                                replyToText = replyTarget?.text?.ifBlank { replyTarget?.mediaType ?: "Media" }.orEmpty()
-                            ) {
-                                isSending = false
-                                replyTarget = null
+                    .background(Green, CircleShape)
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            val message = text.trim()
+                            when {
+                                isUploading || isSending -> Unit
+                                isRecordingVoice -> {
+                                    voiceHaptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    finishVoiceRecording(true)
+                                }
+                                message.isNotBlank() -> {
+                                    text = ""
+                                    updateTyping(false)
+                                    isSending = true
+                                    sendChatMessage(
+                                        chatRef,
+                                        currentUserId,
+                                        message,
+                                        "",
+                                        "text",
+                                        context,
+                                        replyToMessageId = replyTarget?.id.orEmpty(),
+                                        replyToText = replyTarget?.text?.ifBlank { replyTarget?.mediaType ?: "Media" }.orEmpty()
+                                    ) {
+                                        isSending = false
+                                        replyTarget = null
+                                    }
+                                }
+                                ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED -> {
+                                    voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                }
+                                else -> {
+                                    voiceHaptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    startVoiceRecording()
+                                    var lockedByGesture = false
+                                    var cancelledByGesture = false
+                                    awaitPointerEventScope {
+                                        while (true) {
+                                            val event = awaitPointerEvent()
+                                            val change = event.changes.firstOrNull() ?: break
+                                            val verticalDrag = change.position.y - down.position.y
+                                            val horizontalDrag = change.position.x - down.position.x
+                                            if (!lockedByGesture && verticalDrag < -72f) {
+                                                lockedByGesture = true
+                                                voiceLocked = true
+                                                voiceHaptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            } else if (!lockedByGesture && (verticalDrag > 95f || abs(horizontalDrag) > 125f)) {
+                                                cancelledByGesture = true
+                                            }
+                                            if (!change.pressed) break
+                                        }
+                                    }
+                                    voiceHaptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    if (!lockedByGesture) finishVoiceRecording(!cancelledByGesture)
+                                }
                             }
                         }
-                        ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED ->
-                            startVoiceRecording()
-                        else -> voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                    }
-                }
+                    },
+                contentAlignment = Alignment.Center
             ) {
                 Icon(
                     when {
-                        isRecordingVoice -> Icons.Default.Stop
+                        voiceLocked && isRecordingVoice -> Icons.Default.Lock
+                        isRecordingVoice -> Icons.Default.Mic
                         text.isNotBlank() -> Icons.Default.Send
                         else -> Icons.Default.Mic
                     },
                     when {
-                        isRecordingVoice -> "Stop and send voice message"
+                        voiceLocked && isRecordingVoice -> "Recording locked; tap to send"
+                        isRecordingVoice -> "Hold to record; swipe up to lock"
                         text.isNotBlank() -> "Send message"
-                        else -> "Record voice message"
+                        else -> "Press and hold to record voice"
                     },
                     tint = Color.White,
-                    modifier = Modifier.size(23.dp)
+                    modifier = Modifier.size(24.dp)
                 )
             }
         }
