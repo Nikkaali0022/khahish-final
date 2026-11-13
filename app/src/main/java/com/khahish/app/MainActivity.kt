@@ -4587,8 +4587,14 @@ internal fun uploadToCloudinary(
                 .post(requestBody)
                 .build()
 
+            // Media uploads can take several minutes on mobile data or for large videos.
+            // Give the connection and upload body enough time instead of aborting at 120 seconds.
             val client = OkHttpClient.Builder()
-                .callTimeout(120, TimeUnit.SECONDS)
+                .connectTimeout(45, TimeUnit.SECONDS)
+                .writeTimeout(8, TimeUnit.MINUTES)
+                .readTimeout(5, TimeUnit.MINUTES)
+                .callTimeout(10, TimeUnit.MINUTES)
+                .retryOnConnectionFailure(true)
                 .build()
 
             client.newCall(request).execute().use { response ->
@@ -4609,9 +4615,13 @@ internal fun uploadToCloudinary(
                     onSuccess(secureUrl)
                 }
             }
+        } catch (e: java.net.SocketTimeoutException) {
+            Handler(Looper.getMainLooper()).post {
+                onError("Upload took too long because of the network. Please check your internet and try again.")
+            }
         } catch (e: Exception) {
             Handler(Looper.getMainLooper()).post {
-                onError(e.message ?: "Unknown upload error")
+                onError(e.message ?: "Media upload failed. Please try again.")
             }
         }
     }.start()
