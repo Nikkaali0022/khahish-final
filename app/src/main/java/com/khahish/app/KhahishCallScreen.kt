@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Mic
@@ -43,6 +44,9 @@ import io.agora.rtc2.video.VideoCanvas
 fun KhahishCallScreen(
     call: KhahishCall,
     isIncoming: Boolean,
+    isMinimized: Boolean,
+    onMinimize: () -> Unit,
+    onRestore: () -> Unit,
     onExit: () -> Unit
 ) {
     val context = LocalContext.current
@@ -64,7 +68,11 @@ fun KhahishCallScreen(
     var remoteUid by remember(call.id) { mutableStateOf<Int?>(null) }
     var peerPhotoUrl by remember(call.id) { mutableStateOf("") }
     var callElapsedSeconds by remember(call.id) { mutableIntStateOf(0) }
-    val latestSession by rememberUpdatedState(session)
+    fun finishCallLocally() {
+        session?.leave()
+        KhahishCallForegroundService.stop(context)
+        onExit()
+    }
 
     val peerUid = if (isIncoming) currentCall.callerUid else currentCall.calleeUid
     val displayName = if (isIncoming) currentCall.callerName else currentCall.calleeName
@@ -90,7 +98,11 @@ fun KhahishCallScreen(
                     context = context,
                     credentials = token,
                     isVideoCall = currentCall.isVideo,
-                    onJoined = { isJoined = true; statusText = "Connected" },
+                    onJoined = {
+                        isJoined = true
+                        statusText = "Connected"
+                        KhahishCallForegroundService.start(context, currentCall, currentCall.isVideo)
+                    },
                     onRemoteUserJoined = { uid -> remoteUid = uid; statusText = "Connected" },
                     onRemoteUserLeft = { statusText = "The other person left the call" },
                     onFailure = { errorText = it }
@@ -151,23 +163,21 @@ fun KhahishCallScreen(
                             connectIfAllowed()
                         }
                     }
-                    "rejected" -> { statusText = "Call declined"; onExit() }
-                    "ended" -> { statusText = "Call ended"; onExit() }
-                    "missed" -> { statusText = "Missed call"; onExit() }
+                    "rejected" -> { statusText = "Call declined"; finishCallLocally() }
+                    "ended" -> { statusText = "Call ended"; finishCallLocally() }
+                    "missed" -> { statusText = "Missed call"; finishCallLocally() }
                     "ringing" -> statusText = if (isIncoming) "Incoming call" else "Ringing…"
                 }
             }
         }
         onDispose {
             registration.remove()
-            latestSession?.leave()
+            // Session cleanup is performed only on explicit or remote call end.
         }
     }
 
-    BackHandler(enabled = true) {
-        repository.endCall(call.id) { errorText = it }
-        session?.leave()
-        onExit()
+    BackHandler(enabled = !isMinimized) {
+        onMinimize()
     }
 
     LaunchedEffect(call.id, isIncoming, currentCall.status) {
@@ -192,6 +202,49 @@ fun KhahishCallScreen(
         }
     }
 
+    Box(Modifier.fillMaxSize()) {
+        if (isMinimized) {
+            Surface(
+                onClick = onRestore,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                shape = RoundedCornerShape(18.dp),
+                color = Color(0xFFE5F5EF),
+                shadowElevation = 5.dp
+            ) {
+                Column(Modifier.padding(horizontal = 14.dp, vertical = 11.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier.size(42.dp).clip(CircleShape).background(Color(0xFF18A889)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Call, contentDescription = "Ongoing call", tint = Color.White)
+                        }
+                        Spacer(Modifier.width(11.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                if (call.isVideo) "Ongoing video call" else "Ongoing voice call",
+                                color = Color(0xFF173C32), fontWeight = FontWeight.Bold, fontSize = 14.sp
+                            )
+                            Text(
+                                "$displayName · ${formatKhahishCallDuration(callElapsedSeconds)}",
+                                color = Color(0xFF287A60), fontSize = 12.sp
+                            )
+                        }
+                        Surface(shape = RoundedCornerShape(50), color = Color(0xFFD0EDE1)) {
+                            Text("LIVE", Modifier.padding(horizontal = 9.dp, vertical = 5.dp), color = Color(0xFF176B51), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Spacer(Modifier.height(9.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        Text("↗  Return to call", color = Color(0xFF087D60), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        } else {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -311,7 +364,7 @@ fun KhahishCallScreen(
                 Button(
                     onClick = {
                         repository.rejectCall(call.id) { errorText = it }
-                        onExit()
+                        finishCallLocally()
                     },
                     modifier = Modifier.weight(1f).height(54.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = colors.error)
@@ -326,8 +379,14 @@ fun KhahishCallScreen(
                 ) { Text("Accept") }
             }
         } else if (currentCall.status == "accepted" || isJoined) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(26.dp),
+                color = colors.surfaceVariant,
+                tonalElevation = 2.dp
+            ) {
             Row(
-                Modifier.fillMaxWidth(),
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 14.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -367,10 +426,10 @@ fun KhahishCallScreen(
                     iconTint = colors.onError,
                     onClick = {
                         repository.endCall(call.id) { errorText = it }
-                        session?.leave()
-                        onExit()
+                        finishCallLocally()
                     }
                 )
+            }
             }
         } else {
             CircularProgressIndicator(color = colors.primary)
@@ -380,11 +439,12 @@ fun KhahishCallScreen(
             Button(
                 onClick = {
                     repository.endCall(call.id) { errorText = it }
-                    session?.leave()
-                    onExit()
+                    finishCallLocally()
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = colors.error)
             ) { Text("Cancel call") }
+        }
+    }
         }
     }
 }
