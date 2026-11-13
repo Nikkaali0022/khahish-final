@@ -69,6 +69,9 @@ fun KhahishCallScreen(
     var remoteUid by remember(call.id) { mutableStateOf<Int?>(null) }
     var peerPhotoUrl by remember(call.id) { mutableStateOf("") }
     var callElapsedSeconds by remember(call.id) { mutableIntStateOf(0) }
+    var localVideoFullscreen by remember(call.id) { mutableStateOf(false) }
+    var selectedBeautyFilter by remember(call.id) { mutableStateOf("Natural") }
+    var showBeautyFilters by remember(call.id) { mutableStateOf(false) }
     fun finishCallLocally() {
         session?.leave()
         KhahishCallForegroundService.stop(context)
@@ -269,85 +272,150 @@ fun KhahishCallScreen(
             letterSpacing = 2.sp
         )
 
-        Spacer(Modifier.height(42.dp))
-
-        Box(
-            modifier = Modifier
-                .size(226.dp)
-                .border(4.dp, colors.primary, CircleShape)
-                .padding(7.dp)
-                .clip(CircleShape)
-                .background(colors.surfaceVariant),
-            contentAlignment = Alignment.Center
-        ) {
-            if (peerPhotoUrl.isNotBlank()) {
-                AsyncImage(
-                    model = peerPhotoUrl,
-                    contentDescription = "$displayName profile picture",
-                    modifier = Modifier.fillMaxSize().clip(CircleShape),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
-                Text(
-                    displayName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
-                    color = colors.onSurface,
-                    fontSize = 76.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
-
-        Spacer(Modifier.height(28.dp))
-
-        Text(
-            displayName.ifBlank { "Khahish user" },
-            color = colors.onBackground,
-            fontSize = 27.sp,
-            fontWeight = FontWeight.SemiBold,
-            textAlign = TextAlign.Center,
-            maxLines = 2
-        )
-
-        Spacer(Modifier.height(12.dp))
-
-        if (isConnected) {
-            Text(
-                formatKhahishCallDuration(callElapsedSeconds),
-                color = colors.onSurfaceVariant,
-                fontSize = 19.sp,
-                fontWeight = FontWeight.Medium
-            )
-            Spacer(Modifier.height(6.dp))
-            Text("Connected", color = colors.primary, fontSize = 13.sp)
-        } else {
-            Text(statusText, color = colors.onSurfaceVariant, fontSize = 15.sp)
-        }
-
-        if (call.isVideo && credentials != null) {
-            Spacer(Modifier.height(24.dp))
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+        if (call.isVideo) {
+            Box(
+                modifier = Modifier.fillMaxWidth().weight(1f)
+                    .clip(RoundedCornerShape(22.dp)).background(Color.Black)
             ) {
-                AndroidView(
-                    modifier = Modifier.weight(1f).height(190.dp),
-                    factory = { viewContext ->
-                        SurfaceView(viewContext).also { surface ->
-                            session?.setupLocalVideo(surface)
-                        }
-                    }
-                )
-                if (remoteUid != null) {
+                if (remoteUid != null && !localVideoFullscreen) {
                     AndroidView(
-                        modifier = Modifier.weight(1f).height(190.dp),
+                        modifier = Modifier.fillMaxSize(),
                         factory = { viewContext ->
-                            SurfaceView(viewContext).also { surface ->
-                                session?.setupRemoteVideo(surface, remoteUid!!)
-                            }
+                            SurfaceView(viewContext).also { session?.setupRemoteVideo(it, remoteUid!!) }
                         }
                     )
+                } else if (localVideoFullscreen && credentials != null) {
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { viewContext ->
+                            SurfaceView(viewContext).also { session?.setupLocalVideo(it) }
+                        }
+                    )
+                } else if (peerPhotoUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = peerPhotoUrl, contentDescription = "$displayName profile picture",
+                        modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(displayName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                            color = Color.White, fontSize = 76.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+
+                if (credentials != null && !localVideoFullscreen) {
+                    Box(
+                        Modifier.align(Alignment.BottomEnd).padding(12.dp)
+                            .size(width = 112.dp, height = 158.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .border(2.dp, Color.White, RoundedCornerShape(16.dp))
+                            .clickable { localVideoFullscreen = true }
+                    ) {
+                        AndroidView(
+                            modifier = Modifier.fillMaxSize(),
+                            factory = { viewContext ->
+                                SurfaceView(viewContext).also {
+                                    it.setZOrderMediaOverlay(true)
+                                    session?.setupLocalVideo(it)
+                                }
+                            }
+                        )
+                        Text("You · tap to expand",
+                            Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                                .background(Color(0x99000000)).padding(vertical = 5.dp),
+                            color = Color.White, textAlign = TextAlign.Center, fontSize = 9.sp)
+                    }
+                } else if (localVideoFullscreen && remoteUid != null) {
+                    Box(
+                        Modifier.align(Alignment.BottomEnd).padding(12.dp)
+                            .size(width = 112.dp, height = 158.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .border(2.dp, Color.White, RoundedCornerShape(16.dp))
+                            .clickable { localVideoFullscreen = false }
+                    ) {
+                        AndroidView(
+                            modifier = Modifier.fillMaxSize(),
+                            factory = { viewContext ->
+                                SurfaceView(viewContext).also {
+                                    it.setZOrderMediaOverlay(true)
+                                    session?.setupRemoteVideo(it, remoteUid!!)
+                                }
+                            }
+                        )
+                        Text("$displayName · tap to expand",
+                            Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                                .background(Color(0x99000000)).padding(vertical = 5.dp),
+                            color = Color.White, textAlign = TextAlign.Center, fontSize = 9.sp,
+                            maxLines = 1)
+                    }
+                }
+
+                Row(Modifier.align(Alignment.TopEnd).padding(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Surface(shape = CircleShape, color = Color(0x99000000),
+                        onClick = { session?.switchCamera() }) {
+                        Icon(Icons.Default.Cached, "Switch camera", tint = Color.White,
+                            modifier = Modifier.padding(11.dp).size(23.dp))
+                    }
+                    Box {
+                        Surface(shape = CircleShape, color = Color(0x99000000),
+                            onClick = { showBeautyFilters = true }) {
+                            Text("✨ Filters", Modifier.padding(horizontal = 13.dp, vertical = 11.dp),
+                                color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        DropdownMenu(expanded = showBeautyFilters,
+                            onDismissRequest = { showBeautyFilters = false }) {
+                            listOf("Natural", "Soft Skin", "Glow", "Rosy", "Smooth Plus").forEach { filter ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(filter, Modifier.weight(1f))
+                                            if (selectedBeautyFilter == filter)
+                                                Icon(Icons.Default.Check, "Selected")
+                                        }
+                                    },
+                                    onClick = {
+                                        selectedBeautyFilter = filter
+                                        session?.setBeautyFilter(filter)
+                                        showBeautyFilters = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+                if (remoteUid == null && !localVideoFullscreen) {
+                    Text(statusText, Modifier.align(Alignment.BottomStart).padding(14.dp)
+                        .background(Color(0x99000000), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                        color = Color.White, fontSize = 12.sp)
                 }
             }
+        } else {
+            Spacer(Modifier.height(28.dp))
+            Box(Modifier.size(226.dp).border(4.dp, colors.primary, CircleShape)
+                .padding(7.dp).clip(CircleShape).background(colors.surfaceVariant),
+                contentAlignment = Alignment.Center) {
+                if (peerPhotoUrl.isNotBlank()) {
+                    AsyncImage(model = peerPhotoUrl, contentDescription = "$displayName profile picture",
+                        modifier = Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop)
+                } else {
+                    Text(displayName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                        color = colors.onSurface, fontSize = 76.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        Text(displayName.ifBlank { "Khahish user" }, color = colors.onBackground,
+            fontSize = 21.sp, fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center, maxLines = 1)
+        if (isConnected) {
+            Text(formatKhahishCallDuration(callElapsedSeconds), color = colors.onSurfaceVariant,
+                fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        } else {
+            Text(statusText, color = colors.onSurfaceVariant, fontSize = 13.sp)
         }
 
         if (errorText.isNotBlank()) {
