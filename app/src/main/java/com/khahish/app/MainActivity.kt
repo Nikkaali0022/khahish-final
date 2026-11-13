@@ -3188,21 +3188,19 @@ fun ConversationScreen(
                                     startVoiceRecording()
                                     var lockedByGesture = false
                                     var cancelledByGesture = false
-                                    awaitPointerEventScope {
-                                        while (true) {
-                                            val event = awaitPointerEvent()
-                                            val change = event.changes.firstOrNull() ?: break
-                                            val verticalDrag = change.position.y - down.position.y
-                                            val horizontalDrag = change.position.x - down.position.x
-                                            if (!lockedByGesture && verticalDrag < -72f) {
-                                                lockedByGesture = true
-                                                voiceLocked = true
-                                                voiceHaptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            } else if (!lockedByGesture && (verticalDrag > 95f || abs(horizontalDrag) > 125f)) {
-                                                cancelledByGesture = true
-                                            }
-                                            if (!change.pressed) break
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        val change = event.changes.firstOrNull() ?: break
+                                        val verticalDrag = change.position.y - down.position.y
+                                        val horizontalDrag = change.position.x - down.position.x
+                                        if (!lockedByGesture && verticalDrag < -72f) {
+                                            lockedByGesture = true
+                                            voiceLocked = true
+                                            voiceHaptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        } else if (!lockedByGesture && (verticalDrag > 95f || abs(horizontalDrag) > 125f)) {
+                                            cancelledByGesture = true
                                         }
+                                        if (!change.pressed) break
                                     }
                                     voiceHaptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     if (!lockedByGesture) finishVoiceRecording(!cancelledByGesture)
