@@ -140,7 +140,7 @@ class KhahishAgoraSession(
         if (!isVideoCall) return
         val rtc = engine ?: return
         when (filter) {
-            "Natural" -> rtc.setBeautyEffectOptions(false, BeautyOptions())
+            "Natural" -> rtc.setBeautyEffectOptions(false, BeautyOptions(BeautyOptions.LIGHTENING_CONTRAST_NORMAL, 0.0f, 0.0f, 0.0f, 0.0f))
             "Soft Skin" -> rtc.setBeautyEffectOptions(true,
                 BeautyOptions(BeautyOptions.LIGHTENING_CONTRAST_NORMAL, 0.45f, 0.68f, 0.12f, 0.35f))
             "Glow" -> rtc.setBeautyEffectOptions(true,
