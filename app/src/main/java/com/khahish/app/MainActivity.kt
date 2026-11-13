@@ -88,8 +88,12 @@ import com.google.firebase.firestore.SetOptions
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
+import okio.BufferedSink
+import okio.ForwardingSink
+import okio.buffer
 import org.json.JSONObject
 import java.io.File
 import java.util.Locale
@@ -168,7 +172,11 @@ data class MessageItem(
     val editedAt: Long = 0L,
     val starredBy: List<String> = emptyList(),
     val restoredFromBackup: Boolean = false,
-    val isPending: Boolean = false
+    val isPending: Boolean = false,
+    val uploadProgress: Int = -1,
+    val localPreviewUri: String = "",
+    val uploadUri: String = "",
+    val uploadFailed: Boolean = false
 )
 
 private fun privateChatId(uid1: String, uid2: String): String =
@@ -1906,6 +1914,7 @@ fun ConversationScreen(
     }
     var isUploading by remember { mutableStateOf(false) }
     var isSending by remember { mutableStateOf(false) }
+    var pendingMediaMessages by remember(chat.id) { mutableStateOf(emptyList<MessageItem>()) }
     var peerTyping by remember { mutableStateOf(false) }
     var peerOnline by remember { mutableStateOf(false) }
     var peerLastSeenAt by remember { mutableStateOf(0L) }
@@ -1990,35 +1999,73 @@ fun ConversationScreen(
     var chatSearchVisible by remember(chat.id) { mutableStateOf(false) }
     var chatSearchQuery by remember(chat.id) { mutableStateOf("") }
 
-    val displayedMessages = remember(messages, chatSearchQuery) {
+    val displayedMessages = remember(messages, pendingMediaMessages, chatSearchQuery) {
+        val allMessages = (messages + pendingMediaMessages).sortedBy { it.timestamp }
         val query = chatSearchQuery.trim()
-        if (query.isBlank()) messages else messages.filter { message ->
+        if (query.isBlank()) allMessages else allMessages.filter { message ->
             message.text.contains(query, ignoreCase = true) ||
                 message.replyToText.contains(query, ignoreCase = true)
         }
     }
 
 
+    fun performChatMediaUpload(pendingMessage: MessageItem) {
+        val uploadUri = Uri.parse(pendingMessage.uploadUri)
+        pendingMediaMessages = pendingMediaMessages.map { item ->
+            if (item.id == pendingMessage.id) item.copy(uploadProgress = 0, uploadFailed = false) else item
+        }
+        uploadToCloudinary(
+            context = context,
+            uri = uploadUri,
+            resourceType = when (pendingMessage.mediaType) {
+                "image" -> "image"
+                "document" -> "raw"
+                else -> "video"
+            },
+            onProgress = { percent ->
+                pendingMediaMessages = pendingMediaMessages.map { item ->
+                    if (item.id == pendingMessage.id) item.copy(uploadProgress = percent) else item
+                }
+            },
+            onSuccess = { url ->
+                sendChatMessage(
+                    chatRef, currentUserId, "", url, pendingMessage.mediaType, context
+                ) {
+                    pendingMediaMessages = pendingMediaMessages.filterNot { it.id == pendingMessage.id }
+                }
+            },
+            onError = {
+                pendingMediaMessages = pendingMediaMessages.map { item ->
+                    if (item.id == pendingMessage.id) item.copy(uploadFailed = true) else item
+                }
+                showToast(context, it)
+            }
+        )
+    }
+
+    fun queueChatMedia(uri: Uri, mediaType: String) {
+        val pending = MessageItem(
+            id = "local_upload_${java.util.UUID.randomUUID()}",
+            senderId = currentUserId,
+            mediaType = mediaType,
+            timestamp = System.currentTimeMillis(),
+            uploadProgress = 0,
+            localPreviewUri = uri.toString(),
+            uploadUri = uri.toString()
+        )
+        pendingMediaMessages = pendingMediaMessages + pending
+        messageScrollScope.launch {
+            delay(120L)
+            val lastIndex = displayedMessages.lastIndex
+            if (lastIndex >= 0) messageListState.animateScrollToItem(lastIndex)
+        }
+        performChatMediaUpload(pending)
+    }
+
     val imagePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
-        if (uri != null) {
-            isUploading = true
-            uploadToCloudinary(
-                context, uri, "image",
-                onSuccess = { url ->
-                    isUploading = false
-                    isSending = true
-                    sendChatMessage(
-                        chatRef, currentUserId, "", url, "image", context
-                    ) { isSending = false }
-                },
-                onError = {
-                    isUploading = false
-                    showToast(context, it)
-                }
-            )
-        }
+        if (uri != null) queueChatMedia(uri, "image")
     }
 
     val wallpaperPicker = rememberLauncherForActivityResult(
@@ -2046,45 +2093,13 @@ fun ConversationScreen(
     val videoPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
-        if (uri != null) {
-            isUploading = true
-            uploadToCloudinary(
-                context, uri, "video",
-                onSuccess = { url ->
-                    isUploading = false
-                    isSending = true
-                    sendChatMessage(
-                        chatRef, currentUserId, "", url, "video", context
-                    ) { isSending = false }
-                },
-                onError = {
-                    isUploading = false
-                    showToast(context, it)
-                }
-            )
-        }
+        if (uri != null) queueChatMedia(uri, "video")
     }
 
     val audioPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
-        if (uri != null) {
-            isUploading = true
-            uploadToCloudinary(
-                context, uri, "video",
-                onSuccess = { url ->
-                    isUploading = false
-                    isSending = true
-                    sendChatMessage(
-                        chatRef, currentUserId, "", url, "audio", context
-                    ) { isSending = false }
-                },
-                onError = {
-                    isUploading = false
-                    showToast(context, it)
-                }
-            )
-        }
+        if (uri != null) queueChatMedia(uri, "audio")
     }
 
     val contactPicker = rememberLauncherForActivityResult(
@@ -2173,23 +2188,7 @@ fun ConversationScreen(
     val documentPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
-        if (uri != null) {
-            isUploading = true
-            uploadToCloudinary(
-                context, uri, "raw",
-                onSuccess = { url ->
-                    isUploading = false
-                    isSending = true
-                    sendChatMessage(
-                        chatRef, currentUserId, "", url, "document", context
-                    ) { isSending = false }
-                },
-                onError = {
-                    isUploading = false
-                    showToast(context, it)
-                }
-            )
-        }
+        if (uri != null) queueChatMedia(uri, "document")
     }
 
 
@@ -2774,16 +2773,17 @@ fun ConversationScreen(
                                 fontWeight = FontWeight.Bold
                             )
                         }
-                        when (msg.mediaType) {
+                        Box(Modifier.wrapContentSize()) {
+                when (msg.mediaType) {
                             "image" -> {
                                 if (showMediaPreviews) {
                                     AsyncImage(
-                                        model = msg.imageUrl,
+                                        model = if (msg.uploadProgress >= 0 && msg.localPreviewUri.isNotBlank()) Uri.parse(msg.localPreviewUri) else msg.imageUrl,
                                         contentDescription = "Shared photo — tap to view full screen",
                                         modifier = Modifier
                                             .sizeIn(maxWidth = 250.dp, maxHeight = 250.dp)
                                             .clip(RoundedCornerShape(10.dp))
-                                            .clickable { photoToView = msg.imageUrl },
+                                            .clickable(enabled = msg.uploadProgress < 0) { photoToView = msg.imageUrl },
                                         contentScale = ContentScale.Crop
                                     )
                                 } else {
@@ -2802,21 +2802,37 @@ fun ConversationScreen(
 
                             "video" -> Row(
                                 Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
-                                    .clickable { videoToPlay = msg.imageUrl }.padding(10.dp),
+                                    .clickable(enabled = msg.uploadProgress < 0) { videoToPlay = msg.imageUrl }.padding(10.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(Icons.Default.PlayCircle, null, tint = Green, modifier = Modifier.size(30.dp))
                                 Spacer(Modifier.width(8.dp))
                                 Text(
-                                    if (showMediaPreviews) "Play video" else "Video preview hidden • tap to play",
+                                    when {
+                                        msg.uploadProgress >= 0 -> "Sending video…"
+                                        showMediaPreviews -> "Play video"
+                                        else -> "Video preview hidden • tap to play"
+                                    },
                                     color = MaterialTheme.colorScheme.onSurface,
                                     fontWeight = FontWeight.SemiBold
                                 )
                             }
 
-                            "audio" -> AudioMessagePlayer(msg.imageUrl)
+                            "audio" -> if (msg.uploadProgress >= 0) {
+                                Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(10.dp)).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Mic, null, tint = Green)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Sending voice message…", color = MaterialTheme.colorScheme.onSurface)
+                                }
+                            } else AudioMessagePlayer(msg.imageUrl)
 
-                            "document" -> MediaOpenRow(
+                            "document" -> if (msg.uploadProgress >= 0) {
+                                Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(10.dp)).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Description, null, tint = Green)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Sending document…", color = MaterialTheme.colorScheme.onSurface)
+                                }
+                            } else MediaOpenRow(
                                 "Document — tap to open",
                                 Icons.Default.Description,
                                 msg.imageUrl,
@@ -2872,7 +2888,16 @@ fun ConversationScreen(
                                 }
                                 Text(msg.text, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
                             }
-                        }
+                }
+                if (msg.uploadProgress >= 0) {
+                    UploadProgressBadge(
+                        progress = msg.uploadProgress,
+                        failed = msg.uploadFailed,
+                        onRetry = { performChatMediaUpload(msg) },
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(7.dp)
+                    )
+                }
+                }
 
                         if (msg.replyToMessageId.isNotBlank()) {
                             Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)).padding(7.dp)) {
@@ -3862,6 +3887,43 @@ private fun MediaOpenRow(
     }
 }
 
+@Composable
+private fun UploadProgressBadge(
+    progress: Int,
+    failed: Boolean,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .background(Color.Black.copy(alpha = 0.78f), CircleShape)
+            .padding(6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        if (failed) {
+            IconButton(onClick = onRetry, modifier = Modifier.size(34.dp)) {
+                Icon(Icons.Default.Refresh, contentDescription = "Retry upload", tint = Color.White)
+            }
+        } else {
+            Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(
+                    progress = (progress.coerceIn(0, 100) / 100f),
+                    modifier = Modifier.fillMaxSize(),
+                    color = Color.White,
+                    trackColor = Color.White.copy(alpha = 0.28f),
+                    strokeWidth = 3.dp
+                )
+                Text(
+                    "$progress%",
+                    color = Color.White,
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
 private fun isKhahishNetworkAvailable(context: Context): Boolean {
     val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
         ?: return false
@@ -4546,12 +4608,42 @@ private fun SettingsItem(
     }
 }
 
+private class ProgressRequestBody(
+    private val delegate: RequestBody,
+    private val onProgress: (Int) -> Unit
+) : RequestBody() {
+    override fun contentType() = delegate.contentType()
+    override fun contentLength(): Long = delegate.contentLength()
+
+    override fun writeTo(sink: BufferedSink) {
+        val totalBytes = contentLength()
+        var uploadedBytes = 0L
+        var lastReported = -1
+        val countingSink = object : ForwardingSink(sink) {
+            override fun write(source: okio.Buffer, byteCount: Long) {
+                super.write(source, byteCount)
+                uploadedBytes += byteCount
+                if (totalBytes > 0L) {
+                    val percent = ((uploadedBytes * 100L) / totalBytes).toInt().coerceIn(0, 100)
+                    if (percent != lastReported) {
+                        lastReported = percent
+                        onProgress(percent)
+                    }
+                }
+            }
+        }.buffer()
+        delegate.writeTo(countingSink)
+        countingSink.flush()
+    }
+}
+
 internal fun uploadToCloudinary(
     context: Context,
     uri: Uri,
     resourceType: String,
     onSuccess: (String) -> Unit,
-    onError: (String) -> Unit
+    onError: (String) -> Unit,
+    onProgress: (Int) -> Unit = {}
 ) {
     Thread {
         try {
@@ -4578,13 +4670,17 @@ internal fun uploadToCloudinary(
                 )
                 .build()
 
+            val progressBody = ProgressRequestBody(requestBody) { percent ->
+                Handler(Looper.getMainLooper()).post { onProgress(percent) }
+            }
+
             val request = Request.Builder()
                 .url(
                     "https://api.cloudinary.com/v1_1/" +
                         CLOUDINARY_CLOUD_NAME +
                         "/" + resourceType + "/upload"
                 )
-                .post(requestBody)
+                .post(progressBody)
                 .build()
 
             // Media uploads can take several minutes on mobile data or for large videos.
