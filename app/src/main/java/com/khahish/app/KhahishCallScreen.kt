@@ -78,6 +78,10 @@ fun KhahishCallScreen(
         onExit()
     }
 
+    LaunchedEffect(session, selectedBeautyFilter) {
+        session?.setBeautyFilter(selectedBeautyFilter)
+    }
+
     val peerUid = if (isIncoming) currentCall.callerUid else currentCall.calleeUid
     val displayName = if (isIncoming) currentCall.callerName else currentCall.calleeName
     val isConnected = currentCall.status == "accepted" || isJoined
@@ -286,7 +290,7 @@ fun KhahishCallScreen(
                     )
                 } else if (localVideoFullscreen && credentials != null) {
                     AndroidView(
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.fillMaxSize().clickable { localVideoFullscreen = false },
                         factory = { viewContext ->
                             SurfaceView(viewContext).also { session?.setupLocalVideo(it) }
                         }
