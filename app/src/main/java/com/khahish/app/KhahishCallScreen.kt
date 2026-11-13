@@ -90,12 +90,12 @@ fun KhahishCallScreen(
 
     fun requestCredentialsAndJoin() {
         statusText = "Connecting…"
+        KhahishCallForegroundService.start(context, currentCall, currentCall.isVideo)
         KhahishAgoraTokenClient.requestToken(
             currentCall.id,
             currentCall.channelName,
             onSuccess = { token ->
                 credentials = token
-                KhahishCallForegroundService.start(context, currentCall, currentCall.isVideo)
                 val rtc = KhahishAgoraSession(
                     context = context,
                     credentials = token,
@@ -114,7 +114,10 @@ fun KhahishCallScreen(
                 session = rtc
                 rtc.join()
             },
-            onError = { errorText = it }
+            onError = {
+                errorText = it
+                KhahishCallForegroundService.stop(context)
+            }
         )
     }
 
