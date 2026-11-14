@@ -484,8 +484,8 @@ service cloud.firestore {
             request.resource.data.get('isGroup', false) != true
             && request.resource.data.members.size() == 2
             && request.resource.data.members[0] != request.resource.data.members[1]
-            // New private chats start hidden from both participants until the
-            // authenticated Worker computes each participant's actual lock state.
+            // Keep the legacy visibility array empty for compatibility;
+            // chat discovery now uses the authenticated members array.
             && request.resource.data.visibleToUids is list
             && request.resource.data.visibleToUids.size() == 0
             && request.resource.data.createdBy == request.auth.uid
