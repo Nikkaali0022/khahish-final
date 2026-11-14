@@ -146,11 +146,10 @@ service cloud.firestore {
 
     function canReadStory(storyData) {
       return signedIn()
+        && storyData.get('moderationStatus', 'active') != 'removed'
         && (
-          storyData.get('moderationStatus', 'active') != 'removed'
-          && (
-            storyData.get('ownerUid', '') == request.auth.uid
-            || (
+          storyData.get('ownerUid', '') == request.auth.uid
+          || (
             storyData.get('allowedUids', []) is list
             && request.auth.uid in storyData.get('allowedUids', [])
             && isAcceptedStoryFriend(storyData.get('ownerUid', ''), request.auth.uid)
