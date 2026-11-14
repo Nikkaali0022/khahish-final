@@ -325,10 +325,12 @@ fun KhahishAdminPanelScreen(onBack: () -> Unit) {
             error = "Title aur message dono likhein."
             return
         }
-        if (targetType == "user" && targetUid.trim().isBlank()) {
+        if (sendTargetType == "user" && sendTargetUid.isBlank()) {
             error = "Specific user ke liye UID zaroor likhein."
             return
         }
+        val sendTargetType = targetType
+        val sendTargetUid = sendTargetUid
         if (sendingMessage) return
 
         sendingMessage = true
@@ -375,8 +377,8 @@ fun KhahishAdminPanelScreen(onBack: () -> Unit) {
                     "title" to title,
                     "body" to body,
                     "kind" to kind,
-                    "targetType" to targetType,
-                    "targetUid" to if (targetType == "user") recipients.first() else "",
+                    "targetType" to sendTargetType,
+                    "targetUid" to if (sendTargetType == "user") recipients.first() else "",
                     "createdBy" to currentUid,
                     "createdAt" to createdAt,
                     "deliveryMode" to "in_app",
@@ -387,7 +389,7 @@ fun KhahishAdminPanelScreen(onBack: () -> Unit) {
                     .addOnSuccessListener {
                         audit(
                             if (kind == "notification") "in_app_notification_sent" else "announcement_sent",
-                            if (targetType == "user") recipients.first() else "",
+                            if (sendTargetType == "user") recipients.first() else "",
                             "$title • ${recipients.size} inboxes"
                         )
                         composeTitle = ""
@@ -406,8 +408,8 @@ fun KhahishAdminPanelScreen(onBack: () -> Unit) {
             }
         }
 
-        if (targetType == "user") {
-            val recipientUid = targetUid.trim()
+        if (sendTargetType == "user") {
+            val recipientUid = sendTargetUid
             db.collection("publicProfiles").document(recipientUid).get()
                 .addOnSuccessListener { profile ->
                     if (!profile.exists()) {
