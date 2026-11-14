@@ -2998,6 +2998,19 @@ fun ConversationScreen(
         }
     }
 
+    // Automatically bring a newly sent message into view. Incoming messages do not
+    // force-scroll the chat, so reading older messages remains undisturbed.
+    LaunchedEffect(displayedMessages.lastOrNull()?.id, chat.id) {
+        val newestMessage = displayedMessages.lastOrNull()
+        if (newestMessage?.senderId == currentUserId) {
+            delay(100L)
+            val latestIndex = displayedMessages.lastIndex
+            if (latestIndex >= 0) {
+                messageListState.animateScrollToItem(latestIndex)
+            }
+        }
+    }
+
     DisposableEffect(chat.id) {
         val registration = chatRef.collection("liveLocations").addSnapshotListener { snapshot, error ->
             if (error != null || snapshot == null) return@addSnapshotListener
