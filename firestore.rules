@@ -136,11 +136,11 @@ service cloud.firestore {
     function canReadStory(storyData) {
       return signedIn()
         && (
-          storyData.ownerUid == request.auth.uid
+          storyData.get('ownerUid', '') == request.auth.uid
           || (
             storyData.get('allowedUids', []) is list
             && request.auth.uid in storyData.get('allowedUids', [])
-            && isAcceptedStoryFriend(storyData.ownerUid, request.auth.uid)
+            && isAcceptedStoryFriend(storyData.get('ownerUid', ''), request.auth.uid)
           )
         );
     }
@@ -821,11 +821,11 @@ service cloud.firestore {
       // filters again; audience privacy is still checked per returned story.
       allow list: if signedIn()
         && (
-          resource.data.ownerUid == request.auth.uid
+          resource.data.get('ownerUid', '') == request.auth.uid
           || (
             resource.data.get('allowedUids', []) is list
             && request.auth.uid in resource.data.get('allowedUids', [])
-            && isAcceptedStoryFriend(resource.data.ownerUid, request.auth.uid)
+            && isAcceptedStoryFriend(resource.data.get('ownerUid', ''), request.auth.uid)
           )
         );
 
