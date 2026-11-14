@@ -91,6 +91,20 @@ class KhahishCallForegroundService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
+        @Volatile private var retainedAgoraSession: KhahishAgoraSession? = null
+
+        /** Keeps the RTC engine reachable while the Activity/UI is backgrounded or recreated. */
+        fun retainSession(session: KhahishAgoraSession) {
+            retainedAgoraSession = session
+        }
+
+        /** Called only when the call is explicitly ended. */
+        fun releaseSession(session: KhahishAgoraSession? = null) {
+            if (session == null || retainedAgoraSession === session) {
+                retainedAgoraSession = null
+            }
+        }
+
         private const val CHANNEL_ID = "khahish_ongoing_calls"
         private const val NOTIFICATION_ID = 73021
         private const val ACTION_STOP = "com.khahish.app.STOP_ACTIVE_CALL"
@@ -117,6 +131,7 @@ class KhahishCallForegroundService : Service() {
         }
 
         fun stop(context: Context) {
+            retainedAgoraSession = null
             context.stopService(Intent(context, KhahishCallForegroundService::class.java))
         }
     }
