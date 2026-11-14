@@ -330,7 +330,7 @@ fun KhahishAdminPanelScreen(onBack: () -> Unit) {
             return
         }
         val sendTargetType = targetType
-        val sendTargetUid = sendTargetUid
+        val sendTargetUid = targetUid.trim()
         if (sendingMessage) return
 
         sendingMessage = true
