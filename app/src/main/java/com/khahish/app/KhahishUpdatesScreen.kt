@@ -442,11 +442,28 @@ fun KhahishUpdatesScreen(
     }
 
     DisposableEffect(currentUid) {
+        val friendsListener = db.collection("chats")
+            .whereArrayContains("visibleToUids", currentUid)
+            .addSnapshotListener { snapshot, error ->
+                if (error == null) {
+                    acceptedFriends = snapshot?.documents.orEmpty().mapNotNull { doc ->
+                        if (doc.getBoolean("isGroup") == true) return@mapNotNull null
+                        val members = (doc.get("members") as? List<*>)?.filterIsInstance<String>().orEmpty()
+                        val peerUid = members.firstOrNull { it != currentUid } ?: return@mapNotNull null
+                        val names = doc.get("memberNames") as? Map<*, *>
+                        peerUid to (names?.get(peerUid) as? String ?: "Khahish User")
+                    }.distinctBy { it.first }.sortedBy { it.second.lowercase(Locale.ROOT) }
+                }
+            }
+        onDispose { friendsListener.remove() }
+    }
+
+    DisposableEffect(currentUid, acceptedFriends) {
         val ownerDocs = mutableMapOf<String, com.google.firebase.firestore.DocumentSnapshot>()
-        val allowedDocs = mutableMapOf<String, com.google.firebase.firestore.DocumentSnapshot>()
+        val friendDocs = mutableMapOf<String, com.google.firebase.firestore.DocumentSnapshot>()
         fun refreshStories() {
             val now = System.currentTimeMillis()
-            stories = (ownerDocs.values + allowedDocs.values)
+            stories = (ownerDocs.values + friendDocs.values)
                 .distinctBy { it.id }
                 .mapNotNull { doc ->
                     val expires = doc.getLong("expiresAt") ?: 0L
@@ -474,19 +491,29 @@ fun KhahishUpdatesScreen(
                     ownerDocs.clear()
                     snapshot?.documents?.forEach { ownerDocs[it.id] = it }
                     refreshStories()
+                } else {
+                    loading = false
+                    Toast.makeText(context, "Unable to load your stories: ${error.message}", Toast.LENGTH_LONG).show()
                 }
             }
-        val allowedListener = db.collection("stories").whereArrayContains("allowedUids", currentUid)
-            .addSnapshotListener { snapshot, error ->
-                if (error == null) {
-                    allowedDocs.clear()
-                    snapshot?.documents?.forEach { allowedDocs[it.id] = it }
-                    refreshStories()
+        val friendListeners = acceptedFriends.map { (friendUid, _) ->
+            db.collection("stories")
+                .whereEqualTo("ownerUid", friendUid)
+                .whereArrayContains("allowedUids", currentUid)
+                .addSnapshotListener { snapshot, error ->
+                    if (error == null) {
+                        friendDocs.entries.removeAll { it.value.getString("ownerUid") == friendUid }
+                        snapshot?.documents?.forEach { friendDocs[it.id] = it }
+                        refreshStories()
+                    } else {
+                        loading = false
+                        Toast.makeText(context, "Unable to load a friend's status: ${error.message}", Toast.LENGTH_LONG).show()
+                    }
                 }
-            }
+        }
         onDispose {
             ownerListener.remove()
-            allowedListener.remove()
+            friendListeners.forEach { it.remove() }
         }
     }
 
