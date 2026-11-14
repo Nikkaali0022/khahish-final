@@ -1501,6 +1501,21 @@ fun NewChatScreen(
     var users by remember { mutableStateOf(listOf<AppUser>()) }
     var loading by remember { mutableStateOf(false) }
     var creatingUid by remember { mutableStateOf("") }
+    var privateNicknames by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+
+    DisposableEffect(currentUid, users.map { it.uid }.joinToString("|")) {
+        val registrations = users.map { user ->
+            db.collection("users").document(currentUid).collection("appSettings")
+                .document("contactNickname_${user.uid}")
+                .addSnapshotListener { snapshot, _ ->
+                    val nickname = snapshot?.getString("nickname").orEmpty().trim()
+                    privateNicknames = privateNicknames.toMutableMap().apply {
+                        if (nickname.isBlank()) remove(user.uid) else put(user.uid, nickname)
+                    }
+                }
+        }
+        onDispose { registrations.forEach { it.remove() } }
+    }
 
     LaunchedEffect(search) {
         val term = normalizeKhahishUsername(search)
@@ -1575,6 +1590,7 @@ fun NewChatScreen(
         } else {
             LazyColumn {
                 items(users, key = { it.uid }) { user ->
+                    val displayName = privateNicknames[user.uid]?.takeIf { it.isNotBlank() } ?: user.name.ifBlank { "Khahish User" }
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -1601,11 +1617,10 @@ fun NewChatScreen(
                                                 Chat(
                                                     id = chatId,
                                                     peerUid = user.uid,
-                                                    name = user.name.ifBlank { "Khahish User" },
+                                                    name = displayName,
                                                     message = existing.getString("lastMessage") ?: "",
                                                     time = "",
-                                                    initials = user.name.firstOrNull()
-                                                        ?.uppercase() ?: "K"
+                                                    initials = displayName.firstOrNull()?.uppercase() ?: "K"
                                                 )
                                             )
                                         } else {
@@ -1648,7 +1663,7 @@ fun NewChatScreen(
                         } else {
                             Box(Modifier.size(48.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape),
                                 contentAlignment = Alignment.Center) {
-                                Text(user.name.firstOrNull()?.uppercase() ?: "K", color = Green, fontWeight = FontWeight.Bold)
+                                Text(displayName.firstOrNull()?.uppercase() ?: "K", color = Green, fontWeight = FontWeight.Bold)
                             }
                         }
 
@@ -1656,7 +1671,7 @@ fun NewChatScreen(
 
                         Column(Modifier.weight(1f)) {
                             Text(
-                                user.name.ifBlank { "Khahish User" },
+                                displayName,
                                 color = MaterialTheme.colorScheme.onSurface,
                                 fontWeight = FontWeight.SemiBold
                             )
