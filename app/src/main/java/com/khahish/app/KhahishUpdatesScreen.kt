@@ -16,6 +16,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
@@ -32,6 +33,7 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.CropRotate
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.PlayCircle
@@ -106,6 +108,9 @@ fun KhahishUpdatesScreen(
     var viewerOwnerUid by remember { mutableStateOf("") }
     var viewerStoryIndex by remember { mutableIntStateOf(0) }
     var viewerPaused by remember { mutableStateOf(false) }
+    var showStoryReply by remember { mutableStateOf(false) }
+    var storyReplyText by remember { mutableStateOf("") }
+    var likedStoryIds by remember { mutableStateOf(setOf<String>()) }
     var voiceStoryPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
     var voiceStoryPlaying by remember { mutableStateOf(false) }
     var videoPlayerUrl by remember { mutableStateOf("") }
@@ -418,9 +423,52 @@ fun KhahishUpdatesScreen(
         viewerOwnerUid = ownerUid
         viewerStoryIndex = 0
         viewerPaused = false
+        showStoryReply = false
+        storyReplyText = ""
+    }
+
+    fun sendStoryChatAction(story: KhahishStory, action: String, body: String) {
+        val chatId = listOf(currentUid, story.ownerUid).sorted().joinToString("_")
+        val chatRef = db.collection("chats").document(chatId)
+        val members = listOf(currentUid, story.ownerUid).sorted()
+        val now = System.currentTimeMillis()
+        val preview = if (action == "story_like") "❤️ Liked your story" else "↩ Replied to your story"
+        val messageText = if (action == "story_like") "$currentName liked your story." else "Replied to your story: $body"
+        val chatData = mapOf(
+            "members" to members,
+            "memberNames" to mapOf(currentUid to currentName, story.ownerUid to story.ownerName),
+            "lastMessage" to preview,
+            "lastMessageAt" to now,
+            "updatedAt" to now,
+            "isGroup" to false,
+            "createdBy" to currentUid,
+            "createdAt" to now,
+            "visibleToUids" to emptyList<String>()
+        )
+        chatRef.get().addOnSuccessListener { existing ->
+            val saveChat = if (existing.exists()) chatRef.update(mapOf("lastMessage" to preview, "lastMessageAt" to now, "updatedAt" to now)) else chatRef.set(chatData)
+            saveChat.addOnSuccessListener {
+                val mediaType = if (story.mediaType == "image" || story.mediaType == "video") story.mediaType else "text"
+                chatRef.collection("messages").add(mapOf(
+                    "senderId" to currentUid,
+                    "text" to messageText,
+                    "imageUrl" to if (mediaType == "text") "" else story.mediaUrl,
+                    "mediaType" to mediaType,
+                    "timestamp" to now,
+                    "deliveredTo" to emptyList<String>(),
+                    "readBy" to listOf(currentUid),
+                    "storyId" to story.id,
+                    "storyOwnerUid" to story.ownerUid,
+                    "storyAction" to action,
+                    "storyMediaUrl" to story.mediaUrl
+                )).addOnFailureListener { Toast.makeText(context, "Could not send story interaction: ${it.message}", Toast.LENGTH_LONG).show() }
+            }.addOnFailureListener { Toast.makeText(context, "Could not open story chat: ${it.message}", Toast.LENGTH_LONG).show() }
+        }.addOnFailureListener { Toast.makeText(context, "Could not open story chat: ${it.message}", Toast.LENGTH_LONG).show() }
     }
 
     fun moveStoryViewer(direction: Int) {
+        showStoryReply = false
+        storyReplyText = ""
         val groups = stories.groupBy { it.ownerUid }
             .values.map { group -> group.sortedBy { it.createdAt } }
             .sortedByDescending { it.lastOrNull()?.createdAt ?: 0L }
@@ -822,7 +870,22 @@ fun KhahishUpdatesScreen(
     }
 
     DisposableEffect(viewerOwnerUid, currentViewerStory?.id) {
+        val storyId = currentViewerStory?.id.orEmpty()
+        val viewsRegistration = if (storyId.isNotBlank()) db.collection("stories").document(storyId)
+            .collection("views").addSnapshotListener { snapshot, _ ->
+                storyViewers = snapshot?.documents.orEmpty().map { doc ->
+                    doc.getString("name")?.takeIf { it.isNotBlank() } ?: doc.getString("uid").orEmpty()
+                }
+            } else null
+        val likeRegistration = if (storyId.isNotBlank() && currentViewerStory?.ownerUid != currentUid) {
+            db.collection("stories").document(storyId).collection("likes").document(currentUid)
+                .addSnapshotListener { snapshot, _ ->
+                    likedStoryIds = if (snapshot?.exists() == true) likedStoryIds + storyId else likedStoryIds - storyId
+                }
+        } else null
         onDispose {
+            viewsRegistration?.remove()
+            likeRegistration?.remove()
             try { voiceStoryPlayer?.stop() } catch (_: Exception) { }
             voiceStoryPlayer?.release()
             voiceStoryPlayer = null
@@ -862,6 +925,14 @@ fun KhahishUpdatesScreen(
                     Box(
                         Modifier.weight(1f).fillMaxWidth()
                             .pointerInput(viewerOwnerUid, viewerStoryIndex) {
+                                detectVerticalDragGestures(onVerticalDrag = { _, dragAmount ->
+                                    if (dragAmount < -8f && !showStoryReply) {
+                                        showStoryReply = true
+                                        viewerPaused = true
+                                    }
+                                })
+                            }
+                            .pointerInput(viewerOwnerUid, viewerStoryIndex) {
                                 detectTapGestures(
                                     onPress = {
                                         viewerPaused = true
@@ -885,7 +956,9 @@ fun KhahishUpdatesScreen(
                             )
                             story.mediaType == "video" && story.mediaUrl.isNotBlank() -> KhahishVideoPlayer(
                                 url = story.mediaUrl,
-                                modifier = Modifier.fillMaxWidth().fillMaxHeight()
+                                modifier = Modifier.fillMaxWidth().fillMaxHeight(),
+                                isPlaying = !viewerPaused,
+                                showControls = false
                             )
                             story.mediaType == "voice" && story.mediaUrl.isNotBlank() -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Icon(Icons.Default.Mic, null, tint = Color.White, modifier = Modifier.size(64.dp))
@@ -944,12 +1017,53 @@ fun KhahishUpdatesScreen(
                             Text("Open link  ↗", color = Color(0xFF70D7B8), fontWeight = FontWeight.SemiBold)
                         }
                     }
-                    Text(
-                        relativeStoryTime(story.createdAt),
-                        color = Color.White.copy(alpha = 0.75f),
-                        fontSize = 11.sp,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
+                    Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(relativeStoryTime(story.createdAt), color = Color.White.copy(alpha = 0.75f), fontSize = 11.sp, modifier = Modifier.weight(1f))
+                        if (story.ownerUid == currentUid) {
+                            TextButton(onClick = { viewerStoryId = story.id }) {
+                                Icon(Icons.Default.Visibility, null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(5.dp))
+                                Text("${storyViewers.size} views", color = Color.White, fontSize = 12.sp)
+                            }
+                        } else {
+                            IconButton(
+                                modifier = Modifier.size(36.dp),
+                                onClick = {
+                                val likeRef = db.collection("stories").document(story.id).collection("likes").document(currentUid)
+                                if (story.id in likedStoryIds) {
+                                    likeRef.delete().addOnSuccessListener { likedStoryIds = likedStoryIds - story.id }
+                                } else {
+                                    likeRef.set(mapOf("uid" to currentUid, "name" to currentName, "likedAt" to System.currentTimeMillis()))
+                                        .addOnSuccessListener {
+                                            likedStoryIds = likedStoryIds + story.id
+                                            sendStoryChatAction(story, "story_like", "")
+                                        }
+                                        .addOnFailureListener { Toast.makeText(context, "Could not like story: ${it.message}", Toast.LENGTH_LONG).show() }
+                                }
+                            }) {
+                                Icon(Icons.Default.Favorite, "Like story", tint = if (story.id in likedStoryIds) Color(0xFFFF5A75) else Color.White, modifier = Modifier.size(19.dp))
+                            }
+                        }
+                    }
+                    if (showStoryReply && story.ownerUid != currentUid) {
+                        Column(Modifier.fillMaxWidth().padding(top = 6.dp).background(Color(0xDD202A35), RoundedCornerShape(16.dp)).padding(10.dp)) {
+                            Text("Reply to ${story.ownerName}’s Story", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf("❤️", "😂", "😍", "🔥").forEach { emoji ->
+                                    TextButton(onClick = { storyReplyText += emoji }) { Text(emoji) }
+                                }
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                OutlinedTextField(value = storyReplyText, onValueChange = { storyReplyText = it }, modifier = Modifier.weight(1f), placeholder = { Text("Write a reply…") }, singleLine = true)
+                                IconButton(enabled = storyReplyText.isNotBlank(), onClick = {
+                                    val reply = storyReplyText.trim()
+                                    sendStoryChatAction(story, "story_reply", reply)
+                                    storyReplyText = ""; showStoryReply = false; viewerPaused = false
+                                    Toast.makeText(context, "Story reply sent", Toast.LENGTH_SHORT).show()
+                                }) { Icon(Icons.Default.Send, "Send reply", tint = Color(0xFF70D7B8)) }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1074,10 +1188,8 @@ fun KhahishUpdatesScreen(
                     Text("Create a Story", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                     Spacer(Modifier.height(8.dp))
                     listOf(
-                        Triple(Icons.Default.Image, "Photo", "Add a photo"),
-                        Triple(Icons.Default.Videocam, "Video", "Add a video"),
-                        Triple(Icons.Default.TextFields, "Text", "Create a text story"),
-                        Triple(Icons.Default.Mic, "Voice", "Record a voice story")
+                        Triple(Icons.Default.Image, "Photo", "Select a photo"),
+                        Triple(Icons.Default.Videocam, "Video", "Select a video")
                     ).forEach { (icon, label, description) ->
                         Row(
                             Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
@@ -1086,8 +1198,6 @@ fun KhahishUpdatesScreen(
                                     when (label) {
                                         "Photo" -> imagePicker.launch("image/*")
                                         "Video" -> videoPicker.launch("video/*")
-                                        "Text" -> { storyText = ""; showTextDialog = true }
-                                        "Voice" -> { storyCaption = ""; storyLinkUrl = ""; voicePreviewFile = null; showVoiceEditor = true }
                                     }
                                 }
                                 .padding(vertical = 9.dp, horizontal = 4.dp),
@@ -1159,23 +1269,7 @@ fun KhahishUpdatesScreen(
                         )
                     }
                 }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    TextButton(onClick = { Toast.makeText(context, "Music tool selected", Toast.LENGTH_SHORT).show() }) {
-                        Icon(Icons.Default.MusicNote, null, tint = Color.White); Text("Music", color = Color.White)
-                    }
-                    TextButton(onClick = { Toast.makeText(context, "Crop and rotate tool selected", Toast.LENGTH_SHORT).show() }) {
-                        Icon(Icons.Default.CropRotate, null, tint = Color.White); Text("Crop", color = Color.White)
-                    }
-                    TextButton(onClick = { storyCaption += " ❤️" }) {
-                        Icon(Icons.Default.EmojiEmotions, null, tint = Color.White); Text("Sticker", color = Color.White)
-                    }
-                    TextButton(onClick = { storyCaption += " " }) {
-                        Icon(Icons.Default.TextFields, null, tint = Color.White); Text("Text", color = Color.White)
-                    }
-                    TextButton(onClick = { Toast.makeText(context, "Drawing tool selected", Toast.LENGTH_SHORT).show() }) {
-                        Icon(Icons.Default.Brush, null, tint = Color.White); Text("Draw", color = Color.White)
-                    }
-                }
+                Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(
                         value = storyCaption,
@@ -1191,14 +1285,6 @@ fun KhahishUpdatesScreen(
                         onClick = { pendingMediaUri?.let { uploadStory(it, pendingMediaType, storyCaption) } }
                     ) { Icon(Icons.Default.Send, "Publish story", tint = Color(0xFF70D7B8)) }
                 }
-                OutlinedTextField(
-                    value = storyLinkUrl,
-                    onValueChange = { storyLinkUrl = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Add a website link (optional)") },
-                    singleLine = true,
-                    leadingIcon = { Text("↗") }
-                )
                 if (uploading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Green)
             }
         }

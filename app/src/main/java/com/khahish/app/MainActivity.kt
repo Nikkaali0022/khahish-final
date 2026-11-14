@@ -1501,6 +1501,21 @@ fun NewChatScreen(
     var users by remember { mutableStateOf(listOf<AppUser>()) }
     var loading by remember { mutableStateOf(false) }
     var creatingUid by remember { mutableStateOf("") }
+    var privateNicknames by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+
+    DisposableEffect(currentUid, users.map { it.uid }.joinToString("|")) {
+        val registrations = users.map { user ->
+            db.collection("users").document(currentUid).collection("appSettings")
+                .document("contactNickname_${user.uid}")
+                .addSnapshotListener { snapshot, _ ->
+                    val nickname = snapshot?.getString("nickname").orEmpty().trim()
+                    privateNicknames = privateNicknames.toMutableMap().apply {
+                        if (nickname.isBlank()) remove(user.uid) else put(user.uid, nickname)
+                    }
+                }
+        }
+        onDispose { registrations.forEach { it.remove() } }
+    }
 
     LaunchedEffect(search) {
         val term = normalizeKhahishUsername(search)
@@ -1575,6 +1590,7 @@ fun NewChatScreen(
         } else {
             LazyColumn {
                 items(users, key = { it.uid }) { user ->
+                    val displayName = privateNicknames[user.uid]?.takeIf { it.isNotBlank() } ?: user.name.ifBlank { "Khahish User" }
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -1601,11 +1617,10 @@ fun NewChatScreen(
                                                 Chat(
                                                     id = chatId,
                                                     peerUid = user.uid,
-                                                    name = user.name.ifBlank { "Khahish User" },
+                                                    name = displayName,
                                                     message = existing.getString("lastMessage") ?: "",
                                                     time = "",
-                                                    initials = user.name.firstOrNull()
-                                                        ?.uppercase() ?: "K"
+                                                    initials = displayName.firstOrNull()?.uppercase() ?: "K"
                                                 )
                                             )
                                         } else {
@@ -1648,7 +1663,7 @@ fun NewChatScreen(
                         } else {
                             Box(Modifier.size(48.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape),
                                 contentAlignment = Alignment.Center) {
-                                Text(user.name.firstOrNull()?.uppercase() ?: "K", color = Green, fontWeight = FontWeight.Bold)
+                                Text(displayName.firstOrNull()?.uppercase() ?: "K", color = Green, fontWeight = FontWeight.Bold)
                             }
                         }
 
@@ -1656,7 +1671,7 @@ fun NewChatScreen(
 
                         Column(Modifier.weight(1f)) {
                             Text(
-                                user.name.ifBlank { "Khahish User" },
+                                displayName,
                                 color = MaterialTheme.colorScheme.onSurface,
                                 fontWeight = FontWeight.SemiBold
                             )
@@ -1710,6 +1725,7 @@ fun ChatList(
     var loading by remember { mutableStateOf(true) }
     var search by remember { mutableStateOf("") }
     var profilePhotos by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var contactNicknames by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var expandedProfileMenu by remember { mutableStateOf("") }
     var selectedPictureUrl by remember { mutableStateOf("") }
     var messageSearchResults by remember { mutableStateOf(emptyList<ChatMessageSearchResult>()) }
@@ -1821,6 +1837,21 @@ fun ChatList(
                 val photo = snap?.getString("photoUrl").orEmpty()
                 profilePhotos = profilePhotos.toMutableMap().apply { if (photo.isBlank()) remove(peerUid) else put(peerUid, photo) }
             }
+        }
+        onDispose { registrations.forEach { it.remove() } }
+    }
+
+    DisposableEffect(currentUid, chats.map { it.peerUid }.distinct().joinToString("|")) {
+        val peerUids = chats.filterNot { it.isGroup }.map { it.peerUid }.filter { it.isNotBlank() }.distinct()
+        val registrations = peerUids.map { peerUid ->
+            db.collection("users").document(currentUid).collection("appSettings")
+                .document("contactNickname_$peerUid")
+                .addSnapshotListener { snap, _ ->
+                    val nickname = snap?.getString("nickname").orEmpty().trim()
+                    contactNicknames = contactNicknames.toMutableMap().apply {
+                        if (nickname.isBlank()) remove(peerUid) else put(peerUid, nickname)
+                    }
+                }
         }
         onDispose { registrations.forEach { it.remove() } }
     }
@@ -1940,7 +1971,12 @@ fun ChatList(
             }
     }
 
-    val filtered = chats.filter {
+    val displayChats = chats.map { item ->
+        if (item.isGroup) item else contactNicknames[item.peerUid]?.let { nickname ->
+            item.copy(name = nickname, initials = nickname.firstOrNull()?.uppercase() ?: item.initials)
+        } ?: item
+    }
+    val filtered = displayChats.filter {
         it.name.contains(search, true) || it.message.contains(search, true)
     }
 
@@ -3049,16 +3085,12 @@ fun ConversationScreen(
         }
     }
 
-    // Automatically bring a newly sent message into view. Incoming messages do not
-    // force-scroll the chat, so reading older messages remains undisturbed.
+    // Keep the newest message visible for both outgoing and incoming messages.
     LaunchedEffect(displayedMessages.lastOrNull()?.id, chat.id) {
-        val newestMessage = displayedMessages.lastOrNull()
-        if (newestMessage?.senderId == currentUserId) {
+        if (displayedMessages.isNotEmpty()) {
             delay(100L)
             val latestIndex = displayedMessages.lastIndex
-            if (latestIndex >= 0) {
-                messageListState.animateScrollToItem(latestIndex)
-            }
+            if (latestIndex >= 0) messageListState.animateScrollToItem(latestIndex)
         }
     }
 
@@ -3873,6 +3905,7 @@ fun ConversationScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 10.dp, vertical = 8.dp)
                 .padding(bottom = 6.dp)
+                .imePadding()
                 .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(30.dp))
                 .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(30.dp))
                 .padding(horizontal = 5.dp, vertical = 4.dp),
@@ -4843,8 +4876,18 @@ fun ConversationScreen(
                     if (canDeleteForEveryone) {
                         TextButton(onClick = {
                             selectedMessageIds.toList().forEach { id ->
-                                chatRef.collection("messages").document(id).delete()
-                                    .addOnFailureListener { showToast(context, "Could not delete for everyone: ${it.message}") }
+                                val selected = selectedMessages.firstOrNull { it.id == id }
+                                val messageRef = chatRef.collection("messages").document(id)
+                                if (selected?.mediaType == "video") {
+                                    messageRef.update(mapOf(
+                                        "mediaType" to "text",
+                                        "text" to "This video was deleted for everyone",
+                                        "imageUrl" to "",
+                                        "deletedForEveryone" to true
+                                    )).addOnFailureListener { showToast(context, "Could not delete video for everyone: ${it.message}") }
+                                } else {
+                                    messageRef.delete().addOnFailureListener { showToast(context, "Could not delete for everyone: ${it.message}") }
+                                }
                             }
                             selectedMessageIds = emptySet()
                             showDeleteOptions = false
@@ -5832,6 +5875,9 @@ private fun KhahishUserProfileScreen(
     val settingsRef = remember(currentUid, uid) {
         db.collection("users").document(currentUid).collection("appSettings").document("chat_${privateChatId(currentUid, uid)}")
     }
+    val nicknameRef = remember(currentUid, uid) {
+        db.collection("users").document(currentUid).collection("appSettings").document("contactNickname_$uid")
+    }
 
     var name by remember(uid) { mutableStateOf("Loading profile…") }
     var photo by remember(uid) { mutableStateOf("") }
@@ -5840,6 +5886,9 @@ private fun KhahishUserProfileScreen(
     var online by remember(uid) { mutableStateOf(false) }
     var loading by remember(uid) { mutableStateOf(true) }
     var showPicture by remember { mutableStateOf(false) }
+    var nickname by remember(uid) { mutableStateOf("") }
+    var nicknameDraft by remember(uid) { mutableStateOf("") }
+    var nicknameSaving by remember { mutableStateOf(false) }
     var showBlockConfirm by remember { mutableStateOf(false) }
     var showReportDialog by remember { mutableStateOf(false) }
     var reportReason by remember { mutableStateOf("Spam or unwanted content") }
@@ -5929,7 +5978,11 @@ private fun KhahishUserProfileScreen(
             notificationsMuted = snapshot?.getBoolean("notificationsMuted") == true
             showMediaPreviews = snapshot?.getBoolean("showMediaPreviews") != false
         }
-        onDispose { registration.remove() }
+        val nicknameRegistration = nicknameRef.addSnapshotListener { snapshot, _ ->
+            nickname = snapshot?.getString("nickname").orEmpty()
+            nicknameDraft = nickname
+        }
+        onDispose { registration.remove(); nicknameRegistration.remove() }
     }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -5964,7 +6017,7 @@ private fun KhahishUserProfileScreen(
                     }
                 }
                 Spacer(Modifier.height(16.dp))
-                Text(name, color = MaterialTheme.colorScheme.onBackground, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                Text(nickname.ifBlank { name }, color = MaterialTheme.colorScheme.onBackground, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                 if (username.isNotBlank()) Text("@$username", color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)
                 Text(if (online) "Online" else "Khahish member", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 if (bio.isNotBlank()) {
@@ -5974,10 +6027,37 @@ private fun KhahishUserProfileScreen(
                     }
                 }
 
+                Spacer(Modifier.height(18.dp))
+                Card(
+                    Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Private nickname", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                        Text("Ye naam sirf aapko nazar aayega. Doosre user ko aapka nickname nahi dikhega.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                        OutlinedTextField(value = nicknameDraft, onValueChange = { nicknameDraft = it.take(40) }, modifier = Modifier.fillMaxWidth(), singleLine = true, placeholder = { Text("Is contact ka nickname") })
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            TextButton(enabled = !nicknameSaving && nickname.isNotBlank(), onClick = {
+                                nicknameSaving = true
+                                nicknameRef.delete().addOnSuccessListener {
+                                    nickname = ""; nicknameDraft = ""; nicknameSaving = false
+                                    Toast.makeText(context, "Nickname removed", Toast.LENGTH_SHORT).show()
+                                }.addOnFailureListener { nicknameSaving = false; Toast.makeText(context, "Could not remove nickname: ${it.message}", Toast.LENGTH_LONG).show() }
+                            }) { Text("Remove") }
+                            Button(enabled = !nicknameSaving && nicknameDraft.trim().isNotBlank(), onClick = {
+                                nicknameSaving = true
+                                nicknameRef.set(mapOf("nickname" to nicknameDraft.trim(), "updatedAt" to System.currentTimeMillis()), SetOptions.merge())
+                                    .addOnSuccessListener { nickname = nicknameDraft.trim(); nicknameSaving = false; Toast.makeText(context, "Private nickname saved", Toast.LENGTH_SHORT).show() }
+                                    .addOnFailureListener { nicknameSaving = false; Toast.makeText(context, "Could not save nickname: ${it.message}", Toast.LENGTH_LONG).show() }
+                            }) { Text(if (nicknameSaving) "Saving…" else "Save nickname") }
+                        }
+                    }
+                }
+
                 Spacer(Modifier.height(22.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Button(
-                        onClick = { onStartCall(uid, name, false) },
+                        onClick = { onStartCall(uid, nickname.ifBlank { name }, false) },
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(containerColor = Green)
                     ) {
@@ -5986,7 +6066,7 @@ private fun KhahishUserProfileScreen(
                         Text("Voice")
                     }
                     OutlinedButton(
-                        onClick = { onStartCall(uid, name, true) },
+                        onClick = { onStartCall(uid, nickname.ifBlank { name }, true) },
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(Icons.Default.Videocam, null)

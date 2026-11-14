@@ -938,6 +938,28 @@ service cloud.firestore {
         allow delete: if signedIn()
           && get(/databases/$(database)/documents/stories/$(storyId)).data.ownerUid == request.auth.uid;
       }
+
+      // A viewer can create or remove only their own private story-like record.
+      // The story owner can read the complete likes list for engagement counts.
+      match /likes/{viewerUid} {
+        allow get, list: if signedIn()
+          && (
+            get(/databases/$(database)/documents/stories/$(storyId)).data.ownerUid == request.auth.uid
+            || viewerUid == request.auth.uid
+          );
+
+        allow create, update: if signedIn()
+          && viewerUid == request.auth.uid
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.name is string
+          && request.resource.data.likedAt is int
+          && get(/databases/$(database)/documents/stories/$(storyId)).data.ownerUid != request.auth.uid
+          && canReadStory(get(/databases/$(database)/documents/stories/$(storyId)).data);
+
+        allow delete: if signedIn()
+          && (viewerUid == request.auth.uid
+            || get(/databases/$(database)/documents/stories/$(storyId)).data.ownerUid == request.auth.uid);
+      }
     }
 
     // -----------------------------------------------------
