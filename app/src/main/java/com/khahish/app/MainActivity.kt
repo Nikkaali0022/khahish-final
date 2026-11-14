@@ -2869,8 +2869,8 @@ fun ConversationScreen(
             voiceRecordingFile?.delete()
             voiceRecordingFile = null
             isRecordingVoice = false
-            voiceDragOffset = 0f
-            voiceCancelGesture = false
+            voiceLocked = false
+            voiceElapsedSeconds = 0L
         }
     }
 
@@ -3838,7 +3838,7 @@ fun ConversationScreen(
                     .size(54.dp)
                     .shadow(8.dp, CircleShape)
                     .background(
-                        if (voiceCancelGesture) MaterialTheme.colorScheme.error else Green,
+                        if (isRecordingVoice && !voiceLocked) Color(0xFFE53935) else Green,
                         CircleShape
                     )
                     .pointerInput(Unit) {
