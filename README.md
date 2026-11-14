@@ -78,8 +78,10 @@ users in the **Khahish Firebase project**:
    Authentication Admin permission. For a service-account key, keep the JSON
    file outside the repository and set `GOOGLE_APPLICATION_CREDENTIALS` to
    its local path. Never upload it to GitHub or share it in chat.
-3. Set `FIREBASE_PROJECT_ID` to the exact Firebase project ID shown in
-   Firebase Console → Project settings → General.
+3. The app's checked-in Firebase configuration identifies the project ID as
+   `khahish-final`. The script uses this as its default; set
+   `FIREBASE_PROJECT_ID` explicitly only if your Firebase Console shows a
+   different project ID.
 4. Run `npm run grant:owner-admin`.
 5. Confirm the script prints its verified success message. The script checks
    that the email and UID resolve to the same Firebase Auth user before it
