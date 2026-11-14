@@ -15,7 +15,7 @@ on:
       - "package.json"
       - ".github/workflows/firestore-rules.yml"
   push:
-    branches: [feature/agora-calling]
+    branches: [feature/agora-calling, integration/combined-from-main]
     paths:
       - "firestore.rules"
       - "firestore.indexes.json"
