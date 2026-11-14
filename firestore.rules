@@ -816,14 +816,10 @@ service cloud.firestore {
         && resource.data.get('expiresAt', 0) is int
         && resource.data.expiresAt > request.time.toMillis();
 
-      // Firestore cannot use request.time as a query filter value. The app's
-      // list queries therefore include expiresAt > clientNow and the UI
-      // filters again; audience privacy is still checked per returned story.
-      allow list: if signedIn()
-        && (
-          resource.data.ownerUid == request.auth.uid
-          || request.auth.uid in resource.data.allowedUids
-        );
+      // Apply the same accepted-friend and block checks to list queries as
+      // direct reads. The app scopes each friend's query by ownerUid and
+      // allowedUids, so Firestore can prove this rule for every returned row.
+      allow list: if canReadStory(resource.data);
 
       allow create: if signedIn()
         && request.resource.data.ownerUid == request.auth.uid
