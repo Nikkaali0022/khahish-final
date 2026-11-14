@@ -25,6 +25,7 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
+import com.google.android.gms.tasks.Tasks
 
 private data class KhahishAdminSection(
     val title: String,
@@ -39,7 +40,7 @@ private val khahishAdminSections = listOf(
     KhahishAdminSection("Reports & Appeals", "Review user reports and moderation cases", Icons.Default.Flag),
     KhahishAdminSection("Stories Management", "Review, remove or restore reported stories", Icons.Default.Collections),
     KhahishAdminSection("Broadcast Center", "Send announcements to all or one user", Icons.Default.Campaign),
-    KhahishAdminSection("Push Notifications", "Send targeted push notifications", Icons.Default.NotificationsActive),
+    KhahishAdminSection("In-App Notifications", "Send announcements to private user inboxes", Icons.Default.Notifications),
     KhahishAdminSection("Chat & Groups", "Review group metadata without reading private messages", Icons.Default.Chat),
     KhahishAdminSection("Support Center", "Reply to user complaints and close tickets", Icons.Default.SupportAgent),
     KhahishAdminSection("Analytics", "Live account and content totals", Icons.Default.Analytics),
@@ -147,6 +148,8 @@ fun KhahishAdminPanelScreen(onBack: () -> Unit) {
     var composeBody by remember { mutableStateOf("") }
     var targetType by remember { mutableStateOf("all") }
     var targetUid by remember { mutableStateOf("") }
+    var pendingBroadcastId by remember { mutableStateOf("") }
+    var sendingMessage by remember { mutableStateOf(false) }
 
     var replyTicket by remember { mutableStateOf<DocumentSnapshot?>(null) }
     var replyText by remember { mutableStateOf("") }
@@ -227,7 +230,7 @@ fun KhahishAdminPanelScreen(onBack: () -> Unit) {
             "Bans & Restrictions" -> attach(db.collection("accountRestrictions").orderBy("createdAt", Query.Direction.DESCENDING).limit(150))
             "Reports & Appeals" -> attach(db.collection("reports").orderBy("createdAt", Query.Direction.DESCENDING).limit(150))
             "Stories Management" -> attach(db.collection("stories").orderBy("createdAt", Query.Direction.DESCENDING).limit(150))
-            "Broadcast Center", "Push Notifications" -> attach(db.collection("adminBroadcasts").orderBy("createdAt", Query.Direction.DESCENDING).limit(100))
+            "Broadcast Center", "In-App Notifications" -> attach(db.collection("adminBroadcasts").orderBy("createdAt", Query.Direction.DESCENDING).limit(100))
             "Chat & Groups" -> attach(db.collection("chats").orderBy("updatedAt", Query.Direction.DESCENDING).limit(150))
             "Support Center" -> attach(db.collection("supportTickets").orderBy("updatedAt", Query.Direction.DESCENDING).limit(150))
             "Activity History" -> attach(db.collection("adminAuditLogs").orderBy("createdAt", Query.Direction.DESCENDING).limit(150))
@@ -326,23 +329,108 @@ fun KhahishAdminPanelScreen(onBack: () -> Unit) {
             error = "Specific user ke liye UID zaroor likhein."
             return
         }
-        val data = mutableMapOf<String, Any>(
-            "title" to title,
-            "body" to body,
-            "kind" to kind,
-            "targetType" to targetType,
-            "createdBy" to currentUid,
-            "createdAt" to System.currentTimeMillis()
-        )
-        if (targetType == "user") data["targetUid"] = targetUid.trim()
-        db.collection("adminBroadcasts").add(data)
-            .addOnSuccessListener {
-                audit(if (kind == "notification") "push_notification_created" else "broadcast_created", targetUid, title)
-                composeTitle = ""
-                composeBody = ""
-                notice = "Message queued. Cloud Function will deliver it and update its status."
+        if (sendingMessage) return
+
+        sendingMessage = true
+        error = ""
+        val broadcastId = pendingBroadcastId.ifBlank {
+            db.collection("adminBroadcasts").document().id.also { pendingBroadcastId = it }
+        }
+        val createdAt = System.currentTimeMillis()
+
+        fun deliverToRecipients(recipientUids: List<String>) {
+            val recipients = recipientUids.distinct().filter { it.isNotBlank() }
+            if (recipients.isEmpty()) {
+                sendingMessage = false
+                error = "Is audience ke liye koi Khahish user nahi mila."
+                return
             }
-            .addOnFailureListener { error = it.localizedMessage ?: "Could not queue message." }
+
+            val commits = recipients.chunked(450).map { chunk ->
+                val batch = db.batch()
+                chunk.forEach { recipientUid ->
+                    val inboxRef = db.collection("users").document(recipientUid)
+                        .collection("notifications").document(broadcastId)
+                    batch.set(
+                        inboxRef,
+                        mapOf(
+                            "broadcastId" to broadcastId,
+                            "recipientUid" to recipientUid,
+                            "title" to title,
+                            "body" to body,
+                            "kind" to kind,
+                            "createdBy" to currentUid,
+                            "createdAt" to createdAt,
+                            "isRead" to false,
+                            "readAt" to 0L,
+                            "deliveryMode" to "in_app"
+                        )
+                    )
+                }
+                batch.commit()
+            }
+
+            Tasks.whenAll(commits).addOnSuccessListener {
+                val history = mapOf(
+                    "title" to title,
+                    "body" to body,
+                    "kind" to kind,
+                    "targetType" to targetType,
+                    "targetUid" to if (targetType == "user") recipients.first() else "",
+                    "createdBy" to currentUid,
+                    "createdAt" to createdAt,
+                    "deliveryMode" to "in_app",
+                    "dispatchStatus" to "delivered",
+                    "recipientCount" to recipients.size
+                )
+                db.collection("adminBroadcasts").document(broadcastId).set(history)
+                    .addOnSuccessListener {
+                        audit(
+                            if (kind == "notification") "in_app_notification_sent" else "announcement_sent",
+                            if (targetType == "user") recipients.first() else "",
+                            "$title • ${recipients.size} inboxes"
+                        )
+                        composeTitle = ""
+                        composeBody = ""
+                        pendingBroadcastId = ""
+                        sendingMessage = false
+                        notice = "Delivered to ${recipients.size} private inbox(es). Users will see it when they open Khahish."
+                    }
+                    .addOnFailureListener {
+                        sendingMessage = false
+                        error = "Inbox messages delivered, but broadcast history could not be saved: ${it.localizedMessage}"
+                    }
+            }.addOnFailureListener {
+                sendingMessage = false
+                error = "Some inbox writes failed. Tap Send again to safely retry this same broadcast: ${it.localizedMessage}"
+            }
+        }
+
+        if (targetType == "user") {
+            val recipientUid = targetUid.trim()
+            db.collection("publicProfiles").document(recipientUid).get()
+                .addOnSuccessListener { profile ->
+                    if (!profile.exists()) {
+                        sendingMessage = false
+                        error = "Target UID ka Khahish profile nahi mila."
+                    } else {
+                        deliverToRecipients(listOf(recipientUid))
+                    }
+                }
+                .addOnFailureListener {
+                    sendingMessage = false
+                    error = it.localizedMessage ?: "Target user verify nahi ho saka."
+                }
+        } else {
+            db.collection("publicProfiles").get()
+                .addOnSuccessListener { profiles ->
+                    deliverToRecipients(profiles.documents.map { it.id })
+                }
+                .addOnFailureListener {
+                    sendingMessage = false
+                    error = it.localizedMessage ?: "User list load nahi ho saki."
+                }
+        }
     }
 
     fun replyToTicket(doc: DocumentSnapshot) {
@@ -550,20 +638,21 @@ fun KhahishAdminPanelScreen(onBack: () -> Unit) {
                         minLines = 3
                     )
                     Button(
-                        onClick = { sendAdminMessage(if (selectedSection == "Push Notifications") "notification" else "announcement") },
+                        onClick = { sendAdminMessage(if (selectedSection == "In-App Notifications") "notification" else "announcement") },
+                        enabled = !sendingMessage,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.Default.Send, null)
                         Spacer(Modifier.width(8.dp))
-                        Text("Queue ${if (selectedSection == "Push Notifications") "push notification" else "broadcast"}")
+                        Text(if (sendingMessage) "Sending…" else "Send in-app ${if (selectedSection == "In-App Notifications") "notification" else "announcement"}")
                     }
-                    Text("Recent deliveries", fontWeight = FontWeight.SemiBold)
+                    Text("Recent inbox deliveries", fontWeight = FontWeight.SemiBold)
                     records.forEach { doc ->
                         AdminRecordCard(
                             title = doc.getString("title") ?: "Admin message",
-                            subtitle = "${doc.getString("dispatchStatus") ?: "queued"} • ${doc.getString("targetType") ?: "all"} • Sent: ${doc.getLong("pushSent") ?: 0}",
+                            subtitle = "${doc.getString("dispatchStatus") ?: "legacy record"} • ${doc.getString("deliveryMode") ?: "legacy"} • Inbox recipients: ${doc.getLong("recipientCount") ?: 0}",
                             trailing = doc.getString("kind") ?: "view",
-                            onAction = { notice = "Delivery status: ${doc.getString("dispatchStatus") ?: "queued"}" }
+                            onAction = { notice = "In-app delivery status: ${doc.getString("dispatchStatus") ?: "legacy record"} • Recipients: ${doc.getLong("recipientCount") ?: 0}" }
                         )
                     }
                 }
