@@ -336,6 +336,12 @@ test("story audience requires an accepted friend and expiry is enforced", async 
     status: "accepted"
   });
   await seed("stories/active-friends", activeStory);
+  // A malicious owner may forge a recipient UID in allowedUids, but that
+  // recipient must still fail both direct reads and scoped list queries.
+  await seed("stories/forged-recipient", {
+    ...activeStory,
+    allowedUids: ["charlie"]
+  });
   await seed("stories/expired-friends", {
     ...activeStory,
     expiresAt: Date.now() - 60_000
@@ -348,6 +354,7 @@ test("story audience requires an accepted friend and expiry is enforced", async 
 
   await assertSucceeds(getDoc(doc(db("bob"), "stories/active-friends")));
   await assertFails(getDoc(doc(db("charlie"), "stories/active-friends")));
+  await assertFails(getDoc(doc(db("charlie"), "stories/forged-recipient")));
   await assertFails(getDoc(doc(db("bob"), "stories/expired-friends")));
   await assertFails(getDoc(doc(db("bob"), "stories/private")));
   await assertSucceeds(getDoc(doc(db("alice"), "stories/private")));
@@ -356,6 +363,12 @@ test("story audience requires an accepted friend and expiry is enforced", async 
     collection(db("bob"), "stories"),
     where("ownerUid", "==", "alice"),
     where("allowedUids", "array-contains", "bob"),
+    where("expiresAt", ">", Date.now())
+  )));
+  await assertFails(getDocs(query(
+    collection(db("charlie"), "stories"),
+    where("ownerUid", "==", "alice"),
+    where("allowedUids", "array-contains", "charlie"),
     where("expiresAt", ">", Date.now())
   )));
   await assertFails(getDocs(query(
