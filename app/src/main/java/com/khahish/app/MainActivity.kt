@@ -370,8 +370,9 @@ fun KhahishApp() {
         mutableStateOf(uiPreferences.getString("theme_mode", "system") ?: "system")
     }
     val systemDark = isSystemInDarkTheme()
+    val isGlassTheme = themeMode == "glass"
     val useDarkTheme = when (themeMode) {
-        "dark" -> true
+        "dark", "glass" -> true
         "light" -> false
         else -> systemDark
     }
@@ -672,7 +673,17 @@ fun KhahishApp() {
     }
 
     MaterialTheme(
-        colorScheme = if (useDarkTheme) darkColorScheme(
+        colorScheme = if (isGlassTheme) darkColorScheme(
+            primary = Color(0xFF8CF5DF),
+            onPrimary = Color(0xFF07352E),
+            background = Color(0xFF102B35),
+            onBackground = Color(0xFFE9FFFC),
+            surface = Color(0xFF1C3B45),
+            onSurface = Color(0xFFE9FFFC),
+            surfaceVariant = Color(0xFF284B54),
+            onSurfaceVariant = Color(0xFFC0DEDA),
+            outlineVariant = Color(0xFF52747A)
+        ) else if (useDarkTheme) darkColorScheme(
             primary = Color(0xFF55D6B4),
             onPrimary = Color(0xFF00382D),
             background = Color(0xFF101918),
@@ -774,6 +785,7 @@ fun KhahishApp() {
                 } else if (selectedChat != null) {
                     ConversationScreen(
                         chat = selectedChat!!,
+                        isGlassTheme = isGlassTheme,
                         onBack = {
                             val wasLockedChat = selectedChat?.peerUid in lockedContactUids
                             selectedChat = null
@@ -2517,6 +2529,7 @@ private fun PeopleSearchDialog(
 @Composable
 fun ConversationScreen(
     chat: Chat,
+    isGlassTheme: Boolean = false,
     onBack: () -> Unit,
     onViewProfile: (String) -> Unit,
     onStartCall: (Boolean) -> Unit
@@ -3434,11 +3447,21 @@ fun ConversationScreen(
                         0.0722f * linearize(outgoingBubbleColor.blue)
                     if (luminance > 0.179f) Color.Black else Color.White
                 }
-                val bubbleBackgroundColor = if (isMe) outgoingBubbleColor else MaterialTheme.colorScheme.surface
-                val bubbleTextColor = if (isMe) outgoingBubbleTextColor else MaterialTheme.colorScheme.onSurface
-                val bubbleSecondaryTextColor = if (isMe) {
-                    if (outgoingBubbleTextColor == Color.White) Color(0xFFDCEFEA) else Color(0xFF34433F)
-                } else MaterialTheme.colorScheme.onSurfaceVariant
+                val bubbleBackgroundColor = when {
+                    isGlassTheme && isMe -> Color(0x6655D6B4)
+                    isGlassTheme -> Color(0x55FFFFFF)
+                    isMe -> Color(0xFFE1FFC3)
+                    else -> Color.White
+                }
+                val bubbleTextColor = Color(0xFF101810)
+                val bubbleSecondaryTextColor = if (isGlassTheme) {
+                    if (isMe) Color(0xFFE4FFF8) else Color(0xFFF0FFFC)
+                } else Color(0xFF89958A)
+                val inlineTextMeta = msg.mediaType == "text" &&
+                    msg.text.isNotBlank() &&
+                    msg.replyToMessageId.isBlank() &&
+                    !msg.restoredFromBackup &&
+                    msg.reactions.isEmpty()
 
                 val isSelected = msg.id in selectedMessageIds
                 val swipeOffset = remember(msg.id) { Animatable(0f) }
@@ -3490,7 +3513,25 @@ fun ConversationScreen(
                                 },
                                 onLongClick = { reactionTarget = msg }
                             )
-                            .border(2.dp, if (isSelected) Green else Color.Transparent, RoundedCornerShape(16.dp))
+                            .shadow(
+                                if (isGlassTheme) 9.dp else 2.dp,
+                                RoundedCornerShape(
+                                    topStart = 16.dp,
+                                    topEnd = 16.dp,
+                                    bottomStart = if (isMe) 16.dp else 4.dp,
+                                    bottomEnd = if (isMe) 4.dp else 16.dp
+                                )
+                            )
+                            .border(
+                                if (isGlassTheme) 1.dp else 0.5.dp,
+                                if (isSelected) Green else if (isGlassTheme) Color.White.copy(alpha = 0.48f) else Color(0x1F52705D),
+                                RoundedCornerShape(
+                                    topStart = 16.dp,
+                                    topEnd = 16.dp,
+                                    bottomStart = if (isMe) 16.dp else 4.dp,
+                                    bottomEnd = if (isMe) 4.dp else 16.dp
+                                )
+                            )
                             .background(
                                 if (isSelected) MaterialTheme.colorScheme.surfaceVariant else bubbleBackgroundColor,
                                 RoundedCornerShape(
@@ -3500,7 +3541,7 @@ fun ConversationScreen(
                                     bottomEnd = if (isMe) 4.dp else 16.dp
                                 )
                             )
-                            .padding(10.dp)
+                            .padding(horizontal = 11.dp, vertical = 6.dp)
                     ) {
                         if (chat.isGroup && !isMe) {
                             Text(
@@ -3622,7 +3663,49 @@ fun ConversationScreen(
                             Spacer(Modifier.height(5.dp))
                         }
                         if (msg.text.isNotBlank() && msg.mediaType != "location" && msg.mediaType != "contact") {
-                            Text(msg.text, color = if (isSelected) MaterialTheme.colorScheme.onSurface else bubbleTextColor, fontSize = 15.sp)
+                            if (inlineTextMeta) {
+                                Row(verticalAlignment = Alignment.Bottom) {
+                                    Text(
+                                        msg.text,
+                                        modifier = Modifier.weight(1f, fill = false),
+                                        color = if (isSelected) MaterialTheme.colorScheme.onSurface else bubbleTextColor,
+                                        fontSize = 15.sp
+                                    )
+                                    Spacer(Modifier.width(7.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            java.text.SimpleDateFormat("hh:mm a", Locale.getDefault())
+                                                .format(java.util.Date(msg.timestamp)),
+                                            fontSize = 10.sp,
+                                            color = bubbleSecondaryTextColor
+                                        )
+                                        if (msg.editedAt > 0L) {
+                                            Text(" · edited", fontSize = 9.sp, color = bubbleSecondaryTextColor)
+                                        }
+                                        if (isMe) {
+                                            Spacer(Modifier.width(4.dp))
+                                            if (msg.isPending) {
+                                                Icon(Icons.Default.Schedule, contentDescription = "Waiting to send", tint = bubbleSecondaryTextColor, modifier = Modifier.size(13.dp))
+                                            } else {
+                                                val read = msg.readBy.any { it != currentUserId }
+                                                val delivered = msg.deliveredTo.any { it != currentUserId }
+                                                Text(
+                                                    when {
+                                                        read -> "✓✓"
+                                                        delivered -> "✓✓"
+                                                        else -> "✓"
+                                                    },
+                                                    color = if (read) Color(0xFF35B7E8) else bubbleSecondaryTextColor,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                Text(msg.text, color = if (isSelected) MaterialTheme.colorScheme.onSurface else bubbleTextColor, fontSize = 15.sp)
+                            }
                         }
                         if (msg.restoredFromBackup) {
                             Text("Imported backup • sender not verified", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp)
@@ -3642,7 +3725,7 @@ fun ConversationScreen(
                             }
                         }
 
-                        Row(
+                        if (!inlineTextMeta) Row(
                             Modifier.align(Alignment.End),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
