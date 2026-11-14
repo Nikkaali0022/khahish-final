@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Cached
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Check
@@ -77,7 +78,19 @@ fun KhahishCallScreen(
     var remoteUid by remember(call.id) { mutableStateOf<Int?>(null) }
     var peerPhotoUrl by remember(call.id) { mutableStateOf("") }
     var callElapsedSeconds by remember(call.id) { mutableIntStateOf(0) }
+    var selectedBeautyFilter by remember(call.id) { mutableStateOf("Natural") }
+    var showBeautyFilters by remember(call.id) { mutableStateOf(false) }
     val latestSession by rememberUpdatedState(session)
+
+    fun finishCallLocally() {
+        session?.leave()
+        KhahishCallForegroundService.stop(context)
+        onExit()
+    }
+
+    LaunchedEffect(session, selectedBeautyFilter) {
+        session?.setBeautyFilter(selectedBeautyFilter)
+    }
 
     val peerUid = if (isIncoming) currentCall.callerUid else currentCall.calleeUid
     val displayName = if (isIncoming) currentCall.callerName else currentCall.calleeName
@@ -95,6 +108,7 @@ fun KhahishCallScreen(
     fun requestCredentialsAndJoin() {
         statusText = "Connecting securely…"
         errorText = ""
+        KhahishCallForegroundService.start(context, currentCall, currentCall.isVideo)
         KhahishAgoraTokenClient.requestToken(
             currentCall.id,
             currentCall.channelName,
@@ -183,9 +197,9 @@ fun KhahishCallScreen(
                         statusText = if (isJoined) "Connected" else "Connecting audio…"
                         if (!isIncoming && session == null && !connectionStarted) connectIfAllowed()
                     }
-                    "rejected" -> { KhahishMessagingService.cancelIncomingCallNotification(context, call.id); errorText = ""; statusText = "Call declined"; onExit() }
-                    "ended" -> { KhahishMessagingService.cancelIncomingCallNotification(context, call.id); errorText = ""; statusText = "Call ended"; onExit() }
-                    "missed" -> { KhahishMessagingService.cancelIncomingCallNotification(context, call.id); errorText = ""; statusText = "Missed call"; onExit() }
+                    "rejected" -> { KhahishMessagingService.cancelIncomingCallNotification(context, call.id); errorText = ""; statusText = "Call declined"; finishCallLocally() }
+                    "ended" -> { KhahishMessagingService.cancelIncomingCallNotification(context, call.id); errorText = ""; statusText = "Call ended"; finishCallLocally() }
+                    "missed" -> { KhahishMessagingService.cancelIncomingCallNotification(context, call.id); errorText = ""; statusText = "Missed call"; finishCallLocally() }
                     "ringing" -> statusText = if (isIncoming) "Incoming call" else "Ringing…"
                 }
             }
@@ -193,6 +207,7 @@ fun KhahishCallScreen(
         onDispose {
             registration.remove()
             latestSession?.leave()
+            KhahishCallForegroundService.stop(context)
         }
     }
 
@@ -230,8 +245,7 @@ fun KhahishCallScreen(
 
     BackHandler(enabled = true) {
         repository.endCall(call.id) { errorText = it }
-        session?.leave()
-        onExit()
+        finishCallLocally()
     }
 
     LaunchedEffect(call.id, isIncoming, currentCall.status) {
@@ -387,6 +401,45 @@ fun KhahishCallScreen(
                         },
                     )
                 }
+                if (call.isVideo) {
+                    Row(
+                        modifier = Modifier.align(Alignment.TopEnd).padding(10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(shape = CircleShape, color = Color(0x99000000),
+                            onClick = { session?.switchCamera() }) {
+                            Icon(Icons.Default.Cached, "Switch camera", tint = Color.White,
+                                modifier = Modifier.padding(11.dp).size(22.dp))
+                        }
+                        Box {
+                            Surface(shape = CircleShape, color = Color(0x99000000),
+                                onClick = { showBeautyFilters = true }) {
+                                Text("✨ Filters", Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                    color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                            DropdownMenu(expanded = showBeautyFilters,
+                                onDismissRequest = { showBeautyFilters = false }) {
+                                listOf("Natural", "Soft Skin", "Glow", "Rosy", "Smooth Plus").forEach { filter ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(filter, Modifier.weight(1f))
+                                                if (selectedBeautyFilter == filter)
+                                                    Icon(Icons.Default.Check, "Selected", tint = colors.primary)
+                                            }
+                                        },
+                                        onClick = {
+                                            selectedBeautyFilter = filter
+                                            session?.setBeautyFilter(filter)
+                                            showBeautyFilters = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -502,8 +555,7 @@ fun KhahishCallScreen(
                     iconTint = colors.onError,
                     onClick = {
                         repository.endCall(call.id) { errorText = it }
-                        session?.leave()
-                        onExit()
+                        finishCallLocally()
                     }
                 )
             }
@@ -515,8 +567,7 @@ fun KhahishCallScreen(
             Button(
                 onClick = {
                     repository.endCall(call.id) { errorText = it }
-                    session?.leave()
-                    onExit()
+                    finishCallLocally()
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = colors.error)
             ) { Text("Cancel call") }
