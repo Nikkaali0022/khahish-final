@@ -92,7 +92,7 @@ class KhahishMessagingService : FirebaseMessagingService() {
         }
         val callId = payload["callId"].orEmpty()
         val isIncomingCall = notificationType == "call" && callId.isNotBlank()
-        ensureNotificationChannels()
+        KhahishAlertSettings.ensureChannels(this)
 
         fun activityIntent(action: String = "open"): Intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -109,8 +109,12 @@ class KhahishMessagingService : FirebaseMessagingService() {
         )
         // Use the call ID for incoming-call notifications so every cancel path targets the same ID.
         val notificationId = if (isIncomingCall) callId.hashCode() else (payload["notificationId"] ?: System.currentTimeMillis().toString()).hashCode()
-        val channelId = if (isIncomingCall) CALL_CHANNEL_ID else CHANNEL_ID
+        val channelId = if (isIncomingCall) KhahishAlertSettings.callChannelId(this) else KhahishAlertSettings.messageChannelId(this)
+        val selectedSound = if (isIncomingCall) KhahishAlertSettings.callSound(this) else KhahishAlertSettings.messageSound(this)
+        val vibrationEnabled = if (isIncomingCall) KhahishAlertSettings.callVibrationEnabled(this) else KhahishAlertSettings.messageVibrationEnabled(this)
         val builder = NotificationCompat.Builder(this, channelId)
+            .setSound(selectedSound)
+            .setVibrate(if (vibrationEnabled) longArrayOf(0L, 350L, 250L, 350L) else longArrayOf(0L))
             .setSmallIcon(android.R.drawable.sym_action_chat)
             .setContentTitle(title)
             .setContentText(body)
@@ -146,34 +150,8 @@ class KhahishMessagingService : FirebaseMessagingService() {
         }
     }
 
-    private fun ensureNotificationChannels() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            val messages = NotificationChannel(
-                CHANNEL_ID, "Khahish messages", NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "New messages and message requests"
-                enableVibration(true)
-            }
-            val calls = NotificationChannel(
-                CALL_CHANNEL_ID, "Khahish incoming calls", NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "Full-screen incoming voice and video call alerts"
-                enableVibration(true)
-                lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
-                setSound(
-                    RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
-                    AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE).build()
-                )
-            }
-            manager.createNotificationChannels(listOf(messages, calls))
-        }
-    }
 
     companion object {
-        private const val CHANNEL_ID = "khahish_messages"
-        private const val CALL_CHANNEL_ID = "khahish_incoming_calls_v2"
-
         fun cancelIncomingCallNotification(context: Context, callId: String) {
             if (callId.isNotBlank()) NotificationManagerCompat.from(context).cancel(callId.hashCode())
         }
