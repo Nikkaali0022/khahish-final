@@ -740,7 +740,17 @@ fun KhahishApp() {
                 } else if (selectedChat != null) {
                     ConversationScreen(
                         chat = selectedChat!!,
-                        onBack = { selectedChat = null },
+                        onBack = {
+                            val wasLockedChat = selectedChat?.peerUid in lockedContactUids
+                            selectedChat = null
+                            if (openedChatFromLockedChats) {
+                                showLockedChats = true
+                            } else if (wasLockedChat) {
+                                secretUnlockExpiresAtMs = 0L
+                                KhahishSecretChatApi.lock()
+                            }
+                            openedChatFromLockedChats = false
+                        },
                         onViewProfile = { profileTargetUid = it },
                         onStartCall = { isVideo ->
                             KhahishCallRepository().createOutgoingCall(
@@ -764,7 +774,7 @@ fun KhahishApp() {
                         currentUid = user.uid,
                         onBack = { showNewGroup = false },
                         onCreated = {
-                            selectedChat = it
+                            openChatWithLockCheck(it)
                             showNewGroup = false
                         }
                     )
@@ -774,10 +784,42 @@ fun KhahishApp() {
                         onBack = { showNewChat = false },
                         onCreateGroup = { showNewChat = false; showNewGroup = true },
                         onChatCreated = {
-                            selectedChat = it
+                            openChatWithLockCheck(it)
                             showNewChat = false
                         }
                     )
+                } else if (showLockedChats) {
+                    LockedChatsHub(
+                        currentUid = user.uid,
+                        lockedContactUids = lockedContactUids,
+                        onBack = {
+                            showLockedChats = false
+                            tab = "Chats"
+                            secretUnlockExpiresAtMs = 0L
+                            KhahishSecretChatApi.lock()
+                        },
+                        onAddContact = { contactUid, onResult ->
+                            KhahishSecretChatApi.updateContact(
+                                action = "add",
+                                contactUid = contactUid,
+                                onSuccess = { updated ->
+                                    lockedContactUids = updated
+                                    KhahishSecretChatLock.saveLockedUids(appContext, user.uid, updated)
+                                    onResult(updated, null)
+                                },
+                                onError = { message -> onResult(null, message) }
+                            )
+                        },
+                        onOpenChat = {
+                            openedChatFromLockedChats = true
+                            selectedChat = it
+                            showLockedChats = false
+                        },
+                        onChangePassword = { showLockPasswordSettings = true }
+                    )
+                    if (showLockPasswordSettings) {
+                        LockChatPasswordSettingsDialog(user.uid) { showLockPasswordSettings = false }
+                    }
                 } else {
                     Scaffold(
                         containerColor = MaterialTheme.colorScheme.background,
@@ -804,7 +846,7 @@ fun KhahishApp() {
                                     Image(
                                         painter = painterResource(R.drawable.khahish_logo),
                                         contentDescription = "Khahish logo",
-                                        modifier = Modifier.size(38.dp),
+                                        modifier = Modifier.size(38.dp).clickable { handleKhahishBrandTap() },
                                         contentScale = ContentScale.Fit
                                     )
 
@@ -825,6 +867,15 @@ fun KhahishApp() {
                                         Text("🦎", fontSize = 23.sp)
                                     }
 
+                                    if (tab == "Chats") {
+                                        IconButton(onClick = {
+                                            secretPasswordCreateMode = !secretPasswordHasPassword
+                                            pendingLockedChat = null
+                                            showSecretPasswordDialog = true
+                                        }) {
+                                            Icon(Icons.Default.Lock, "Locked Chats", tint = Color.White)
+                                        }
+                                    }
                                     IconButton(onClick = { tab = "Settings" }) {
                                         Icon(
                                             Icons.Default.Settings,
@@ -908,14 +959,15 @@ fun KhahishApp() {
                                 "Chats" -> ChatList(
                                     modifier = Modifier.padding(padding),
                                     currentUid = user.uid,
-                                    onOpen = { selectedChat = it },
-                                    onViewProfile = { profileTargetUid = it }
+                                    onOpen = { openChatWithLockCheck(it) },
+                                    onViewProfile = { profileTargetUid = it },
+                                    lockedContactUids = lockedContactUids
                                 )
 
                                 "Contacts" -> KhahishContactsScreen(
                                     currentUid = user.uid,
                                     modifier = Modifier.padding(padding),
-                                    onOpenChat = { selectedChat = it },
+                                    onOpenChat = { openChatWithLockCheck(it) },
                                     onViewProfile = { profileTargetUid = it }
                                 )
 
@@ -971,6 +1023,30 @@ fun KhahishApp() {
                     }
                 }
             }
+        }
+        if (currentUser != null && showSecretPasswordDialog) {
+            SecretChatPasswordDialog(
+                uid = currentUser!!.uid,
+                createMode = secretPasswordCreateMode,
+                onDismiss = {
+                    showSecretPasswordDialog = false
+                    pendingLockedChat = null
+                },
+                onUnlocked = { expiresAt ->
+                    showSecretPasswordDialog = false
+                    secretPasswordHasPassword = true
+                    secretUnlockExpiresAtMs = expiresAt
+                    val requestedChat = pendingLockedChat
+                    pendingLockedChat = null
+                    if (requestedChat != null) {
+                        selectedChat = requestedChat
+                        openedChatFromLockedChats = false
+                        showLockedChats = false
+                    } else {
+                        showLockedChats = true
+                    }
+                }
+            )
         }
         if (currentUser != null && activeCall != null) {
             KhahishCallScreen(
