@@ -19,6 +19,13 @@ service cloud.firestore {
         && (
           isAdmin()
           || !exists(/databases/$(database)/documents/accountRestrictions/$(request.auth.uid))
+          || (
+            exists(/databases/$(database)/documents/accountRestrictions/$(request.auth.uid))
+            && request.auth.token.get('admin', false) != true
+            && get(/databases/$(database)/documents/accountRestrictions/$(request.auth.uid)).data.get('permanent', false) != true
+            && get(/databases/$(database)/documents/accountRestrictions/$(request.auth.uid)).data.get('expiresAt', 0) is int
+            && get(/databases/$(database)/documents/accountRestrictions/$(request.auth.uid)).data.expiresAt <= request.time.toMillis()
+          )
         );
     }
 
@@ -1015,7 +1022,7 @@ service cloud.firestore {
     // -----------------------------------------------------
 
     match /accountRestrictions/{uid} {
-      allow get: if isOwner(uid) || isAdmin();
+      allow get: if (request.auth != null && request.auth.uid == uid) || isAdmin();
       allow list: if isAdmin();
       allow create, update, delete: if isAdmin();
     }
