@@ -830,3 +830,22 @@ test("admin audit logs are append-only and private to admins", async () => {
     action: "changed"
   }));
 });
+
+test("all signed-in users can read only the global maintenance status", async () => {
+  await seed("appConfig/global", {
+    maintenanceMode: true,
+    maintenanceMessage: "Maintenance"
+  });
+  const aliceDb = db("alice");
+  await assertSucceeds(getDoc(doc(aliceDb, "appConfig/global")));
+  await assertFails(getDoc(doc(aliceDb, "appConfig/private")));
+  await assertFails(setDoc(doc(aliceDb, "appConfig/global"), {
+    maintenanceMode: false
+  }));
+
+  const ownerDb = env.authenticatedContext("owner", { admin: true }).firestore();
+  await assertSucceeds(setDoc(doc(ownerDb, "appConfig/global"), {
+    maintenanceMode: false,
+    updatedAt: Date.now()
+  }));
+});
