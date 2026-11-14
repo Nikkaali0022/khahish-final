@@ -6018,7 +6018,6 @@ private fun KhahishUserProfileScreen(
                 }
                 Spacer(Modifier.height(16.dp))
                 Text(nickname.ifBlank { name }, color = MaterialTheme.colorScheme.onBackground, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                if (nickname.isNotBlank()) Text(name, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 if (username.isNotBlank()) Text("@$username", color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)
                 Text(if (online) "Online" else "Khahish member", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 if (bio.isNotBlank()) {
