@@ -358,7 +358,7 @@ fun KhahishCallScreen(
             Text(statusText, color = colors.onSurfaceVariant, fontSize = 15.sp)
         }
 
-        if ((call.isVideo || remoteUid != null) && credentials != null) {
+        if (call.isVideo && credentials != null) {
             Spacer(Modifier.height(18.dp))
             Box(
                 modifier = Modifier
