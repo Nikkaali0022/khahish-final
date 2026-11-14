@@ -7,8 +7,19 @@ service cloud.firestore {
     // Shared helpers
     // -----------------------------------------------------
 
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.token.get('admin', false) == true;
+    }
+
+    // A server-created restriction blocks ordinary accounts across the app.
+    // The trusted Owner account is never locked out by a user restriction.
     function signedIn() {
-      return request.auth != null;
+      return request.auth != null
+        && (
+          isAdmin()
+          || !exists(/databases/$(database)/documents/accountRestrictions/$(request.auth.uid))
+        );
     }
 
     function isOwner(uid) {
@@ -136,8 +147,10 @@ service cloud.firestore {
     function canReadStory(storyData) {
       return signedIn()
         && (
-          storyData.get('ownerUid', '') == request.auth.uid
-          || (
+          storyData.get('moderationStatus', 'active') != 'removed'
+          && (
+            storyData.get('ownerUid', '') == request.auth.uid
+            || (
             storyData.get('allowedUids', []) is list
             && request.auth.uid in storyData.get('allowedUids', [])
             && isAcceptedStoryFriend(storyData.get('ownerUid', ''), request.auth.uid)
@@ -157,7 +170,8 @@ service cloud.firestore {
     // -----------------------------------------------------
 
     match /users/{uid} {
-      allow get, create, update: if isOwner(uid);
+      allow get: if isOwner(uid) || isAdmin();
+      allow create, update: if isOwner(uid);
       allow delete: if false;
       allow list: if false;
 
@@ -244,6 +258,13 @@ service cloud.firestore {
         allow read, create, update, delete: if isOwner(uid);
       }
 
+      // Admin announcements are delivered into each user's private inbox by
+      // the trusted Cloud Function. Clients can only read their own inbox.
+      match /notifications/{notificationId} {
+        allow get, list: if isOwner(uid);
+        allow create, update, delete: if false;
+      }
+
       // Password hashes and unlock sessions are written only by the trusted
       // Secret Locked Chats Worker using its server credentials.
       match /secretChatLock/{lockDocument} {
@@ -270,7 +291,7 @@ service cloud.firestore {
       // Legacy documents containing private contact fields are hidden until
       // their owner signs in and the app removes those fields.
       allow get: if signedIn() && safePublicProfile(resource.data);
-      allow list: if false;
+      allow list: if isAdmin();
 
       allow create, update: if isOwner(uid)
         && safePublicProfile(request.resource.data)
@@ -395,19 +416,19 @@ service cloud.firestore {
     match /chats/{chatId} {
       // Allow checking a deterministic chat ID when no chat exists yet.
       // Existing chat documents remain readable only by their members.
-      allow get: if signedIn()
+      allow get: if isAdmin() || (signedIn()
         && (
           !exists(/databases/$(database)/documents/chats/$(chatId))
           || (
             request.auth.uid in resource.data.members
             && (!isSecretLockedChat(chatId) || hasActiveSecretChatUnlock())
           )
-        );
+        ));
       // Private-chat visibility is Worker-managed; group visibility mirrors the
       // member list and is validated on every group membership change.
       // The single visibleToUids array supports a secure, index-friendly query.
-      allow list: if signedIn()
-        && request.auth.uid in resource.data.get('visibleToUids', []);
+      allow list: if isAdmin()
+        || (signedIn() && request.auth.uid in resource.data.get('visibleToUids', []));
 
       allow create: if signedIn()
         && request.resource.data.members is list
@@ -839,13 +860,15 @@ service cloud.firestore {
 
     match /stories/{storyId} {
       // Direct document reads reject expired stories.
-      allow get: if canReadStory(resource.data)
+      allow get: if isAdmin() || (
+        canReadStory(resource.data)
         && resource.data.get('expiresAt', 0) is int
-        && resource.data.expiresAt > request.time.toMillis();
+        && resource.data.expiresAt > request.time.toMillis()
+      );
 
       // Other users read stories through their path-scoped storyFeed entries.
-      // Only the owner may list the top-level stories collection.
-      allow list: if signedIn() && resource.data.ownerUid == request.auth.uid;
+      // The Owner may list all stories for moderation.
+      allow list: if isAdmin() || (signedIn() && resource.data.ownerUid == request.auth.uid);
 
       allow create: if signedIn()
         && request.resource.data.ownerUid == request.auth.uid
@@ -862,9 +885,15 @@ service cloud.firestore {
         && request.resource.data.get('allowedUids', []).size() <= 500
         && !(request.auth.uid in request.resource.data.allowedUids);
 
-      allow update: if false;
-      allow delete: if signedIn()
-        && resource.data.ownerUid == request.auth.uid;
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'moderationStatus', 'moderationReason', 'moderatedAt', 'moderatedBy'
+        ])
+        && request.resource.data.moderationStatus in ['active', 'removed']
+        && request.resource.data.moderationReason is string
+        && request.resource.data.moderatedAt is int
+        && request.resource.data.moderatedBy == request.auth.uid;
+      allow delete: if isAdmin() || (signedIn() && resource.data.ownerUid == request.auth.uid);
 
       match /views/{viewerUid} {
         allow get, list: if signedIn()
@@ -980,6 +1009,49 @@ service cloud.firestore {
         && request.resource.data.updatedAt is int;
 
       allow delete: if signedIn() && request.auth.token.get('admin', false) == true;
+    }
+
+    // -----------------------------------------------------
+    // Owner-only account restrictions, broadcasts, audit and app config
+    // -----------------------------------------------------
+
+    match /accountRestrictions/{uid} {
+      allow get: if isOwner(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /adminBroadcasts/{broadcastId} {
+      allow get, list: if isAdmin();
+      allow create: if isAdmin()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.title is string
+        && request.resource.data.title.size() >= 1
+        && request.resource.data.title.size() <= 100
+        && request.resource.data.body is string
+        && request.resource.data.body.size() >= 1
+        && request.resource.data.body.size() <= 2000
+        && request.resource.data.targetType in ['all', 'user']
+        && (
+          request.resource.data.targetType != 'user'
+          || request.resource.data.targetUid is string
+        )
+        && request.resource.data.createdAt is int;
+      // Dispatch state is written only by Cloud Functions/Admin SDK.
+      allow update, delete: if false;
+    }
+
+    match /adminAuditLogs/{logId} {
+      allow get, list: if isAdmin();
+      allow create: if isAdmin()
+        && request.resource.data.actorUid == request.auth.uid
+        && request.resource.data.action is string
+        && request.resource.data.createdAt is int;
+      allow update, delete: if false;
+    }
+
+    match /appConfig/{configId} {
+      allow get, list, create, update, delete: if isAdmin();
     }
 
     // -----------------------------------------------------
