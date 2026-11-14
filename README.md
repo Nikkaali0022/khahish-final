@@ -116,4 +116,4 @@ Deploy from Google Cloud Shell or another trusted environment already authentica
 
 Cloud Functions deployment may require the Firebase project's billing plan and the required Google Cloud APIs. Never paste service-account keys into ChatGPT, GitHub source files, or the Android app.
 
-The group moderation section intentionally shows group metadata only; it does not expose private message contents or delete conversations. The maintenance flag is stored in `appConfig/global`; app-wide maintenance enforcement requires the Android client to read and honor that flag.
+The group moderation section intentionally shows group metadata only; it does not expose private message contents or delete conversations. The Android client reads `appConfig/global` and blocks non-Owner app access while maintenance mode is enabled. The active Owner custom claim bypasses maintenance mode.
