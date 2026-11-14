@@ -321,6 +321,8 @@ fun KhahishAdminPanelScreen(onBack: () -> Unit) {
     fun sendAdminMessage(kind: String) {
         val title = composeTitle.trim()
         val body = composeBody.trim()
+        val sendTargetType = targetType
+        val sendTargetUid = targetUid.trim()
         if (title.isBlank() || body.isBlank()) {
             error = "Title aur message dono likhein."
             return
@@ -329,8 +331,6 @@ fun KhahishAdminPanelScreen(onBack: () -> Unit) {
             error = "Specific user ke liye UID zaroor likhein."
             return
         }
-        val sendTargetType = targetType
-        val sendTargetUid = targetUid.trim()
         if (sendingMessage) return
 
         sendingMessage = true
