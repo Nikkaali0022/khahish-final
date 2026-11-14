@@ -361,9 +361,7 @@ internal fun LockedChatsHub(
                 modifier = Modifier.weight(1f),
                 currentUid = currentUid,
                 onOpen = onOpenChat,
-                onViewProfile = {},
-                lockedContactUids = lockedContactUids,
-                showOnlyLockedChats = true
+                onViewProfile = {}
             )
             Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.Center) {
                 OutlinedButton(onClick = { showAddContact = true }) {
