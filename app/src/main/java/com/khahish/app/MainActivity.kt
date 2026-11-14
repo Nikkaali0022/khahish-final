@@ -212,6 +212,30 @@ private fun formatChatListTimestamp(timestamp: Long): String {
     return java.text.SimpleDateFormat(pattern, Locale.getDefault()).format(java.util.Date(timestamp))
 }
 
+private fun isSameChatMessageDay(firstTimestamp: Long, secondTimestamp: Long): Boolean {
+    if (firstTimestamp <= 0L || secondTimestamp <= 0L) return false
+    val first = java.util.Calendar.getInstance().apply { timeInMillis = firstTimestamp }
+    val second = java.util.Calendar.getInstance().apply { timeInMillis = secondTimestamp }
+    return first.get(java.util.Calendar.YEAR) == second.get(java.util.Calendar.YEAR) &&
+        first.get(java.util.Calendar.DAY_OF_YEAR) == second.get(java.util.Calendar.DAY_OF_YEAR)
+}
+
+private fun formatChatMessageDate(timestamp: Long): String {
+    if (timestamp <= 0L) return "Earlier"
+    val messageDate = java.util.Calendar.getInstance().apply { timeInMillis = timestamp }
+    val today = java.util.Calendar.getInstance()
+    val yesterday = (today.clone() as java.util.Calendar).apply {
+        add(java.util.Calendar.DAY_OF_YEAR, -1)
+    }
+    return when {
+        isSameChatMessageDay(timestamp, today.timeInMillis) -> "Today"
+        isSameChatMessageDay(timestamp, yesterday.timeInMillis) -> "Yesterday"
+        messageDate.get(java.util.Calendar.YEAR) == today.get(java.util.Calendar.YEAR) ->
+            java.text.SimpleDateFormat("d MMMM", Locale.getDefault()).format(java.util.Date(timestamp))
+        else -> java.text.SimpleDateFormat("d MMMM yyyy", Locale.getDefault()).format(java.util.Date(timestamp))
+    }
+}
+
 private fun showToast(context: Context, message: String) {
     Toast.makeText(context, message, Toast.LENGTH_LONG).show()
 }
@@ -3527,7 +3551,29 @@ fun ConversationScreen(
                 if (chatSearchVisible && displayedMessages.isEmpty()) {
                     item { Text("No matching messages", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(24.dp), textAlign = TextAlign.Center) }
                 }
-                items(displayedMessages, key = { it.id }) { msg ->
+                items(displayedMessages.indices.toList(), key = { displayedMessages[it].id }) { messageIndex ->
+                val msg = displayedMessages[messageIndex]
+                val previousMessage = displayedMessages.getOrNull(messageIndex - 1)
+                if (previousMessage == null || !isSameChatMessageDay(previousMessage.timestamp, msg.timestamp)) {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            tonalElevation = 1.dp
+                        ) {
+                            Text(
+                                text = formatChatMessageDate(msg.timestamp),
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
                 val isMe = msg.senderId == currentUserId
                 val outgoingBubbleColor = remember(chatBubbleColorHex) {
                     runCatching {
