@@ -7,8 +7,8 @@
 import { applicationDefault, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 
-const OWNER_UID = "f4cb0tIrnJOdrrcx1KVsCCyJZCG3";
-const OWNER_EMAIL = "manaticarry580@gmail.com";
+const OWNER_UID = "CWzzbORWciaU2zb3R375nNckWbi2";
+const OWNER_EMAIL = "pakistanivlogger57@gmail.com";
 const projectId =
   process.env.FIREBASE_PROJECT_ID ||
   process.env.GOOGLE_CLOUD_PROJECT ||
