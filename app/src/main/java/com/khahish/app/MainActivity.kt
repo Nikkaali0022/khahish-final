@@ -2512,6 +2512,7 @@ private fun PeopleSearchDialog(
         }
     }
 }
+
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun ConversationScreen(
