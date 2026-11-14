@@ -264,11 +264,36 @@ service cloud.firestore {
         allow read, create, update, delete: if isOwner(uid);
       }
 
-      // Admin announcements are delivered into each user's private inbox by
-      // the trusted Cloud Function. Clients can only read their own inbox.
+      // Owner Admin creates in-app announcements directly in each recipient's
+      // private inbox. Recipients can read, mark as read, and retain their own inbox.
+      // No client can send FCM or write another user's inbox without the admin claim.
       match /notifications/{notificationId} {
         allow get, list: if isOwner(uid);
-        allow create, update, delete: if false;
+        allow create: if isAdmin()
+          && request.resource.data.broadcastId == notificationId
+          && request.resource.data.recipientUid == uid
+          && request.resource.data.title is string
+          && request.resource.data.title.size() >= 1
+          && request.resource.data.title.size() <= 100
+          && request.resource.data.body is string
+          && request.resource.data.body.size() >= 1
+          && request.resource.data.body.size() <= 2000
+          && request.resource.data.kind in ['notification', 'announcement']
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.createdAt is int
+          && request.resource.data.isRead == false
+          && request.resource.data.readAt == 0
+          && request.resource.data.deliveryMode == 'in_app'
+          && request.resource.data.keys().hasOnly([
+            'broadcastId', 'recipientUid', 'title', 'body', 'kind',
+            'createdBy', 'createdAt', 'isRead', 'readAt', 'deliveryMode'
+          ]);
+        allow update: if isOwner(uid)
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['isRead', 'readAt'])
+          && request.resource.data.isRead == true
+          && request.resource.data.readAt is int;
+        allow delete: if false;
       }
 
       // Password hashes and unlock sessions are written only by the trusted
@@ -296,7 +321,7 @@ service cloud.firestore {
     match /publicProfiles/{uid} {
       // Legacy documents containing private contact fields are hidden until
       // their owner signs in and the app removes those fields.
-      allow get: if signedIn() && safePublicProfile(resource.data);
+      allow get: if isAdmin() || (signedIn() && safePublicProfile(resource.data));
       allow list: if isAdmin();
 
       allow create, update: if isOwner(uid)

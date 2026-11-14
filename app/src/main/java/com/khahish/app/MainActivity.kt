@@ -384,6 +384,7 @@ fun KhahishApp() {
     var accountRestricted by remember { mutableStateOf(false) }
     var accountRestrictionReason by remember { mutableStateOf("") }
     var tab by remember { mutableStateOf("Chats") }
+    var showNotifications by remember { mutableStateOf(false) }
     val tabOrder = listOf("Chats", "Contacts", "Updates", "Calls", "Settings")
     var selectedChat by remember { mutableStateOf<Chat?>(null) }
     var profileTargetUid by remember { mutableStateOf("") }
@@ -838,6 +839,11 @@ fun KhahishApp() {
                             autoAcceptIncoming = false
                         }
                     )
+                } else if (showNotifications) {
+                    KhahishNotificationsScreen(
+                        uid = user.uid,
+                        onBack = { showNotifications = false }
+                    )
                 } else if (profileTargetUid.isNotBlank()) {
                     KhahishUserProfileScreen(
                         uid = profileTargetUid,
@@ -991,6 +997,9 @@ fun KhahishApp() {
                                         Text("🦎", fontSize = 23.sp)
                                     }
 
+                                    IconButton(onClick = { showNotifications = true }) {
+                                        Icon(Icons.Default.Notifications, "Notifications", tint = Color.White)
+                                    }
                                     IconButton(onClick = { tab = "Settings" }) {
                                         Icon(
                                             Icons.Default.Settings,
