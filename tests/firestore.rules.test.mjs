@@ -233,7 +233,7 @@ test("group membership changes keep the visible user index synchronized", async 
   }));
 });
 
-test("secret-locked chat previews are excluded by the per-user server index", async () => {
+test("all chat members can discover and read conversations even when legacy visibility is empty", async () => {
   await seed("users/alice/secretChatLock/config", {
     passwordHash: "not-a-real-hash",
     lockedContactUids: ["bob"]
@@ -244,33 +244,35 @@ test("secret-locked chat previews are excluded by the per-user server index", as
     lastMessage: "Private preview",
     lastMessageAt: Date.now(),
     updatedAt: Date.now(),
-    visibleToUids: ["bob"]
+    visibleToUids: []
   });
 
   const aliceQuery = query(
     collection(db("alice"), "chats"),
-    where("visibleToUids", "array-contains", "alice")
+    where("members", "array-contains", "alice")
   );
   const bobQuery = query(
     collection(db("bob"), "chats"),
-    where("visibleToUids", "array-contains", "bob")
+    where("members", "array-contains", "bob")
   );
   await assertSucceeds(getDocs(aliceQuery));
   await assertSucceeds(getDocs(bobQuery));
   const aliceResults = await getDocs(aliceQuery);
   const bobResults = await getDocs(bobQuery);
-  assert.equal(aliceResults.size, 0);
+  assert.equal(aliceResults.size, 1);
   assert.equal(bobResults.size, 1);
 
-  await assertFails(getDoc(doc(db("alice"), "chats/alice_bob")));
+  await assertSucceeds(getDoc(doc(db("alice"), "chats/alice_bob")));
   await assertSucceeds(getDoc(doc(db("bob"), "chats/alice_bob")));
 
-  // The Locked Chats hub uses direct document reads, gated by the server session.
-  await seed("users/alice/secretChatLock/config/sessions/current", {
-    expiresAt: new Date(Date.now() + 10 * 60 * 1000)
-  });
-  await assertSucceeds(getDoc(doc(db("alice"), "chats/alice_bob")));
+  // A member may use ordinary chat activity updates without a secret unlock session.
+  await assertSucceeds(updateDoc(doc(db("alice"), "chats/alice_bob"), {
+    lastMessage: "Updated preview",
+    lastMessageAt: Date.now(),
+    updatedAt: Date.now()
+  }));
 
+  // Clients still cannot edit the legacy visibility index directly.
   await assertFails(updateDoc(doc(db("alice"), "chats/alice_bob"), {
     visibleToUids: ["alice", "bob"]
   }));
