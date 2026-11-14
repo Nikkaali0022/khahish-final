@@ -428,7 +428,7 @@ fun KhahishUpdatesScreen(
     }
 
     fun sendStoryChatAction(story: KhahishStory, action: String, body: String) {
-        val chatId = privateChatId(currentUid, story.ownerUid)
+        val chatId = listOf(currentUid, story.ownerUid).sorted().joinToString("_")
         val chatRef = db.collection("chats").document(chatId)
         val members = listOf(currentUid, story.ownerUid).sorted()
         val now = System.currentTimeMillis()
