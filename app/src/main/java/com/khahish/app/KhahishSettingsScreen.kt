@@ -3,7 +3,9 @@ package com.khahish.app
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.app.Activity
 import android.app.NotificationManager
+import android.media.RingtoneManager
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -60,6 +62,7 @@ fun KhahishSettingsScreen(
     val uid = user?.uid.orEmpty()
     val prefs = remember { context.getSharedPreferences("khahish_ui_settings", Context.MODE_PRIVATE) }
     val privacyPrefs = remember { context.getSharedPreferences("khahish_privacy_settings", Context.MODE_PRIVATE) }
+    val alertPrefs = remember { context.getSharedPreferences("khahish_alert_settings", Context.MODE_PRIVATE) }
 
     var showAdvanced by remember { mutableStateOf(false) }
     var showEditProfile by remember { mutableStateOf(false) }
@@ -74,6 +77,12 @@ fun KhahishSettingsScreen(
     var showPrivacy by remember { mutableStateOf(false) }
     var showLockChatPasswordDialog by remember { mutableStateOf(false) }
     var showAppearance by remember { mutableStateOf(false) }
+    var showSoundSettings by remember { mutableStateOf(false) }
+    var messageRingtoneLabel by remember { mutableStateOf(KhahishAlertSettings.selectedSoundLabel(context, "message_sound", RingtoneManager.TYPE_NOTIFICATION)) }
+    var callRingtoneLabel by remember { mutableStateOf(KhahishAlertSettings.selectedSoundLabel(context, "call_sound", RingtoneManager.TYPE_RINGTONE)) }
+    var messageVibration by remember { mutableStateOf(KhahishAlertSettings.messageVibrationEnabled(context)) }
+    var callVibration by remember { mutableStateOf(KhahishAlertSettings.callVibrationEnabled(context)) }
+    var voiceRecordingHaptics by remember { mutableStateOf(alertPrefs.getBoolean(KhahishAlertSettings.VOICE_HAPTICS, true)) }
     var showStorage by remember { mutableStateOf(false) }
     var showSupport by remember { mutableStateOf(false) }
     var adminTapCount by remember { mutableStateOf(0) }
@@ -102,6 +111,39 @@ fun KhahishSettingsScreen(
                     profilePhotoUrl = profile.getString("photoUrl") ?: user?.photoUrl?.toString().orEmpty()
                     editName = profile.getString("name") ?: user?.displayName.orEmpty()
                 }
+        }
+    }
+
+    val messageRingtonePicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val picked = result.data?.getParcelableExtra<Uri>(RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+            KhahishAlertSettings.saveMessageSound(context, picked?.toString() ?: "silent")
+            messageRingtoneLabel = KhahishAlertSettings.selectedSoundLabel(context, "message_sound", RingtoneManager.TYPE_NOTIFICATION)
+        }
+    }
+    val callRingtonePicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val picked = result.data?.getParcelableExtra<Uri>(RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+            KhahishAlertSettings.saveCallSound(context, picked?.toString() ?: "silent")
+            callRingtoneLabel = KhahishAlertSettings.selectedSoundLabel(context, "call_sound", RingtoneManager.TYPE_RINGTONE)
+        }
+    }
+
+    fun ringtonePickerIntent(type: Int, title: String, key: String): Intent {
+        val defaultUri = RingtoneManager.getDefaultUri(type)
+        val saved = alertPrefs.getString(key, null)
+        val existingUri = when {
+            saved == "silent" -> null
+            saved.isNullOrBlank() -> defaultUri
+            else -> Uri.parse(saved)
+        }
+        return Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+            putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, type)
+            putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, title)
+            putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+            putExtra(RingtoneManager.EXTRA_RINGTONE_DEFAULT_URI, defaultUri)
+            putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, true)
+            putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, existingUri)
         }
     }
 
@@ -424,6 +466,35 @@ fun KhahishSettingsScreen(
                 } catch (_: Exception) {
                     Toast.makeText(context, "Unable to open notification settings", Toast.LENGTH_SHORT).show()
                 }
+            }
+            KhahishSettingsItem(Icons.Default.MusicNote, "Sounds & haptics", "Choose message/call ringtones and vibration") {
+                showSoundSettings = !showSoundSettings
+            }
+            if (showSoundSettings) {
+                KhahishSettingsItem(Icons.Default.MusicNote, "Message ringtone", messageRingtoneLabel) {
+                    messageRingtonePicker.launch(ringtonePickerIntent(RingtoneManager.TYPE_NOTIFICATION, "Select message ringtone", "message_sound"))
+                }
+                KhahishSettingsItem(Icons.Default.Call, "Incoming call ringtone", callRingtoneLabel) {
+                    callRingtonePicker.launch(ringtonePickerIntent(RingtoneManager.TYPE_RINGTONE, "Select incoming call ringtone", "call_sound"))
+                }
+                KhahishSettingsSwitch("Message vibration", "Vibrate for new messages and requests", messageVibration) {
+                    messageVibration = it
+                    KhahishAlertSettings.saveMessageVibration(context, it)
+                }
+                KhahishSettingsSwitch("Call vibration", "Vibrate for incoming voice and video calls", callVibration) {
+                    callVibration = it
+                    KhahishAlertSettings.saveCallVibration(context, it)
+                }
+                KhahishSettingsSwitch("Voice recording haptics", "Haptic feedback on press, lock and while recording", voiceRecordingHaptics) {
+                    voiceRecordingHaptics = it
+                    alertPrefs.edit().putBoolean(KhahishAlertSettings.VOICE_HAPTICS, it).apply()
+                }
+                Text(
+                    "Phone Silent/Vibrate mode and Android notification permissions still control whether alerts can make sound or vibrate.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(vertical = 6.dp)
+                )
             }
             if (Build.VERSION.SDK_INT >= 34) {
                 KhahishSettingsItem(Icons.Default.Call, "Full-screen call alerts", "Allow incoming calls to appear over the lock screen") {
