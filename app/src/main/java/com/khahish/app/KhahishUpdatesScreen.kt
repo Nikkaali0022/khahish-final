@@ -237,12 +237,12 @@ fun KhahishUpdatesScreen(
         loadAcceptedFriends {
         val acceptedUids = acceptedFriends.map { it.first }.toSet()
         when (storyAudience) {
-            "close_friends", "my_friends" -> {
-                val listName = if (storyAudience == "close_friends") "closeFriends" else "friends"
-                db.collection("users").document(currentUid).collection(listName).get()
+            "close_friends" -> {
+                db.collection("users").document(currentUid).collection("closeFriends").get()
                     .addOnSuccessListener { snapshot -> saveForAudience(snapshot.documents.map { it.id }.filter { it in acceptedUids }) }
                     .addOnFailureListener { Toast.makeText(context, "Could not load audience: ${it.message}", Toast.LENGTH_LONG).show() }
             }
+            "my_friends" -> saveForAudience(acceptedUids.toList())
             "my_contacts" -> {
                 db.collection("chats").whereArrayContains("visibleToUids", currentUid).get()
                     .addOnSuccessListener { snapshot ->
@@ -522,11 +522,6 @@ fun KhahishUpdatesScreen(
                         text = { Text("Manage Close Friends") },
                         leadingIcon = { Icon(Icons.Default.People, null) },
                         onClick = { updatesMenu = false; openAudienceList("closeFriends") }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Manage My Friends") },
-                        leadingIcon = { Icon(Icons.Default.Person, null) },
-                        onClick = { updatesMenu = false; openAudienceList("friends") }
                     )
                 }
             }
