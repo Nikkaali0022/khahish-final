@@ -825,7 +825,6 @@ service cloud.firestore {
           || (
             resource.data.get('allowedUids', []) is list
             && request.auth.uid in resource.data.get('allowedUids', [])
-            && isAcceptedStoryFriend(resource.data.get('ownerUid', ''), request.auth.uid)
           )
         );
 
