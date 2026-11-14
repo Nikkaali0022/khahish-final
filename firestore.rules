@@ -88,8 +88,9 @@ service cloud.firestore {
     }
 
     function canAccessChatContent(chatId) {
-      return isChatMember(chatId)
-        && (!isSecretLockedChat(chatId) || hasActiveSecretChatUnlock());
+      // Lock Chats is disabled in the app for now; all signed-in chat members
+      // retain normal access to their own conversation content.
+      return isChatMember(chatId);
     }
 
     function isGroupAdmin(chatId) {
@@ -446,20 +447,16 @@ service cloud.firestore {
 
     match /chats/{chatId} {
       // Allow checking a deterministic chat ID when no chat exists yet.
-      // Existing chat documents remain readable only by their members.
+      // Existing chat documents are readable/listable only by their members.
       allow get: if isAdmin() || (signedIn()
         && (
           !exists(/databases/$(database)/documents/chats/$(chatId))
-          || (
-            request.auth.uid in resource.data.members
-            && (!isSecretLockedChat(chatId) || hasActiveSecretChatUnlock())
-          )
+          || request.auth.uid in resource.data.members
         ));
-      // Private-chat visibility is Worker-managed; group visibility mirrors the
-      // member list and is validated on every group membership change.
-      // The single visibleToUids array supports a secure, index-friendly query.
+      // Main Chats queries the members array directly. This keeps older
+      // conversations visible even when legacy visibleToUids is empty.
       allow list: if isAdmin()
-        || (signedIn() && request.auth.uid in resource.data.get('visibleToUids', []));
+        || (signedIn() && request.auth.uid in resource.data.members);
 
       allow create: if signedIn()
         && request.resource.data.members is list
@@ -487,17 +484,13 @@ service cloud.firestore {
             request.resource.data.get('isGroup', false) != true
             && request.resource.data.members.size() == 2
             && request.resource.data.members[0] != request.resource.data.members[1]
-            // New private chats start hidden from both participants until the
-            // authenticated Worker computes each participant's actual lock state.
+            // Keep the legacy visibility array empty for compatibility;
+            // chat discovery now uses the authenticated members array.
             && request.resource.data.visibleToUids is list
             && request.resource.data.visibleToUids.size() == 0
             && request.resource.data.createdBy == request.auth.uid
             && requestParticipantsMatchChat(chatId, request.resource.data.members)
             && privateChatIsUnblocked(request.resource.data.members)
-            && (
-              !isSecretLockedMembers(request.resource.data.members)
-              || hasActiveSecretChatUnlock()
-            )
           )
         );
 
