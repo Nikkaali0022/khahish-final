@@ -131,21 +131,45 @@ fun KhahishUpdatesScreen(
     var ownerPhotos by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
 
     fun loadAcceptedFriends(onDone: (() -> Unit)? = null) {
-        db.collection("chats").whereArrayContains("visibleToUids", currentUid).get()
-            .addOnSuccessListener { snapshot ->
-                acceptedFriends = snapshot.documents.mapNotNull { doc ->
-                    if (doc.getBoolean("isGroup") == true) return@mapNotNull null
-                    val members = (doc.get("members") as? List<*>)?.filterIsInstance<String>().orEmpty()
-                    val peerUid = members.firstOrNull { it != currentUid } ?: return@mapNotNull null
-                    val names = doc.get("memberNames") as? Map<*, *>
-                    peerUid to (names?.get(peerUid) as? String ?: "Khahish User")
-                }.distinctBy { it.first }.sortedBy { it.second.lowercase(Locale.ROOT) }
-                onDone?.invoke()
+        val acceptedByMe = db.collection("messageRequests")
+            .whereEqualTo("senderUid", currentUid)
+            .whereEqualTo("status", "accepted")
+        val acceptedByOthers = db.collection("messageRequests")
+            .whereEqualTo("receiverUid", currentUid)
+            .whereEqualTo("status", "accepted")
+
+        com.google.android.gms.tasks.Tasks.whenAllSuccess<com.google.firebase.firestore.QuerySnapshot>(
+            acceptedByMe.get(),
+            acceptedByOthers.get()
+        ).addOnSuccessListener { results ->
+            val friends = linkedMapOf<String, String>()
+            results.filterIsInstance<com.google.firebase.firestore.QuerySnapshot>().forEach { snapshot ->
+                snapshot.documents.forEach { request ->
+                    val senderUid = request.getString("senderUid").orEmpty()
+                    val receiverUid = request.getString("receiverUid").orEmpty()
+                    val peerUid = when (currentUid) {
+                        senderUid -> receiverUid
+                        receiverUid -> senderUid
+                        else -> ""
+                    }
+                    if (peerUid.isNotBlank() && peerUid != currentUid) {
+                        val peerName = if (currentUid == senderUid) {
+                            request.getString("receiverName")
+                        } else {
+                            request.getString("senderName")
+                        }
+                        friends[peerUid] = peerName?.takeIf { it.isNotBlank() } ?: "Khahish User"
+                    }
+                }
             }
-            .addOnFailureListener {
-                Toast.makeText(context, "Could not load accepted friends: ${it.message}", Toast.LENGTH_LONG).show()
-                onDone?.invoke()
-            }
+            acceptedFriends = friends.entries
+                .map { it.key to it.value }
+                .sortedBy { it.second.lowercase(Locale.ROOT) }
+            onDone?.invoke()
+        }.addOnFailureListener {
+            Toast.makeText(context, "Could not load accepted friends: ${it.message}", Toast.LENGTH_LONG).show()
+            onDone?.invoke()
+        }
     }
 
     fun openOnlyShareWith() {
