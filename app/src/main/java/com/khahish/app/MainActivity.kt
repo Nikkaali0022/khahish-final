@@ -1526,6 +1526,7 @@ fun NewChatScreen(
     var loading by remember { mutableStateOf(false) }
     var creatingUid by remember { mutableStateOf("") }
     var privateNicknames by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var requestStates by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
 
     DisposableEffect(currentUid, users.map { it.uid }.joinToString("|")) {
         val registrations = users.map { user ->
@@ -1544,185 +1545,386 @@ fun NewChatScreen(
     LaunchedEffect(search) {
         val term = normalizeKhahishUsername(search)
         if (term.length < 3 || !isValidKhahishUsername(term)) {
-            users = emptyList(); loading = false
+            users = emptyList()
+            requestStates = emptyMap()
+            loading = false
         } else {
             loading = true
             db.collection("usernames").document(term).get().addOnSuccessListener { claim ->
                 val targetUid = claim.getString("uid").orEmpty()
                 if (targetUid.isBlank() || targetUid == currentUid) {
-                    users = emptyList(); loading = false
-                } else db.collection("publicProfiles").document(targetUid).get().addOnSuccessListener { profile ->
-                    users = listOfNotNull(profile.toObject(AppUser::class.java)?.takeIf { it.uid == targetUid })
+                    users = emptyList()
+                    requestStates = emptyMap()
                     loading = false
-                }.addOnFailureListener { loading = false; showToast(context, "Profile lookup failed: " + it.message) }
-            }.addOnFailureListener { loading = false; showToast(context, "Username search failed: " + it.message) }
+                } else {
+                    db.collection("publicProfiles").document(targetUid).get().addOnSuccessListener { profile ->
+                        val found = profile.toObject(AppUser::class.java)?.takeIf { it.uid == targetUid }
+                        users = listOfNotNull(found)
+                        if (found != null) {
+                            val requestId = privateChatId(currentUid, targetUid)
+                            db.collection("messageRequests").document(requestId).get()
+                                .addOnSuccessListener { request ->
+                                    val state = when {
+                                        !request.exists() -> "none"
+                                        request.getString("status") == "pending" &&
+                                            request.getString("senderUid") == currentUid -> "sent"
+                                        request.getString("status") == "pending" -> "received"
+                                        request.getString("status") == "accepted" -> "connected"
+                                        else -> "none"
+                                    }
+                                    requestStates = requestStates + (targetUid to state)
+                                }
+                        }
+                        loading = false
+                    }.addOnFailureListener {
+                        loading = false
+                        showToast(context, "Profile lookup failed: " + it.message)
+                    }
+                }
+            }.addOnFailureListener {
+                loading = false
+                showToast(context, "Username search failed: " + it.message)
+            }
+        }
+    }
+
+    fun sendRequest(user: AppUser, displayName: String) {
+        if (creatingUid.isNotEmpty() || requestStates[user.uid] == "sent") return
+        creatingUid = user.uid
+        val chatId = privateChatId(currentUid, user.uid)
+        val chatRef = db.collection("chats").document(chatId)
+        val members = listOf(currentUid, user.uid).sorted()
+        val now = System.currentTimeMillis()
+
+        chatRef.get().addOnSuccessListener { existing ->
+            val existingIsMemberChat = existing.exists() &&
+                (existing.get("members") as? List<*>)?.contains(currentUid) == true
+            if (existingIsMemberChat) {
+                creatingUid = ""
+                requestStates = requestStates + (user.uid to "connected")
+                onChatCreated(
+                    Chat(
+                        id = chatId,
+                        peerUid = user.uid,
+                        name = displayName,
+                        message = existing.getString("lastMessage") ?: "",
+                        time = "",
+                        initials = displayName.firstOrNull()?.uppercase() ?: "K"
+                    )
+                )
+            } else {
+                val requestRef = db.collection("messageRequests").document(chatId)
+                requestRef.get().addOnSuccessListener { request ->
+                    val status = request.getString("status").orEmpty()
+                    when {
+                        !request.exists() -> {
+                            val senderName = FirebaseAuth.getInstance().currentUser?.displayName
+                                ?.takeIf { it.isNotBlank() } ?: "Khahish User"
+                            requestRef.set(
+                                mapOf(
+                                    "senderUid" to currentUid,
+                                    "receiverUid" to user.uid,
+                                    "senderName" to senderName,
+                                    "senderUsername" to "",
+                                    "receiverName" to user.name,
+                                    "status" to "pending",
+                                    "createdAt" to now
+                                )
+                            ).addOnSuccessListener {
+                                creatingUid = ""
+                                requestStates = requestStates + (user.uid to "sent")
+                                showToast(context, "Message request sent. Chat opens after acceptance.")
+                            }.addOnFailureListener {
+                                creatingUid = ""
+                                showToast(context, "Request failed: ${it.message}")
+                            }
+                        }
+                        status == "pending" && request.getString("senderUid") == currentUid -> {
+                            creatingUid = ""
+                            requestStates = requestStates + (user.uid to "sent")
+                        }
+                        status == "pending" -> {
+                            creatingUid = ""
+                            requestStates = requestStates + (user.uid to "received")
+                            showToast(context, "This person has already requested to chat. Accept it from Chats.")
+                        }
+                        status == "rejected" -> {
+                            creatingUid = ""
+                            showToast(context, "This person rejected the request. Chat cannot start.")
+                        }
+                        status == "accepted" -> {
+                            creatingUid = ""
+                            requestStates = requestStates + (user.uid to "connected")
+                            showToast(context, "This request was accepted. Open your Chats list to continue.")
+                        }
+                        else -> {
+                            creatingUid = ""
+                            showToast(context, "A chat request already exists.")
+                        }
+                    }
+                }.addOnFailureListener {
+                    creatingUid = ""
+                    showToast(context, "Request lookup failed: ${it.message}")
+                }
+            }
+        }.addOnFailureListener {
+            creatingUid = ""
+            showToast(context, "Chat lookup failed: ${it.message}")
         }
     }
 
     Column(
-        modifier
-            .fillMaxSize()
+        modifier.fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
         Row(
-            Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface)
-                .padding(12.dp),
+            Modifier.fillMaxWidth()
+                .background(Green)
+                .statusBarsPadding()
+                .padding(horizontal = 8.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, "Back")
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
             }
+            Text(
+                "Search Users",
+                modifier = Modifier.weight(1f),
+                color = Color.White,
+                fontSize = 21.sp,
+                fontWeight = FontWeight.Bold
+            )
             IconButton(onClick = onCreateGroup) {
-                Icon(Icons.Default.GroupAdd, "Create group")
+                Icon(Icons.Default.GroupAdd, contentDescription = "Create group", tint = Color.White)
             }
+        }
 
+        Column(
+            Modifier.fillMaxSize().padding(horizontal = 16.dp)
+        ) {
+            Spacer(Modifier.height(16.dp))
             OutlinedTextField(
                 value = search,
                 onValueChange = { search = it },
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("Enter exact username, e.g. ali_123") },
-                leadingIcon = { Icon(Icons.Default.Search, null) },
-                singleLine = true,
-                shape = RoundedCornerShape(16.dp)
-            )
-        }
-
-        Text(
-            "Find one person by their unique username",
-            modifier = Modifier.padding(18.dp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 13.sp
-        )
-
-        if (loading) {
-            LinearProgressIndicator(
                 modifier = Modifier.fillMaxWidth(),
-                color = Green
-            )
-        }
-
-        if (normalizeKhahishUsername(search).length < 3) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Enter a complete username (3–20 letters, numbers or _)", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        } else if (!loading && users.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No users found", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        } else {
-            LazyColumn {
-                items(users, key = { it.uid }) { user ->
-                    val displayName = privateNicknames[user.uid]?.takeIf { it.isNotBlank() } ?: user.name.ifBlank { "Khahish User" }
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                if (creatingUid.isNotEmpty()) return@clickable
-
-                                creatingUid = user.uid
-
-                                val chatId = privateChatId(currentUid, user.uid)
-                                val chatRef = db.collection("chats").document(chatId)
-                                val members = listOf(currentUid, user.uid).sorted()
-                                val now = System.currentTimeMillis()
-
-                                // Read the deterministic conversation document directly.
-                                // A collection query is unnecessary here and can be rejected
-                                // by Firestore list rules before a chat exists.
-                                chatRef.get()
-                                    .addOnSuccessListener { existing ->
-                                        val existingIsMemberChat = existing.exists() &&
-                                            (existing.get("members") as? List<*>)?.contains(currentUid) == true
-                                        if (existingIsMemberChat) {
-                                            creatingUid = ""
-                                            onChatCreated(
-                                                Chat(
-                                                    id = chatId,
-                                                    peerUid = user.uid,
-                                                    name = displayName,
-                                                    message = existing.getString("lastMessage") ?: "",
-                                                    time = "",
-                                                    initials = displayName.firstOrNull()?.uppercase() ?: "K"
-                                                )
-                                            )
-                                        } else {
-                                            val requestRef = db.collection("messageRequests").document(chatId)
-                                            requestRef.get().addOnSuccessListener { request ->
-                                                val status = request.getString("status").orEmpty()
-                                                when {
-                                                    !request.exists() -> {
-                                                        val senderName = FirebaseAuth.getInstance().currentUser?.displayName?.takeIf { it.isNotBlank() } ?: "Khahish User"
-                                                        requestRef.set(mapOf("senderUid" to currentUid, "receiverUid" to user.uid, "senderName" to senderName, "senderUsername" to "", "receiverName" to user.name, "status" to "pending", "createdAt" to now))
-                                                            .addOnSuccessListener { creatingUid = ""; showToast(context, "Message request sent. Chat opens after acceptance.") }
-                                                            .addOnFailureListener { creatingUid = ""; showToast(context, "Request failed: ${it.message}") }
-                                                    }
-                                                    status == "pending" && request.getString("senderUid") == currentUid -> { creatingUid = ""; showToast(context, "Your message request is already pending.") }
-                                                    status == "pending" -> { creatingUid = ""; showToast(context, "This person has already requested to chat. Accept it from Chats.") }
-                                                    status == "rejected" -> { creatingUid = ""; showToast(context, "This person rejected the request. Chat cannot start.") }
-                                                    status == "accepted" -> {
-                                                        creatingUid = ""
-                                                        showToast(context, "This request was accepted. Open your Chats list to continue.")
-                                                    }
-                                                    else -> { creatingUid = ""; showToast(context, "A chat request already exists.") }
-                                                }
-                                            }.addOnFailureListener { creatingUid = ""; showToast(context, "Request lookup failed: ${it.message}") }
-                                        }
-                                    }
-                                    .addOnFailureListener { error ->
-                                        creatingUid = ""
-                                        showToast(
-                                            context,
-                                            "Chat lookup failed: ${error.message}"
-                                        )
-                                    }
-                            }
-                            .padding(horizontal = 18.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (user.photoUrl.isNotBlank()) {
-                            AsyncImage(model = user.photoUrl, contentDescription = "Profile picture",
-                                modifier = Modifier.size(48.dp).clip(CircleShape), contentScale = ContentScale.Crop)
-                        } else {
-                            Box(Modifier.size(48.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape),
-                                contentAlignment = Alignment.Center) {
-                                Text(displayName.firstOrNull()?.uppercase() ?: "K", color = Green, fontWeight = FontWeight.Bold)
-                            }
-                        }
-
-                        Spacer(Modifier.width(13.dp))
-
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                displayName,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            val statusText = when {
-                                user.isOnline && user.onlineStatusVisible -> "Online"
-                                user.lastSeenVisible && user.lastSeenAt > 0L ->
-                                    "Last seen " + java.text.SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault())
-                                        .format(java.util.Date(user.lastSeenAt))
-                                else -> "Tap to send a message request"
-                            }
-                            Text(statusText, color = if (statusText == "Online") Green else MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-                            if (user.bio.isNotBlank()) {
-                                Text(user.bio, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, maxLines = 2)
-                            }
-                        }
-
-                        if (creatingUid == user.uid) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(22.dp),
-                                color = Green,
-                                strokeWidth = 2.dp
-                            )
-                        } else {
-                            Icon(Icons.Default.Chat, null, tint = Green)
+                placeholder = { Text("Search by username (e.g. ali_123)") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Green) },
+                trailingIcon = {
+                    if (search.isNotEmpty()) {
+                        IconButton(onClick = { search = "" }) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear search")
                         }
                     }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(28.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Green,
+                    cursorColor = Green
+                )
+            )
+
+            Spacer(Modifier.height(12.dp))
+            Surface(
+                color = Green.copy(alpha = 0.09f),
+                shape = RoundedCornerShape(18.dp)
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Info, contentDescription = null, tint = Green, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "Find people using their unique Khahish username.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
+            when {
+                loading -> {
+                    LinearProgressIndicator(
+                        Modifier.fillMaxWidth(),
+                        color = Green
+                    )
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = Green)
+                    }
+                }
+                normalizeKhahishUsername(search).length < 3 -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.PersonSearch, contentDescription = null, tint = Green, modifier = Modifier.size(52.dp))
+                            Spacer(Modifier.height(10.dp))
+                            Text("Discover people on Khahish", fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "Enter a username to find and connect with someone.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 12.sp,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+                users.isEmpty() -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.PersonOff, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(44.dp))
+                            Spacer(Modifier.height(8.dp))
+                            Text("No users found", fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "Check the username and try again.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+                else -> {
+                    Text(
+                        "SEARCH RESULT",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+                    )
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(bottom = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(users, key = { it.uid }) { user ->
+                            val displayName = privateNicknames[user.uid]?.takeIf { it.isNotBlank() }
+                                ?: user.name.ifBlank { "Khahish User" }
+                            val requestState = requestStates[user.uid] ?: "checking"
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = MaterialTheme.colorScheme.surface,
+                                shape = RoundedCornerShape(20.dp),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+                                ),
+                                shadowElevation = 1.dp
+                            ) {
+                                Row(
+                                    Modifier.fillMaxWidth().padding(13.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box {
+                                        if (user.photoUrl.isNotBlank()) {
+                                            AsyncImage(
+                                                model = user.photoUrl,
+                                                contentDescription = "${displayName} profile picture",
+                                                modifier = Modifier.size(58.dp).clip(CircleShape),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        } else {
+                                            Box(
+                                                Modifier.size(58.dp)
+                                                    .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    displayName.firstOrNull()?.uppercase() ?: "K",
+                                                    color = Green,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 21.sp
+                                                )
+                                            }
+                                        }
+                                        if (user.isOnline && user.onlineStatusVisible) {
+                                            Box(
+                                                Modifier.align(Alignment.BottomEnd)
+                                                    .size(15.dp)
+                                                    .background(MaterialTheme.colorScheme.surface, CircleShape)
+                                                    .padding(2.dp)
+                                                    .background(Green, CircleShape)
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(Modifier.width(12.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            displayName,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 16.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            "@${user.username.ifBlank { normalizeKhahishUsername(search) }}",
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontSize = 12.sp
+                                        )
+                                        if (user.bio.isNotBlank()) {
+                                            Text(
+                                                user.bio,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                fontSize = 12.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        } else {
+                                            Text(
+                                                if (user.isOnline && user.onlineStatusVisible) "Online now" else "Khahish member",
+                                                color = if (user.isOnline && user.onlineStatusVisible) Green else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(Modifier.width(8.dp))
+                                    val buttonLabel = when (requestState) {
+                                        "sent" -> "Request Sent"
+                                        "received" -> "Requested You"
+                                        "connected" -> "Connected"
+                                        "checking" -> "..."
+                                        else -> "Add"
+                                    }
+                                    val alreadyRequested = requestState == "sent" ||
+                                        requestState == "received" || requestState == "connected"
+                                    OutlinedButton(
+                                        onClick = { sendRequest(user, displayName) },
+                                        enabled = !alreadyRequested && requestState != "checking" && creatingUid != user.uid,
+                                        shape = RoundedCornerShape(24.dp),
+                                        colors = ButtonDefaults.outlinedButtonColors(
+                                            contentColor = if (alreadyRequested) Green else Color.White,
+                                            disabledContentColor = Green
+                                        ),
+                                        border = androidx.compose.foundation.BorderStroke(
+                                            1.dp,
+                                            if (alreadyRequested) Green.copy(alpha = 0.55f) else Green
+                                        ),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                                    ) {
+                                        if (creatingUid == user.uid) {
+                                            CircularProgressIndicator(
+                                                Modifier.size(16.dp),
+                                                color = Green,
+                                                strokeWidth = 2.dp
+                                            )
+                                        } else {
+                                            if (requestState == "sent") {
+                                                Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(15.dp))
+                                                Spacer(Modifier.width(4.dp))
+                                            } else if (!alreadyRequested) {
+                                                Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(15.dp))
+                                                Spacer(Modifier.width(4.dp))
+                                            }
+                                            Text(buttonLabel, fontSize = 11.sp, maxLines = 1)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
