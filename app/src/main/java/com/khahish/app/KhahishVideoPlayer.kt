@@ -2,6 +2,7 @@ package com.khahish.app
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -12,7 +13,12 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 
 @Composable
-fun KhahishVideoPlayer(url: String, modifier: Modifier = Modifier) {
+fun KhahishVideoPlayer(
+    url: String,
+    modifier: Modifier = Modifier,
+    isPlaying: Boolean = true,
+    showControls: Boolean = true
+) {
     val context = LocalContext.current
     val player = remember(url) {
         ExoPlayer.Builder(context).build().apply {
@@ -21,6 +27,8 @@ fun KhahishVideoPlayer(url: String, modifier: Modifier = Modifier) {
             playWhenReady = true
         }
     }
+
+    LaunchedEffect(player, isPlaying) { player.playWhenReady = isPlaying }
 
     DisposableEffect(player) {
         onDispose { player.release() }
