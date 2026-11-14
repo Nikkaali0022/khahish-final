@@ -66,8 +66,8 @@ store an admin password, service-account key, or other privileged credential.
 
 The one-time provisioning script is deliberately restricted to the reviewed
 Owner identity:
-- Email: `manaticarry580@gmail.com`
-- Firebase Auth UID: `f4cb0tIrnJOdrrcx1KVsCCyJZCG3`
+- Email: `pakistanivlogger57@gmail.com`
+- Firebase Auth UID: `CWzzbORWciaU2zb3R375nNckWbi2`
 
 Run it only from a trusted computer or Google Cloud Shell after granting the
 signed-in operator/service account permission to manage Firebase Authentication
@@ -90,4 +90,30 @@ users in the **Khahish Firebase project**:
 After provisioning, the Owner must sign out and sign back in (or refresh the
 Firebase ID token) before the Android Admin Panel sees the new claim.
 This script only provisions the Owner claim; it does not deploy Firestore
-Rules, deploy Cloud Functions, or make unfinished Admin Panel actions live.
+Rules or Cloud Functions.
+
+## Live Owner Admin Panel deployment
+
+The Admin Panel now uses the following protected Firestore collections:
+- `accountRestrictions/{uid}` for temporary/permanent bans. Active restrictions block normal account Firestore access; the Owner custom claim bypasses restrictions.
+- `adminBroadcasts/{id}` as the queue for global or single-user announcements and push notifications.
+- `adminAuditLogs/{id}` as an append-only record of Owner actions.
+- `appConfig/global` for global app configuration.
+- `users/{uid}/notifications/{id}` as the private notification inbox populated by the trusted backend.
+
+The trusted Firebase Function in `functions/index.js` sends FCM notifications and creates inbox records when an Owner creates an `adminBroadcasts` document. It reads FCM tokens from the existing `users/{uid}/fcmTokens` subcollections. Invalid FCM tokens are removed automatically.
+
+Deploy from Google Cloud Shell or another trusted environment already authenticated to the **khahish-final** Firebase project:
+
+1. Clone or pull the latest repository changes.
+2. Run `npm install` in the repository root if the Firebase CLI is not already installed.
+3. Run `npm install --prefix functions`.
+4. Run `firebase use khahish-final` (or `firebase deploy --project khahish-final`).
+5. Review and deploy the updated rules with `firebase deploy --only firestore:rules --project khahish-final`.
+6. Deploy the push-delivery function with `firebase deploy --only functions --project khahish-final`.
+7. Verify the function named `dispatchAdminBroadcast` is active in Firebase Console → Functions.
+8. Sign out and sign back in to Khahish on the Owner device so the refreshed ID token contains `admin: true`.
+
+Cloud Functions deployment may require the Firebase project's billing plan and the required Google Cloud APIs. Never paste service-account keys into ChatGPT, GitHub source files, or the Android app.
+
+The group moderation section intentionally shows group metadata only; it does not expose private message contents or delete conversations. The Android client reads `appConfig/global` and blocks non-Owner app access while maintenance mode is enabled. The active Owner custom claim bypasses maintenance mode.

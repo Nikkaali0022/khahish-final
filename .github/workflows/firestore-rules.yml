@@ -12,6 +12,7 @@ on:
       - "firestore.indexes.json"
       - "firebase.json"
       - "tests/**"
+      - "functions/**"
       - "package.json"
       - ".github/workflows/firestore-rules.yml"
   push:
@@ -38,3 +39,9 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Run Firestore emulator security tests
         run: npm run test:rules
+
+      - name: Install trusted admin function dependencies
+        run: npm install --prefix functions --no-audit --no-fund
+
+      - name: Validate trusted admin function syntax
+        run: npm run lint --prefix functions

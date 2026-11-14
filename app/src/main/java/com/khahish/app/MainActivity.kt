@@ -378,6 +378,11 @@ fun KhahishApp() {
     }
 
     var currentUser by remember { mutableStateOf(auth.currentUser) }
+    var hasAdminClaim by remember { mutableStateOf(false) }
+    var maintenanceMode by remember { mutableStateOf(false) }
+    var maintenanceMessage by remember { mutableStateOf("Khahish is temporarily under maintenance. Please try again soon.") }
+    var accountRestricted by remember { mutableStateOf(false) }
+    var accountRestrictionReason by remember { mutableStateOf("") }
     var tab by remember { mutableStateOf("Chats") }
     val tabOrder = listOf("Chats", "Contacts", "Updates", "Calls", "Settings")
     var selectedChat by remember { mutableStateOf<Chat?>(null) }
@@ -432,6 +437,52 @@ fun KhahishApp() {
         }
         auth.addAuthStateListener(listener)
         onDispose { auth.removeAuthStateListener(listener) }
+    }
+
+    // Refresh the custom claim and observe Owner-controlled account/app status.
+    // The restriction document is readable only by its own account and admins.
+    DisposableEffect(currentUser?.uid) {
+        val user = currentUser
+        if (user == null) {
+            hasAdminClaim = false
+            maintenanceMode = false
+            accountRestricted = false
+            accountRestrictionReason = ""
+            onDispose { }
+        } else {
+            var active = true
+            user.getIdToken(true).addOnSuccessListener { token ->
+                if (active) hasAdminClaim = token.claims["admin"] == true
+            }.addOnFailureListener {
+                if (active) hasAdminClaim = false
+            }
+
+            val db = FirebaseFirestore.getInstance()
+            val configListener = db.collection("appConfig").document("global")
+                .addSnapshotListener { snapshot, _ ->
+                    if (active) {
+                        maintenanceMode = snapshot?.getBoolean("maintenanceMode") == true
+                        maintenanceMessage = snapshot?.getString("maintenanceMessage")
+                            ?: "Khahish is temporarily under maintenance. Please try again soon."
+                    }
+                }
+            val restrictionListener = db.collection("accountRestrictions").document(user.uid)
+                .addSnapshotListener { snapshot, _ ->
+                    if (active) {
+                        val permanent = snapshot?.getBoolean("permanent") == true
+                        val expiresAt = snapshot?.getLong("expiresAt") ?: 0L
+                        accountRestricted = snapshot?.exists() == true &&
+                            (permanent || expiresAt > System.currentTimeMillis())
+                        accountRestrictionReason = snapshot?.getString("reason").orEmpty()
+                    }
+                }
+
+            onDispose {
+                active = false
+                configListener.remove()
+                restrictionListener.remove()
+            }
+        }
     }
 
     LaunchedEffect(currentUser?.uid) {
@@ -750,7 +801,33 @@ fun KhahishApp() {
                     return@AnimatedContent
                 }
 
-                if (activeCall != null) {
+                if (accountRestricted && !hasAdminClaim) {
+                    Column(
+                        Modifier.fillMaxSize().background(Pale).padding(28.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(Icons.Default.GppBad, null, tint = Color(0xFFB3261E), modifier = Modifier.size(58.dp))
+                        Spacer(Modifier.height(16.dp))
+                        Text("Account temporarily restricted", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = Ink)
+                        Text(accountRestrictionReason.ifBlank { "This account has been restricted by Khahish moderation." }, color = Muted, textAlign = TextAlign.Center)
+                        Spacer(Modifier.height(18.dp))
+                        Button(onClick = { auth.signOut(); currentUser = null }) { Text("Sign out") }
+                    }
+                } else if (maintenanceMode && !hasAdminClaim) {
+                    Column(
+                        Modifier.fillMaxSize().background(Pale).padding(28.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(Icons.Default.Build, null, tint = Green, modifier = Modifier.size(58.dp))
+                        Spacer(Modifier.height(16.dp))
+                        Text("Khahish is under maintenance", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = Ink)
+                        Text(maintenanceMessage, color = Muted, textAlign = TextAlign.Center)
+                        Spacer(Modifier.height(18.dp))
+                        TextButton(onClick = { auth.signOut(); currentUser = null }) { Text("Sign out") }
+                    }
+                } else if (activeCall != null) {
                     KhahishCallScreen(
                         call = activeCall!!,
                         isIncoming = incomingCall,
