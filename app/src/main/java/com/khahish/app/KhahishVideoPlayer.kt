@@ -39,9 +39,9 @@ fun KhahishVideoPlayer(
         factory = { viewContext ->
             PlayerView(viewContext).apply {
                 this.player = player
-                useController = showControls,
-                controllerAutoShow = showControls,
-                controllerShowTimeoutMs = if (showControls) 3500 else 0,
+                useController = showControls
+                controllerAutoShow = showControls
+                controllerShowTimeoutMs = if (showControls) 3500 else 0
                 resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
             }
         },
