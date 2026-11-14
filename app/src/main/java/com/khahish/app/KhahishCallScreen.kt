@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Cached
 import androidx.compose.material.icons.filled.Bluetooth
@@ -78,6 +79,7 @@ fun KhahishCallScreen(
     var remoteUid by remember(call.id) { mutableStateOf<Int?>(null) }
     var peerPhotoUrl by remember(call.id) { mutableStateOf("") }
     var callElapsedSeconds by remember(call.id) { mutableIntStateOf(0) }
+    var isMinimized by remember(call.id) { mutableStateOf(false) }
     var selectedBeautyFilter by remember(call.id) { mutableStateOf("Natural") }
     var showBeautyFilters by remember(call.id) { mutableStateOf(false) }
     val latestSession by rememberUpdatedState(session)
@@ -133,6 +135,7 @@ fun KhahishCallScreen(
                     }
                 )
                 session = rtc
+                KhahishCallForegroundService.retainSession(rtc)
                 rtc.setAudioRoute(selectedAudioRoute)
                 rtc.join()
             },
@@ -205,9 +208,9 @@ fun KhahishCallScreen(
             }
         }
         onDispose {
+            // Do not tear down Agora when the Activity/UI leaves the foreground.
+            // The foreground service retains the live session until the call is explicitly ended.
             registration.remove()
-            latestSession?.leave()
-            KhahishCallForegroundService.stop(context)
         }
     }
 
@@ -243,9 +246,8 @@ fun KhahishCallScreen(
         }
     }
 
-    BackHandler(enabled = true) {
-        repository.endCall(call.id) { errorText = it }
-        finishCallLocally()
+    BackHandler(enabled = !isMinimized) {
+        isMinimized = true
     }
 
     LaunchedEffect(call.id, isIncoming, currentCall.status) {
@@ -270,6 +272,7 @@ fun KhahishCallScreen(
         }
     }
 
+    if (!isMinimized) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -571,6 +574,49 @@ fun KhahishCallScreen(
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = colors.error)
             ) { Text("Cancel call") }
+        }
+    }
+    } else {
+        Column(
+            modifier = Modifier.fillMaxSize().background(colors.background).statusBarsPadding().padding(16.dp),
+            verticalArrangement = Arrangement.Top
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(22.dp),
+                color = Color(0xFF18A889),
+                shadowElevation = 8.dp
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Surface(shape = CircleShape, color = Color.White.copy(alpha = 0.18f)) {
+                        Icon(Icons.Default.Call, null, tint = Color.White, modifier = Modifier.padding(11.dp).size(22.dp))
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(displayName.ifBlank { "Khahish user" }, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1)
+                        Text(
+                            if (isConnected) "Voice call · " + formatKhahishCallDuration(callElapsedSeconds) else statusText,
+                            color = Color.White.copy(alpha = 0.9f), fontSize = 12.sp
+                        )
+                    }
+                    TextButton(onClick = { isMinimized = false }) {
+                        Text("Return to call", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Text("Call is continuing. Use Return to call to open the controls.", color = colors.onSurfaceVariant, fontSize = 13.sp)
+            Spacer(Modifier.height(16.dp))
+            OutlinedButton(
+                onClick = {
+                    repository.endCall(call.id) { errorText = it }
+                    finishCallLocally()
+                },
+                modifier = Modifier.align(Alignment.End)
+            ) { Text("End call", color = colors.error) }
         }
     }
 
