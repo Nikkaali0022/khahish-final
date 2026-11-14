@@ -160,20 +160,25 @@ internal fun isValidKhahishUsername(value: String): Boolean = Regex("^[a-z0-9_]{
 /** True only when the whole message is one emoji grapheme (including flags and ZWJ emoji). */
 internal fun isSingleEmojiMessage(value: String): Boolean {
     if (value.isBlank()) return false
-    val allowedEmojiPart = Regex("[\\\\p{So}\\\\p{Sk}\\\\p{M}\\\\p{N}#*\\\\uFE0E\\\\uFE0F\\\\u200D\\\\u20E3\\\\u{1F1E6}-\\\\u{1F1FF}\\\\u{1F3FB}-\\\\u{1F3FF}]+")
-    if (!allowedEmojiPart.matches(value)) return false
-    val hasEmojiCodePoint = value.codePoints().toArray().any { cp ->
+    val codePoints = value.codePoints().toArray()
+    val hasEmojiCodePoint = codePoints.any { cp ->
         cp in 0x1F000..0x1FAFF || cp in 0x2600..0x27BF ||
             cp in 0x2300..0x23FF || cp in 0x1F1E6..0x1F1FF
     }
     if (!hasEmojiCodePoint) return false
+    val onlyEmojiCharacters = codePoints.all { cp ->
+        cp in 0x1F000..0x1FAFF || cp in 0x2600..0x27BF ||
+            cp in 0x2300..0x23FF || cp in 0x1F1E6..0x1F1FF ||
+            cp in 0x1F3FB..0x1F3FF || cp == 0xFE0E || cp == 0xFE0F ||
+            cp == 0x200D || cp == 0x20E3 || cp in 0x30..0x39 ||
+            cp == 0x23 || cp == 0x2A
+    }
+    if (!onlyEmojiCharacters) return false
     val iterator = android.icu.text.BreakIterator.getCharacterInstance(Locale.ROOT)
     iterator.setText(value)
     var clusters = 0
-    var boundary = iterator.first()
-    while (true) {
-        boundary = iterator.next()
-        if (boundary == android.icu.text.BreakIterator.DONE) break
+    iterator.first()
+    while (iterator.next() != android.icu.text.BreakIterator.DONE) {
         clusters++
         if (clusters > 1) return false
     }
