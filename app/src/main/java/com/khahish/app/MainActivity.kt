@@ -3975,7 +3975,19 @@ fun ConversationScreen(
                                 )
                             }
 
-                            "audio" -> if (msg.uploadProgress >= 0) Text("Voice message uploading…", color = bubbleTextColor) else AudioMessagePlayer(msg.imageUrl)
+                            "audio" -> if (msg.uploadProgress >= 0) Text("Voice message uploading…", color = bubbleTextColor) else AudioMessagePlayer(
+                                url = msg.imageUrl,
+                                messageTime = java.text.SimpleDateFormat("hh:mm a", Locale.getDefault()).format(java.util.Date(msg.timestamp)),
+                                deliveryText = if (isMe) {
+                                    when {
+                                        msg.isPending -> "◷"
+                                        msg.readBy.any { it != currentUserId } -> "✓✓"
+                                        msg.deliveredTo.any { it != currentUserId } -> "✓✓"
+                                        else -> "✓"
+                                    }
+                                } else "",
+                                deliveryColor = if (msg.readBy.any { it != currentUserId }) Color(0xFF35B7E8) else bubbleSecondaryTextColor
+                            )
 
                             "document" -> if (msg.uploadProgress >= 0) Text("Document uploading…", color = bubbleTextColor) else MediaOpenRow(
                                 "Document — tap to open", Icons.Default.Description, msg.imageUrl, context
@@ -4110,7 +4122,7 @@ fun ConversationScreen(
                             }
                         }
 
-                        if (!inlineTextMeta) Row(
+                        if (!inlineTextMeta && msg.mediaType != "audio") Row(
                             Modifier.align(Alignment.End),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -5275,12 +5287,18 @@ fun ConversationScreen(
 }
 
 @Composable
-private fun AudioMessagePlayer(url: String) {
+private fun AudioMessagePlayer(
+    url: String,
+    messageTime: String,
+    deliveryText: String,
+    deliveryColor: Color
+) {
     val context = LocalContext.current
     var player by remember(url) { mutableStateOf<MediaPlayer?>(null) }
     var playing by remember(url) { mutableStateOf(false) }
     var loading by remember(url) { mutableStateOf(false) }
     var durationMs by remember(url) { mutableStateOf(0) }
+    var currentPositionMs by remember(url) { mutableStateOf(0) }
     var progress by remember(url) { mutableStateOf(0f) }
     var seeking by remember(url) { mutableStateOf(false) }
     var playbackSpeed by remember(url) { mutableStateOf(1f) }
@@ -5294,7 +5312,8 @@ private fun AudioMessagePlayer(url: String) {
                 val active = player
                 if (active != null) {
                     durationMs = active.duration.coerceAtLeast(durationMs)
-                    progress = (active.currentPosition.toFloat() / durationMs.coerceAtLeast(1)).coerceIn(0f, 1f)
+                    currentPositionMs = active.currentPosition.coerceIn(0, durationMs.coerceAtLeast(0))
+                    progress = (currentPositionMs.toFloat() / durationMs.coerceAtLeast(1)).coerceIn(0f, 1f)
                 }
             }
             kotlinx.coroutines.delay(100)
@@ -5313,7 +5332,7 @@ private fun AudioMessagePlayer(url: String) {
 
     Row(
         Modifier.widthIn(max = 248.dp)
-            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(16.dp))
             .padding(horizontal = 9.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -5327,6 +5346,7 @@ private fun AudioMessagePlayer(url: String) {
                     } else if (player != null) {
                         if (durationMs > 0 && progress >= 0.999f) {
                             player?.seekTo(0)
+                            currentPositionMs = 0
                             progress = 0f
                         }
                         player?.start()
@@ -5339,6 +5359,7 @@ private fun AudioMessagePlayer(url: String) {
                             created.setOnPreparedListener { ready ->
                                 loading = false
                                 durationMs = ready.duration.coerceAtLeast(0)
+                                currentPositionMs = 0
                                 player = ready
                                 ready.start()
                                 playing = true
@@ -5346,6 +5367,7 @@ private fun AudioMessagePlayer(url: String) {
                             created.setOnCompletionListener { done ->
                                 playing = false
                                 done.seekTo(0)
+                                currentPositionMs = 0
                                 progress = 0f
                             }
                             created.setOnErrorListener { failed, _, _ ->
@@ -5387,9 +5409,13 @@ private fun AudioMessagePlayer(url: String) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Slider(
                     value = progress,
-                    onValueChange = { seeking = true; progress = it },
+                    onValueChange = {
+                        seeking = true
+                        progress = it
+                        currentPositionMs = (durationMs * it).toInt()
+                    },
                     onValueChangeFinished = {
-                        if (durationMs > 0) player?.seekTo((durationMs * progress).toInt())
+                        if (durationMs > 0) player?.seekTo(currentPositionMs)
                         seeking = false
                     },
                     enabled = durationMs > 0 && !loading,
@@ -5407,7 +5433,24 @@ private fun AudioMessagePlayer(url: String) {
                     }
                 )
             }
-            Text(timeText((durationMs * progress).toInt()), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "${timeText(currentPositionMs)} / ${timeText(durationMs)}",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 9.sp
+                )
+                Spacer(Modifier.weight(1f))
+                Text(messageTime, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp)
+                if (deliveryText.isNotBlank()) {
+                    Text(
+                        deliveryText,
+                        color = deliveryColor,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(start = 4.dp)
+                    )
+                }
+            }
         }
     }
 }
