@@ -2977,6 +2977,8 @@ fun ConversationScreen(
     var videoToPlay by remember { mutableStateOf("") }
     var photoToView by remember { mutableStateOf("") }
     var showDeleteOptions by remember { mutableStateOf(false) }
+    var showClearChatConfirmation by remember(chat.id) { mutableStateOf(false) }
+    var isClearingChat by remember(chat.id) { mutableStateOf(false) }
     var showDisappearingOptions by remember { mutableStateOf(false) }
     var disappearingDurationMs by remember { mutableStateOf(0L) }
     var replyTarget by remember { mutableStateOf<MessageItem?>(null) }
@@ -3674,6 +3676,14 @@ fun ConversationScreen(
                                 chatMenuExpanded = false
                                 notificationsMuted = !notificationsMuted
                                 saveChatSetting("notificationsMuted", notificationsMuted)
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Clear chat") },
+                            leadingIcon = { Icon(Icons.Default.DeleteSweep, null) },
+                            onClick = {
+                                chatMenuExpanded = false
+                                showClearChatConfirmation = true
                             }
                         )
                         DropdownMenuItem(
@@ -5144,6 +5154,78 @@ fun ConversationScreen(
                 }
             },
             confirmButton = { TextButton(onClick = { showDisappearingOptions = false }) { Text("Close") } }
+        )
+    }
+
+    if (showClearChatConfirmation) {
+        AlertDialog(
+            onDismissRequest = { if (!isClearingChat) showClearChatConfirmation = false },
+            title = { Text("Clear chat for you?") },
+            text = {
+                Text(
+                    "This removes the conversation history only from your account. " +
+                        "The other person's messages and chat history will not be deleted."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !isClearingChat,
+                    onClick = {
+                        if (isClearingChat) return@TextButton
+                        isClearingChat = true
+                        chatRef.collection("messages").get()
+                            .addOnSuccessListener { snapshot ->
+                                val docs = snapshot.documents
+                                if (docs.isEmpty()) {
+                                    messages = emptyList()
+                                    pendingMediaMessages = emptyList()
+                                    isClearingChat = false
+                                    showClearChatConfirmation = false
+                                    showToast(context, "Chat cleared for you")
+                                } else {
+                                    val chunks = docs.chunked(450)
+                                    var completed = 0
+                                    var failed = false
+                                    chunks.forEach { chunk ->
+                                        val batch = db.batch()
+                                        chunk.forEach { doc ->
+                                            batch.update(doc.reference, "hiddenFor", FieldValue.arrayUnion(currentUserId))
+                                        }
+                                        batch.commit()
+                                            .addOnSuccessListener {
+                                                completed++
+                                                if (completed == chunks.size && !failed) {
+                                                    messages = emptyList()
+                                                    pendingMediaMessages = emptyList()
+                                                    selectedMessageIds = emptySet()
+                                                    isClearingChat = false
+                                                    showClearChatConfirmation = false
+                                                    showToast(context, "Chat cleared for you")
+                                                }
+                                            }
+                                            .addOnFailureListener { error ->
+                                                failed = true
+                                                isClearingChat = false
+                                                showToast(context, "Some messages could not be cleared: ${error.message}")
+                                            }
+                                    }
+                                }
+                            }
+                            .addOnFailureListener { error ->
+                                isClearingChat = false
+                                showToast(context, "Could not clear chat: ${error.message}")
+                            }
+                    }
+                ) {
+                    if (isClearingChat) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    else Text("Clear chat", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(enabled = !isClearingChat, onClick = { showClearChatConfirmation = false }) {
+                    Text("Cancel")
+                }
+            }
         )
     }
 
