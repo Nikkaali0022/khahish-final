@@ -956,7 +956,9 @@ fun KhahishUpdatesScreen(
                             )
                             story.mediaType == "video" && story.mediaUrl.isNotBlank() -> KhahishVideoPlayer(
                                 url = story.mediaUrl,
-                                modifier = Modifier.fillMaxWidth().fillMaxHeight()
+                                modifier = Modifier.fillMaxWidth().fillMaxHeight(),
+                                isPlaying = !viewerPaused,
+                                showControls = false
                             )
                             story.mediaType == "voice" && story.mediaUrl.isNotBlank() -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Icon(Icons.Default.Mic, null, tint = Color.White, modifier = Modifier.size(64.dp))
