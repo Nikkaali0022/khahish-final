@@ -10,6 +10,7 @@ on:
     branches:
       - main
       - feature/agora-calling
+      - feature/compact-glass-chat-bubbles
       - integration/final-from-updated-features
   pull_request:
     branches:
