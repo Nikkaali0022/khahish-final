@@ -133,6 +133,7 @@ fun KhahishCallScreen(
                     }
                 )
                 session = rtc
+                KhahishCallForegroundService.retainSession(rtc)
                 rtc.setAudioRoute(selectedAudioRoute)
                 rtc.join()
             },
@@ -205,9 +206,9 @@ fun KhahishCallScreen(
             }
         }
         onDispose {
+            // Do not tear down Agora when the Activity/UI leaves the foreground.
+            // The foreground service retains the live session until the call is explicitly ended.
             registration.remove()
-            latestSession?.leave()
-            KhahishCallForegroundService.stop(context)
         }
     }
 
