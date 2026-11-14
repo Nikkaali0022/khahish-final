@@ -753,6 +753,11 @@ test("only group admins can add members, while ordinary members can leave", asyn
 });
 
 test("active account restrictions block ordinary accounts but expire automatically", async () => {
+  await seed("publicProfiles/alice", {
+    uid: "alice",
+    name: "Alice",
+    username: "alice_name"
+  });
   await seed("accountRestrictions/bob", {
     uid: "bob",
     permanent: true,
