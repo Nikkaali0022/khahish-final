@@ -2855,10 +2855,17 @@ fun ConversationScreen(
     var voiceRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
     var voiceRecordingFile by remember { mutableStateOf<File?>(null) }
     val voiceHaptic = LocalHapticFeedback.current
-    LaunchedEffect(isRecordingVoice) {
+    val voiceHapticsEnabled = remember {
+        context.getSharedPreferences("khahish_alert_settings", Context.MODE_PRIVATE)
+            .getBoolean(KhahishAlertSettings.VOICE_HAPTICS, true)
+    }
+    LaunchedEffect(isRecordingVoice, voiceHapticsEnabled) {
         while (isRecordingVoice) {
             delay(1000L)
             voiceElapsedSeconds += 1L
+            if (voiceHapticsEnabled && voiceElapsedSeconds % 2L == 0L) {
+                voiceHaptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            }
         }
     }
     var selectedMessageIds by remember { mutableStateOf(setOf<String>()) }
@@ -4192,7 +4199,7 @@ fun ConversationScreen(
                             val message = text.trim()
                             when {
                                 isUploading || isSending -> Unit
-                                isRecordingVoice -> { voiceHaptic.performHapticFeedback(HapticFeedbackType.LongPress); finishVoiceRecording(true) }
+                                isRecordingVoice -> { if (voiceHapticsEnabled) voiceHaptic.performHapticFeedback(HapticFeedbackType.LongPress); finishVoiceRecording(true) }
                                 message.isNotBlank() -> {
                                     text = ""; updateTyping(false); isSending = true
                                     sendChatMessage(chatRef, currentUserId, message, "", "text", context,
