@@ -466,20 +466,58 @@ fun KhahishUpdatesScreen(
     }
 
     DisposableEffect(currentUid) {
-        val friendsListener = db.collection("chats")
-            .whereArrayContains("visibleToUids", currentUid)
-            .addSnapshotListener { snapshot, error ->
-                if (error == null) {
-                    acceptedFriends = snapshot?.documents.orEmpty().mapNotNull { doc ->
-                        if (doc.getBoolean("isGroup") == true) return@mapNotNull null
-                        val members = (doc.get("members") as? List<*>)?.filterIsInstance<String>().orEmpty()
-                        val peerUid = members.firstOrNull { it != currentUid } ?: return@mapNotNull null
-                        val names = doc.get("memberNames") as? Map<*, *>
-                        peerUid to (names?.get(peerUid) as? String ?: "Khahish User")
-                    }.distinctBy { it.first }.sortedBy { it.second.lowercase(Locale.ROOT) }
+        val sentRequests = mutableMapOf<String, com.google.firebase.firestore.DocumentSnapshot>()
+        val receivedRequests = mutableMapOf<String, com.google.firebase.firestore.DocumentSnapshot>()
+
+        fun refreshAcceptedFriends() {
+            val friends = linkedMapOf<String, String>()
+            (sentRequests.values + receivedRequests.values).forEach { request ->
+                if (request.getString("status") != "accepted") return@forEach
+                val senderUid = request.getString("senderUid").orEmpty()
+                val receiverUid = request.getString("receiverUid").orEmpty()
+                val peerUid = when (currentUid) {
+                    senderUid -> receiverUid
+                    receiverUid -> senderUid
+                    else -> ""
+                }
+                if (peerUid.isNotBlank() && peerUid != currentUid) {
+                    val peerName = if (currentUid == senderUid) {
+                        request.getString("receiverName")
+                    } else {
+                        request.getString("senderName")
+                    }
+                    friends[peerUid] = peerName?.takeIf { it.isNotBlank() } ?: "Khahish User"
                 }
             }
-        onDispose { friendsListener.remove() }
+            acceptedFriends = friends.entries
+                .map { it.key to it.value }
+                .sortedBy { it.second.lowercase(Locale.ROOT) }
+        }
+
+        val sentListener = db.collection("messageRequests")
+            .whereEqualTo("senderUid", currentUid)
+            .whereEqualTo("status", "accepted")
+            .addSnapshotListener { snapshot, error ->
+                if (error == null) {
+                    sentRequests.clear()
+                    snapshot?.documents?.forEach { sentRequests[it.id] = it }
+                    refreshAcceptedFriends()
+                }
+            }
+        val receivedListener = db.collection("messageRequests")
+            .whereEqualTo("receiverUid", currentUid)
+            .whereEqualTo("status", "accepted")
+            .addSnapshotListener { snapshot, error ->
+                if (error == null) {
+                    receivedRequests.clear()
+                    snapshot?.documents?.forEach { receivedRequests[it.id] = it }
+                    refreshAcceptedFriends()
+                }
+            }
+        onDispose {
+            sentListener.remove()
+            receivedListener.remove()
+        }
     }
 
     DisposableEffect(currentUid, acceptedFriends) {
