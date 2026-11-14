@@ -44,7 +44,26 @@ fun KhahishContactsScreen(
                     loading = false
                     return@addSnapshotListener
                 }
-                contacts = snapshot?.documents.orEmpty().mapNotNull { doc ->
+                val documents = snapshot?.documents.orEmpty()
+
+                // Backfill legacy private chats whose privacy Worker has not yet
+                // populated visibleToUids. The Worker recalculates visibility for
+                // both participants, preserving Secret Locked Chats privacy.
+                documents.forEach { doc ->
+                    if (doc.getBoolean("isGroup") != true) {
+                        val members = (doc.get("members") as? List<*>)?.filterIsInstance<String>().orEmpty()
+                        val visibleToUids = (doc.get("visibleToUids") as? List<*>)?.filterIsInstance<String>().orEmpty()
+                        if (members.size == 2 && currentUid in members && visibleToUids.isEmpty()) {
+                            KhahishSecretChatApi.syncChatVisibility(
+                                chatId = doc.id,
+                                onSuccess = {},
+                                onError = {}
+                            )
+                        }
+                    }
+                }
+
+                contacts = documents.mapNotNull { doc ->
                     if (doc.getBoolean("isGroup") == true) return@mapNotNull null
                     val members = (doc.get("members") as? List<*>)?.filterIsInstance<String>().orEmpty()
                     if (members.size != 2 || currentUid !in members) return@mapNotNull null
