@@ -605,7 +605,7 @@ fun KhahishAdminPanelScreen(onBack: () -> Unit) {
                     }
                 }
 
-                "Broadcast Center", "Push Notifications" -> {
+                "Broadcast Center", "In-App Notifications" -> {
                     Text("Target audience", fontWeight = FontWeight.SemiBold)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         RadioButton(selected = targetType == "all", onClick = { targetType = "all" })
