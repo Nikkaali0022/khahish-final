@@ -37,6 +37,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -65,6 +66,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -84,7 +87,11 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.statusBarsPadding
 import coil.compose.AsyncImage
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.ApiException
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
 import com.google.firebase.auth.FirebaseAuthInvalidUserException
 import com.google.firebase.auth.FirebaseAuthUserCollisionException
@@ -1182,6 +1189,67 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
     var isSignUp by remember { mutableStateOf(true) }
     var isLoading by remember { mutableStateOf(false) }
 
+    val googleSignInLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode != Activity.RESULT_OK || result.data == null) {
+            isLoading = false
+        } else {
+            try {
+                val account = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+                    .getResult(ApiException::class.java)
+                val idToken = account.idToken
+                if (idToken.isNullOrBlank()) {
+                    isLoading = false
+                    showToast(context, "Google sign-in token missing. Check Web OAuth client setup.")
+                } else {
+                    val credential = GoogleAuthProvider.getCredential(idToken, null)
+                    auth.signInWithCredential(credential)
+                        .addOnSuccessListener { authResult ->
+                            val signedInUser = authResult.user
+                            val uid = signedInUser?.uid
+                            if (uid.isNullOrBlank()) {
+                                isLoading = false
+                                showToast(context, "Google sign-in completed, but account details were unavailable.")
+                            } else {
+                                val displayName = signedInUser.displayName
+                                    ?: account.displayName
+                                    ?: "Khahish User"
+                                val userEmail = signedInUser.email
+                                    ?: account.email
+                                    ?: ""
+                                val photoUrl = signedInUser.photoUrl?.toString().orEmpty()
+                                saveUserToFirestore(db, uid, displayName, userEmail)
+                                val profileUpdates = mapOf<String, Any>(
+                                    "uid" to uid,
+                                    "name" to displayName,
+                                    "nameLowercase" to displayName.lowercase(Locale.ROOT),
+                                    "photoUrl" to photoUrl,
+                                    "updatedAt" to System.currentTimeMillis()
+                                )
+                                db.collection("users").document(uid)
+                                    .set(profileUpdates, SetOptions.merge())
+                                db.collection("publicProfiles").document(uid)
+                                    .set(profileUpdates, SetOptions.merge())
+                                isLoading = false
+                                onLoginSuccess()
+                            }
+                        }
+                        .addOnFailureListener { error ->
+                            isLoading = false
+                            showToast(context, error.localizedMessage ?: "Google sign-in failed.")
+                        }
+                }
+            } catch (error: ApiException) {
+                isLoading = false
+                showToast(context, "Google sign-in failed: ${error.statusCode}")
+            } catch (error: Exception) {
+                isLoading = false
+                showToast(context, error.localizedMessage ?: "Google sign-in failed.")
+            }
+        }
+    }
+
     Column(
         Modifier
             .fillMaxSize()
@@ -1454,6 +1522,46 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
             )
         }
 
+        Spacer(Modifier.height(14.dp))
+
+        OutlinedButton(
+            enabled = !isLoading,
+            onClick = {
+                isLoading = true
+                try {
+                    val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                        .requestIdToken(context.getString(R.string.default_web_client_id))
+                        .requestEmail()
+                        .build()
+                    val client = GoogleSignIn.getClient(context, options)
+                    googleSignInLauncher.launch(client.signInIntent)
+                } catch (error: Exception) {
+                    isLoading = false
+                    showToast(context, error.localizedMessage ?: "Google sign-in could not start.")
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(54.dp)
+                .shadow(4.dp, RoundedCornerShape(16.dp)),
+            shape = RoundedCornerShape(16.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8E5)),
+            colors = ButtonDefaults.outlinedButtonColors(
+                containerColor = Color.White,
+                contentColor = Color(0xFF202A35),
+                disabledContainerColor = Color.White,
+                disabledContentColor = Color(0xFF82909A)
+            )
+        ) {
+            GoogleGMark()
+            Spacer(Modifier.width(12.dp))
+            Text(
+                "Continue with Google",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+
         TextButton(onClick = { isSignUp = !isSignUp }) {
             Text(
                 if (isSignUp) "Already have an account? Sign in"
@@ -1461,6 +1569,61 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                 color = Green
             )
         }
+    }
+}
+
+@Composable
+private fun GoogleGMark() {
+    Canvas(Modifier.size(23.dp)) {
+        val strokeWidth = size.minDimension * 0.19f
+        val arcSize = androidx.compose.ui.geometry.Size(
+            size.width - strokeWidth,
+            size.height - strokeWidth
+        )
+        val topLeft = androidx.compose.ui.geometry.Offset(strokeWidth / 2f, strokeWidth / 2f)
+        drawArc(
+            color = Color(0xFF4285F4),
+            startAngle = -45f,
+            sweepAngle = 90f,
+            useCenter = false,
+            topLeft = topLeft,
+            size = arcSize,
+            style = Stroke(width = strokeWidth, cap = StrokeCap.Butt)
+        )
+        drawArc(
+            color = Color(0xFF34A853),
+            startAngle = 45f,
+            sweepAngle = 90f,
+            useCenter = false,
+            topLeft = topLeft,
+            size = arcSize,
+            style = Stroke(width = strokeWidth, cap = StrokeCap.Butt)
+        )
+        drawArc(
+            color = Color(0xFFFBBC05),
+            startAngle = 135f,
+            sweepAngle = 90f,
+            useCenter = false,
+            topLeft = topLeft,
+            size = arcSize,
+            style = Stroke(width = strokeWidth, cap = StrokeCap.Butt)
+        )
+        drawArc(
+            color = Color(0xFFEA4335),
+            startAngle = 225f,
+            sweepAngle = 90f,
+            useCenter = false,
+            topLeft = topLeft,
+            size = arcSize,
+            style = Stroke(width = strokeWidth, cap = StrokeCap.Butt)
+        )
+        drawLine(
+            color = Color(0xFF4285F4),
+            start = androidx.compose.ui.geometry.Offset(size.width * 0.52f, size.height * 0.5f),
+            end = androidx.compose.ui.geometry.Offset(size.width * 0.98f, size.height * 0.5f),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Butt
+        )
     }
 }
 
