@@ -57,3 +57,35 @@ Communities, Two-Step Verification, account deletion, Guest Mode, multiple-accou
 - Chat backup restores JSON message records and media URLs, not separate copies of Cloudinary media files.
 - Trusted-device records and remote sign-out are not equivalent to cryptographic linked-device pairing.
 - `KhahishKeyVault.kt` is local encrypted key-storage groundwork only; it does not make message content E2EE.
+
+## Khahish Owner Admin claim provisioning
+
+The hidden Admin Panel and the admin-only Firestore Rules require a Firebase
+Authentication ID token containing `admin: true`. The repository does not
+store an admin password, service-account key, or other privileged credential.
+
+The one-time provisioning script is deliberately restricted to the reviewed
+Owner identity:
+- Email: `manaticarry580@gmail.com`
+- Firebase Auth UID: `f4cb0tIrnJOdrrcx1KVsCCyJZCG3`
+
+Run it only from a trusted computer or Google Cloud Shell after granting the
+signed-in operator/service account permission to manage Firebase Authentication
+users in the **Khahish Firebase project**:
+
+1. Install the repository's Node dependencies with `npm install`.
+2. Authenticate with Application Default Credentials that have Firebase
+   Authentication Admin permission. For a service-account key, keep the JSON
+   file outside the repository and set `GOOGLE_APPLICATION_CREDENTIALS` to
+   its local path. Never upload it to GitHub or share it in chat.
+3. Set `FIREBASE_PROJECT_ID` to the exact Firebase project ID shown in
+   Firebase Console → Project settings → General.
+4. Run `npm run grant:owner-admin`.
+5. Confirm the script prints its verified success message. The script checks
+   that the email and UID resolve to the same Firebase Auth user before it
+   changes claims, preserves existing custom claims, and verifies the result.
+
+After provisioning, the Owner must sign out and sign back in (or refresh the
+Firebase ID token) before the Android Admin Panel sees the new claim.
+This script only provisions the Owner claim; it does not deploy Firestore
+Rules, deploy Cloud Functions, or make unfinished Admin Panel actions live.
