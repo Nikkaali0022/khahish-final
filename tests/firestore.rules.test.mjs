@@ -81,6 +81,38 @@ test("private user records are owner-only and login history is append-only", asy
   }));
 });
 
+test("Owner can deliver private in-app notifications and recipients control read state", async () => {
+  const ownerDb = env.authenticatedContext("owner", { admin: true }).firestore();
+  const inboxPath = "users/alice/notifications/broadcast-1";
+  const payload = {
+    broadcastId: "broadcast-1",
+    recipientUid: "alice",
+    title: "Khahish update",
+    body: "A new announcement is available.",
+    kind: "announcement",
+    createdBy: "owner",
+    createdAt: Date.now(),
+    isRead: false,
+    readAt: 0,
+    deliveryMode: "in_app"
+  };
+
+  await assertSucceeds(setDoc(doc(ownerDb, inboxPath), payload));
+  await assertSucceeds(getDoc(doc(db("alice"), inboxPath)));
+  await assertFails(getDoc(doc(db("bob"), inboxPath)));
+  await assertFails(setDoc(doc(db("alice"), "users/alice/notifications/user-forged"), {
+    ...payload,
+    broadcastId: "user-forged"
+  }));
+  await assertFails(updateDoc(doc(db("alice"), inboxPath), {
+    title: "Tampered announcement"
+  }));
+  await assertSucceeds(updateDoc(doc(db("alice"), inboxPath), {
+    isRead: true,
+    readAt: Date.now()
+  }));
+});
+
 test("blocked-account records are private to the blocker", async () => {
   await seed("users/alice/blocked/bob", {
     uid: "bob",
