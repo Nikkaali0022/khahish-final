@@ -315,8 +315,6 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         appInForeground = false
         updateKhahishPresence(presenceUid, false)
-        // Revoke the server-side Secret Locked Chats session as soon as the app leaves foreground.
-        KhahishSecretChatApi.lock()
         super.onStop()
     }
 
@@ -395,43 +393,8 @@ fun KhahishApp() {
     val tabOrder = listOf("Chats", "Contacts", "Updates", "Calls", "Settings")
     var selectedChat by remember { mutableStateOf<Chat?>(null) }
     var profileTargetUid by remember { mutableStateOf("") }
-    var lockedContactUids by remember(currentUser?.uid) {
-        mutableStateOf(KhahishSecretChatLock.lockedUids(appContext, currentUser?.uid.orEmpty()))
-    }
-    var secretPasswordHasPassword by remember { mutableStateOf(false) }
-    var secretUnlockExpiresAtMs by remember { mutableStateOf(0L) }
-    var showLockedChats by remember { mutableStateOf(false) }
-    var showSecretPasswordDialog by remember { mutableStateOf(false) }
-    var secretPasswordCreateMode by remember { mutableStateOf(false) }
-    var pendingLockedChat by remember { mutableStateOf<Chat?>(null) }
-    var openedChatFromLockedChats by remember { mutableStateOf(false) }
-    var showLockPasswordSettings by remember { mutableStateOf(false) }
-    var brandTapCount by remember { mutableStateOf(0) }
-    var lastBrandTapAt by remember { mutableStateOf(0L) }
-
-    fun openChatWithLockCheck(chat: Chat) {
-        if (!chat.isGroup && chat.peerUid in lockedContactUids) {
-            pendingLockedChat = chat
-            secretPasswordCreateMode = false
-            showSecretPasswordDialog = true
-        } else {
-            openedChatFromLockedChats = false
-            selectedChat = chat
-        }
-    }
-
-    fun handleKhahishBrandTap() {
-        val now = System.currentTimeMillis()
-        if (now - lastBrandTapAt > 2200L) brandTapCount = 0
-        lastBrandTapAt = now
-        brandTapCount += 1
-        if (brandTapCount >= 4) {
-            brandTapCount = 0
-            secretPasswordCreateMode = !secretPasswordHasPassword
-            pendingLockedChat = null
-            showSecretPasswordDialog = true
-        }
-    }
+    var lockedContactUids by remember(currentUser?.uid) { mutableStateOf(emptySet<String>()) }
+    fun openChatWithLockCheck(chat: Chat) { selectedChat = chat }
     var showNewChat by remember { mutableStateOf(false) }
     var showNewGroup by remember { mutableStateOf(false) }
     var activeCall by remember { mutableStateOf<KhahishCall?>(null) }
@@ -489,42 +452,6 @@ fun KhahishApp() {
                 active = false
                 configListener.remove()
                 restrictionListener.remove()
-            }
-        }
-    }
-
-    LaunchedEffect(currentUser?.uid) {
-        val uid = currentUser?.uid
-        if (uid.isNullOrBlank()) {
-            lockedContactUids = emptySet()
-            secretPasswordHasPassword = false
-            secretUnlockExpiresAtMs = 0L
-        } else {
-            KhahishSecretChatApi.loadConfig(
-                onSuccess = { config ->
-                    lockedContactUids = config.lockedContactUids
-                    secretPasswordHasPassword = config.hasPassword
-                    KhahishSecretChatLock.saveLockedUids(appContext, uid, config.lockedContactUids)
-                },
-                onError = { message ->
-                    Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
-                }
-            )
-        }
-    }
-
-    LaunchedEffect(secretUnlockExpiresAtMs) {
-        val expiry = secretUnlockExpiresAtMs
-        if (expiry > 0L) {
-            val waitMs = (expiry - System.currentTimeMillis()).coerceAtLeast(0L)
-            kotlinx.coroutines.delay(waitMs)
-            if (secretUnlockExpiresAtMs == expiry) {
-                if (selectedChat?.peerUid in lockedContactUids) selectedChat = null
-                showLockedChats = false
-                openedChatFromLockedChats = false
-                secretUnlockExpiresAtMs = 0L
-                KhahishSecretChatApi.lock()
-                Toast.makeText(appContext, "Locked Chats were secured again.", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -602,13 +529,7 @@ fun KhahishApp() {
                         isGroup = isGroup,
                         memberUids = members
                     )
-                    if (!isGroup && peerUid in lockedContactUids) {
-                        pendingLockedChat = notificationChat
-                        secretPasswordCreateMode = false
-                        showSecretPasswordDialog = true
-                    } else {
-                        selectedChat = notificationChat
-                    }
+                    selectedChat = notificationChat
                     tab = "Chats"
                     showNewChat = false
                     showNewGroup = false
@@ -701,7 +622,7 @@ fun KhahishApp() {
 
     BackHandler(
         enabled = currentUser != null &&
-            (selectedChat != null || showNewChat || showNewGroup || showLockedChats || profileTargetUid.isNotBlank() || tab != "Chats")
+            (selectedChat != null || showNewChat || showNewGroup || profileTargetUid.isNotBlank() || tab != "Chats")
     ) {
         when {
             profileTargetUid.isNotBlank() -> profileTargetUid = ""
@@ -709,22 +630,7 @@ fun KhahishApp() {
                 activeCall = null
                 incomingCall = false
             }
-            selectedChat != null -> {
-                val wasLockedChat = selectedChat?.peerUid in lockedContactUids
-                selectedChat = null
-                if (openedChatFromLockedChats) {
-                    showLockedChats = true
-                } else if (wasLockedChat) {
-                    secretUnlockExpiresAtMs = 0L
-                    KhahishSecretChatApi.lock()
-                }
-                openedChatFromLockedChats = false
-            }
-            showLockedChats -> {
-                showLockedChats = false
-                secretUnlockExpiresAtMs = 0L
-                KhahishSecretChatApi.lock()
-            }
+            selectedChat != null -> selectedChat = null
             showNewGroup -> showNewGroup = false
             showNewChat -> showNewChat = false
             tab != "Chats" -> tab = "Chats"
@@ -876,17 +782,7 @@ fun KhahishApp() {
                     ConversationScreen(
                         chat = selectedChat!!,
                         isGlassTheme = isGlassTheme,
-                        onBack = {
-                            val wasLockedChat = selectedChat?.peerUid in lockedContactUids
-                            selectedChat = null
-                            if (openedChatFromLockedChats) {
-                                showLockedChats = true
-                            } else if (wasLockedChat) {
-                                secretUnlockExpiresAtMs = 0L
-                                KhahishSecretChatApi.lock()
-                            }
-                            openedChatFromLockedChats = false
-                        },
+                        onBack = { selectedChat = null },
                         onViewProfile = { profileTargetUid = it },
                         onStartCall = { isVideo ->
                             KhahishCallRepository().createOutgoingCall(
@@ -924,38 +820,6 @@ fun KhahishApp() {
                             showNewChat = false
                         }
                     )
-                } else if (showLockedChats) {
-                    LockedChatsHub(
-                        currentUid = user.uid,
-                        lockedContactUids = lockedContactUids,
-                        onBack = {
-                            showLockedChats = false
-                            tab = "Chats"
-                            secretUnlockExpiresAtMs = 0L
-                            KhahishSecretChatApi.lock()
-                        },
-                        onAddContact = { contactUid, onResult ->
-                            KhahishSecretChatApi.updateContact(
-                                action = "add",
-                                contactUid = contactUid,
-                                onSuccess = { updated ->
-                                    lockedContactUids = updated
-                                    KhahishSecretChatLock.saveLockedUids(appContext, user.uid, updated)
-                                    onResult(updated, null)
-                                },
-                                onError = { message -> onResult(null, message) }
-                            )
-                        },
-                        onOpenChat = {
-                            openedChatFromLockedChats = true
-                            selectedChat = it
-                            showLockedChats = false
-                        },
-                        onChangePassword = { showLockPasswordSettings = true }
-                    )
-                    if (showLockPasswordSettings) {
-                        LockChatPasswordSettingsDialog(user.uid) { showLockPasswordSettings = false }
-                    }
                 } else {
                     Scaffold(
                         containerColor = MaterialTheme.colorScheme.background,
@@ -980,10 +844,7 @@ fun KhahishApp() {
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Row(
-                                        modifier = Modifier.weight(1f).combinedClickable(
-                                            onClick = { handleKhahishBrandTap() },
-                                            onLongClick = { }
-                                        ),
+                                        modifier = Modifier.weight(1f),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Image(
@@ -1155,30 +1016,6 @@ fun KhahishApp() {
                             }
                         }
                     }
-                }
-                if (showSecretPasswordDialog) {
-                    SecretChatPasswordDialog(
-                        uid = user.uid,
-                        createMode = secretPasswordCreateMode,
-                        onDismiss = {
-                            showSecretPasswordDialog = false
-                            pendingLockedChat = null
-                        },
-                        onUnlocked = { expiresAt ->
-                            showSecretPasswordDialog = false
-                            secretPasswordHasPassword = true
-                            secretUnlockExpiresAtMs = expiresAt
-                            val requestedChat = pendingLockedChat
-                            pendingLockedChat = null
-                            if (requestedChat != null) {
-                                selectedChat = requestedChat
-                                openedChatFromLockedChats = false
-                                showLockedChats = false
-                            } else {
-                                showLockedChats = true
-                            }
-                        }
-                    )
                 }
             }
         }
@@ -1870,104 +1707,46 @@ fun ChatList(
     var hasMoreMessageSearchPages by remember { mutableStateOf(false) }
     var isLoadingMoreMessageSearch by remember { mutableStateOf(false) }
 
-    DisposableEffect(currentUid, lockedContactUids.joinToString("|"), showOnlyLockedChats) {
+    DisposableEffect(currentUid) {
         var active = true
         loading = true
-
-        if (showOnlyLockedChats) {
-            if (lockedContactUids.isEmpty()) {
-                chats = emptyList()
-                loading = false
-            } else {
-                // Locked chats are fetched by deterministic document ID, not by a
-                // collection query. Firestore get rules require the active unlock session.
-                val tasks = lockedContactUids.map { peerUid ->
-                    db.collection("chats").document(privateChatId(currentUid, peerUid)).get()
+        val registration = db.collection("chats")
+            .whereArrayContains("members", currentUid)
+            .addSnapshotListener { snapshot, error ->
+                if (!active) return@addSnapshotListener
+                if (error != null) {
+                    loading = false
+                    chats = emptyList()
+                    showToast(context, "Could not load conversations: ${error.message}")
+                    return@addSnapshotListener
                 }
-                com.google.android.gms.tasks.Tasks
-                    .whenAllSuccess<com.google.firebase.firestore.DocumentSnapshot>(tasks)
-                    .addOnSuccessListener { documents ->
-                        if (active) {
-                            chats = documents.mapNotNull { doc ->
-                                if (!doc.exists()) return@mapNotNull null
-                                val members = doc.get("members") as? List<*>
-                                val memberUids = members?.filterIsInstance<String>() ?: emptyList()
-                                val peerUid = memberUids.firstOrNull { it != currentUid }
-                                    ?: return@mapNotNull null
-                                if (peerUid !in lockedContactUids || doc.getBoolean("isGroup") == true) {
-                                    return@mapNotNull null
-                                }
-                                val names = doc.get("memberNames") as? Map<*, *>
-                                val peerName = names?.get(peerUid) as? String ?: "Khahish User"
-                                Chat(
-                                    id = doc.id,
-                                    peerUid = peerUid,
-                                    name = peerName,
-                                    message = doc.getString("lastMessage") ?: "",
-                                    time = "",
-                                    initials = peerName.firstOrNull()?.uppercase() ?: "K",
-                                    isGroup = false,
-                                    memberUids = memberUids
-                                )
-                            }.sortedByDescending { chat ->
-                                documents.firstOrNull { it.id == chat.id }?.getLong("lastMessageAt") ?: 0L
-                            }
-                            loading = false
-                        }
+                if (snapshot != null) {
+                    val docs = snapshot.documents
+                    chats = docs.mapNotNull { doc ->
+                        val memberUids = (doc.get("members") as? List<*>)
+                            ?.filterIsInstance<String>().orEmpty()
+                        if (currentUid !in memberUids) return@mapNotNull null
+                        val isGroup = doc.getBoolean("isGroup") == true
+                        val peerUid = memberUids.firstOrNull { it != currentUid }.orEmpty()
+                        val names = doc.get("memberNames") as? Map<*, *>
+                        val peerName = names?.get(peerUid) as? String ?: "Khahish User"
+                        val displayName = if (isGroup) doc.getString("groupName")
+                            ?.takeIf { it.isNotBlank() } ?: "Group chat" else peerName
+                        Chat(
+                            id = doc.id, peerUid = peerUid, name = displayName,
+                            message = doc.getString("lastMessage") ?: "", time = "",
+                            initials = displayName.firstOrNull()?.uppercase() ?: "K",
+                            isGroup = isGroup, memberUids = memberUids
+                        )
+                    }.sortedByDescending { chat ->
+                        docs.firstOrNull { it.id == chat.id }?.getLong("lastMessageAt") ?: 0L
                     }
-                    .addOnFailureListener {
-                        if (active) {
-                            chats = emptyList()
-                            loading = false
-                            showToast(context, "Could not load Locked Chats: ${it.message}")
-                        }
-                    }
-            }
-            onDispose { active = false }
-        } else {
-            val registration = db.collection("chats")
-                .whereArrayContains("visibleToUids", currentUid)
-                .addSnapshotListener { snapshot, error ->
-                    if (error != null) {
-                        loading = false
-                        return@addSnapshotListener
-                    }
-
-                    if (snapshot != null) {
-                        val docs = snapshot.documents
-                        chats = docs.mapNotNull { doc ->
-                            val members = doc.get("members") as? List<*>
-                            val memberUids = members?.filterIsInstance<String>() ?: emptyList()
-                            val peerUid = memberUids.firstOrNull { it != currentUid }
-                                ?: return@mapNotNull null
-                            val names = doc.get("memberNames") as? Map<*, *>
-                            val isGroup = doc.getBoolean("isGroup") == true
-                            val peerName = names?.get(peerUid) as? String ?: "Khahish User"
-                            val displayName = if (isGroup) doc.getString("groupName") ?: "Group chat" else peerName
-
-                            Chat(
-                                id = doc.id,
-                                peerUid = peerUid,
-                                name = displayName,
-                                message = doc.getString("lastMessage") ?: "",
-                                time = "",
-                                initials = displayName.firstOrNull()?.uppercase() ?: "K",
-                                isGroup = isGroup,
-                                memberUids = memberUids
-                            )
-                        }.filter { chat ->
-                            if (chat.isGroup) true else chat.peerUid !in lockedContactUids
-                        }.sortedByDescending { chat ->
-                            docs.firstOrNull { it.id == chat.id }?.getLong("lastMessageAt") ?: 0L
-                        }
-                        loading = false
-                    }
+                    loading = false
                 }
-
-            onDispose {
-                active = false
-                registration.remove()
             }
+        onDispose {
+            active = false
+            registration.remove()
         }
     }
 
@@ -2206,18 +1985,9 @@ fun ChatList(
                                         batch.update(reqRef, mapOf("status" to "accepted", "acceptedBy" to currentUid, "handledBy" to currentUid, "acceptedAt" to now))
                                         batch.set(chatRef, mapOf("members" to members, "memberNames" to mapOf(currentUid to (FirebaseAuth.getInstance().currentUser?.displayName ?: "You"), request.senderUid to request.senderName), "lastMessage" to "", "lastMessageAt" to 0L, "updatedAt" to now, "createdAt" to now, "createdBy" to currentUid, "disappearingDurationMs" to 0L, "visibleToUids" to emptyList<String>()))
                                         batch.commit().addOnSuccessListener {
-                                            KhahishSecretChatApi.syncChatVisibility(
-                                                request.id,
-                                                onSuccess = {
-                                                    showToast(context, "Request accepted. Chat is ready.")
-                                                    showRequestsScreen = false
-                                                    onOpen(Chat(request.id, request.senderUid, request.senderName, "", "", request.senderName.firstOrNull()?.uppercase() ?: "K"))
-                                                },
-                                                onError = { message ->
-                                                    showToast(context, "Chat created but privacy sync is pending. It remains hidden until synchronization succeeds. $message")
-                                                    showRequestsScreen = false
-                                                }
-                                            )
+                                            showToast(context, "Request accepted. Chat is ready.")
+                                            showRequestsScreen = false
+                                            onOpen(Chat(request.id, request.senderUid, request.senderName, "", "", request.senderName.firstOrNull()?.uppercase() ?: "K"))
                                         }.addOnFailureListener { showToast(context, "Could not accept request: ${it.message}") }
                                     }, colors = ButtonDefaults.buttonColors(containerColor = Green)) { Text("Accept", color = Color.White) }
                                 }
@@ -2294,7 +2064,7 @@ fun ChatList(
                     )
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        if (search.isBlank()) "No private chats yet"
+                        if (search.isBlank()) "No conversations yet"
                         else "No matching conversations",
                         color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.SemiBold
