@@ -55,6 +55,9 @@ dependencies {
     implementation("com.google.firebase:firebase-firestore-ktx")
     implementation("com.google.firebase:firebase-messaging")
 
+    // Google account sign-in with Firebase Authentication
+    implementation("com.google.android.gms:play-services-auth:21.3.0")
+
     // Cloudinary / OkHttp
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
