@@ -254,7 +254,28 @@ fun KhahishUpdatesScreen(
             }
             data["allowedUids"] = allowed
             db.collection("stories").add(data)
-                .addOnSuccessListener { Toast.makeText(context, "Story shared for 24 hours", Toast.LENGTH_SHORT).show() }
+                .addOnSuccessListener { storyRef ->
+                    val feedBatch = db.batch()
+                    allowed.forEach { viewerUid ->
+                        val feedRef = db.collection("users").document(viewerUid)
+                            .collection("storyFeed").document(currentUid)
+                            .collection("stories").document(storyRef.id)
+                        feedBatch.set(feedRef, mapOf(
+                            "ownerUid" to currentUid,
+                            "viewerUid" to viewerUid,
+                            "storyId" to storyRef.id,
+                            "createdAt" to now,
+                            "expiresAt" to (now + 24L * 60L * 60L * 1000L)
+                        ))
+                    }
+                    feedBatch.commit()
+                        .addOnSuccessListener {
+                            Toast.makeText(context, "Story shared for 24 hours", Toast.LENGTH_SHORT).show()
+                        }
+                        .addOnFailureListener {
+                            Toast.makeText(context, "Story saved, but friend feed update failed: ${it.message}", Toast.LENGTH_LONG).show()
+                        }
+                }
                 .addOnFailureListener { Toast.makeText(context, "Story failed: ${it.message}", Toast.LENGTH_LONG).show() }
         }
 
@@ -559,13 +580,26 @@ fun KhahishUpdatesScreen(
                 }
             }
         val friendListeners = acceptedFriends.map { (friendUid, _) ->
-            db.collection("stories")
-                .whereEqualTo("ownerUid", friendUid)
-                .whereArrayContains("allowedUids", currentUid)
+            db.collection("users").document(currentUid)
+                .collection("storyFeed").document(friendUid)
+                .collection("stories")
                 .addSnapshotListener { snapshot, error ->
                     if (error == null) {
-                        friendDocs.entries.removeAll { it.value.getString("ownerUid") == friendUid }
-                        snapshot?.documents?.forEach { friendDocs[it.id] = it }
+                        val feedStoryIds = snapshot?.documents.orEmpty().map { it.id }.toSet()
+                        friendDocs.entries.removeAll {
+                            it.value.getString("ownerUid") == friendUid && it.key !in feedStoryIds
+                        }
+                        snapshot?.documents?.forEach { feedEntry ->
+                            db.collection("stories").document(feedEntry.id).get()
+                                .addOnSuccessListener { storyDoc ->
+                                    if (storyDoc.exists()) {
+                                        friendDocs[storyDoc.id] = storyDoc
+                                    } else {
+                                        friendDocs.remove(feedEntry.id)
+                                    }
+                                    refreshStories()
+                                }
+                        }
                         refreshStories()
                     } else {
                         loading = false
