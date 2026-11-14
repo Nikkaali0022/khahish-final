@@ -1682,8 +1682,6 @@ fun ChatList(
     currentUid: String,
     onOpen: (Chat) -> Unit,
     onViewProfile: (String) -> Unit,
-    lockedContactUids: Set<String> = emptySet(),
-    showOnlyLockedChats: Boolean = false
 ) {
     val db = remember { FirebaseFirestore.getInstance() }
     val context = LocalContext.current
