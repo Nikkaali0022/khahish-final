@@ -39,6 +39,17 @@ class KhahishMessagingService : FirebaseMessagingService() {
         val chatId = payload["chatId"].orEmpty()
         val notificationType = payload["type"].orEmpty()
 
+        // A data-only FCM message can reach this service even while Khahish is
+        // in the background. Record delivery here; never mark it as read.
+        val messageId = payload["messageId"].orEmpty()
+        val recipientUid = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
+        if (chatId.isNotBlank() && messageId.isNotBlank() && recipientUid.isNotBlank()) {
+            FirebaseFirestore.getInstance()
+                .collection("chats").document(chatId)
+                .collection("messages").document(messageId)
+                .update("deliveredTo", com.google.firebase.firestore.FieldValue.arrayUnion(recipientUid))
+        }
+
         // Per-chat mute applies to message alerts only; incoming calls remain audible.
         if (chatId.isNotBlank() && notificationType != "call") {
             val uid = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
