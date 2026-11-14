@@ -369,6 +369,7 @@ fun KhahishSettingsScreen(
                 when (themeMode) {
                     "light" -> "Light"
                     "dark" -> "Dark"
+                    "glass" -> "Glass"
                     else -> "System default"
                 }
             ) { themeMenuExpanded = true }
@@ -381,6 +382,9 @@ fun KhahishSettingsScreen(
                 })
                 DropdownMenuItem(text = { Text("Dark") }, onClick = {
                     onThemeModeChanged("dark"); themeMenuExpanded = false
+                })
+                DropdownMenuItem(text = { Text("Glass") }, onClick = {
+                    onThemeModeChanged("glass"); themeMenuExpanded = false
                 })
             }
             KhahishSettingsItem(Icons.Default.Tune, "Animations and transitions", "Smooth movement and slide effects") {
