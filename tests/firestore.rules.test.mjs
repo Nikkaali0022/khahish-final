@@ -751,3 +751,77 @@ test("only group admins can add members, while ordinary members can leave", asyn
     updatedAt: Date.now()
   }));
 });
+
+test("active account restrictions block ordinary accounts but expire automatically", async () => {
+  await seed("accountRestrictions/bob", {
+    uid: "bob",
+    permanent: true,
+    expiresAt: 0,
+    reason: "Test ban"
+  });
+
+  await assertFails(getDoc(doc(db("bob"), "publicProfiles/alice")));
+  await assertFails(setDoc(doc(db("bob"), "users/bob/loginHistory/blocked"), {
+    time: Date.now(),
+    deviceName: "Blocked device",
+    platform: "Android"
+  }));
+
+  const ownerDb = env.authenticatedContext("owner", { admin: true }).firestore();
+  await assertSucceeds(getDoc(doc(ownerDb, "accountRestrictions/bob")));
+  await assertSucceeds(setDoc(doc(ownerDb, "accountRestrictions/bob"), {
+    uid: "bob",
+    permanent: false,
+    expiresAt: Date.now() - 1000,
+    reason: "Expired"
+  }));
+
+  await assertSucceeds(getDoc(doc(db("bob"), "publicProfiles/alice")));
+});
+
+test("only an admin can list moderation profiles and queue broadcasts", async () => {
+  await seed("publicProfiles/alice", {
+    uid: "alice",
+    name: "Alice",
+    username: "alice_name",
+    nameLowercase: "alice"
+  });
+
+  await assertFails(getDocs(collection(db("bob"), "publicProfiles")));
+  await assertFails(setDoc(doc(db("bob"), "adminBroadcasts/regular-user"), {
+    title: "Hello",
+    body: "Not allowed",
+    targetType: "all",
+    createdBy: "bob",
+    createdAt: Date.now()
+  }));
+
+  const ownerDb = env.authenticatedContext("owner", { admin: true }).firestore();
+  await assertSucceeds(getDocs(collection(ownerDb, "publicProfiles")));
+  await assertSucceeds(setDoc(doc(ownerDb, "adminBroadcasts/owner-message"), {
+    title: "Khahish update",
+    body: "A message for everyone.",
+    kind: "announcement",
+    targetType: "all",
+    createdBy: "owner",
+    createdAt: Date.now()
+  }));
+  await assertFails(updateDoc(doc(ownerDb, "adminBroadcasts/owner-message"), {
+    dispatchStatus: "sent"
+  }));
+});
+
+test("admin audit logs are append-only and private to admins", async () => {
+  const ownerDb = env.authenticatedContext("owner", { admin: true }).firestore();
+  await assertSucceeds(setDoc(doc(ownerDb, "adminAuditLogs/log1"), {
+    actorUid: "owner",
+    action: "user_banned",
+    targetUid: "bob",
+    createdAt: Date.now()
+  }));
+  await assertSucceeds(getDocs(collection(ownerDb, "adminAuditLogs")));
+  await assertFails(getDocs(collection(db("bob"), "adminAuditLogs")));
+  await assertFails(updateDoc(doc(ownerDb, "adminAuditLogs/log1"), {
+    action: "changed"
+  }));
+});
