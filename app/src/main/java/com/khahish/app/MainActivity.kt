@@ -1409,7 +1409,9 @@ fun ChatList(
     modifier: Modifier = Modifier,
     currentUid: String,
     onOpen: (Chat) -> Unit,
-    onViewProfile: (String) -> Unit
+    onViewProfile: (String) -> Unit,
+    lockedContactUids: Set<String> = emptySet(),
+    showOnlyLockedChats: Boolean = false
 ) {
     val db = remember { FirebaseFirestore.getInstance() }
     val context = LocalContext.current
@@ -1434,50 +1436,99 @@ fun ChatList(
     var hasMoreMessageSearchPages by remember { mutableStateOf(false) }
     var isLoadingMoreMessageSearch by remember { mutableStateOf(false) }
 
-    DisposableEffect(currentUid, chatListRetry) {
-        val registration = db.collection("chats")
-            .whereArrayContains("members", currentUid)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    chatListError = error.message ?: "Could not load conversations."
-                    loading = false
-                    return@addSnapshotListener
+    DisposableEffect(currentUid, chatListRetry, lockedContactUids.joinToString("|"), showOnlyLockedChats) {
+        var active = true
+        var registration: com.google.firebase.firestore.ListenerRegistration? = null
+        loading = true
+        chatListError = ""
+
+        if (showOnlyLockedChats) {
+            if (lockedContactUids.isEmpty()) {
+                chats = emptyList()
+                loading = false
+            } else {
+                val tasks = lockedContactUids.map { peerUid ->
+                    db.collection("chats").document(privateChatId(currentUid, peerUid)).get()
                 }
-
-                if (snapshot != null) {
-                    chatListError = ""
-                    val docs = snapshot.documents
-
-                    chats = docs.mapNotNull { doc ->
-                        val members = doc.get("members") as? List<*>
-                        val memberUids = members?.filterIsInstance<String>() ?: emptyList()
-                        val peerUid = memberUids.firstOrNull { it != currentUid }
-                            ?: return@mapNotNull null
-                        val names = doc.get("memberNames") as? Map<*, *>
-                        val isGroup = doc.getBoolean("isGroup") == true
-                        val peerName = names?.get(peerUid) as? String ?: "Khahish User"
-                        val displayName = if (isGroup) doc.getString("groupName") ?: "Group chat" else peerName
-
-                        Chat(
-                            id = doc.id,
-                            peerUid = peerUid,
-                            name = displayName,
-                            message = doc.getString("lastMessage") ?: "",
-                            time = "",
-                            initials = displayName.firstOrNull()?.uppercase() ?: "K",
-                            isGroup = isGroup,
-                            memberUids = memberUids
-                        )
-                    }.sortedByDescending { chat ->
-                        docs.firstOrNull { it.id == chat.id }
-                            ?.getLong("lastMessageAt") ?: 0L
+                com.google.android.gms.tasks.Tasks
+                    .whenAllSuccess<com.google.firebase.firestore.DocumentSnapshot>(tasks)
+                    .addOnSuccessListener { documents ->
+                        if (active) {
+                            chats = documents.mapNotNull { doc ->
+                                if (!doc.exists()) return@mapNotNull null
+                                val members = doc.get("members") as? List<*>
+                                val memberUids = members?.filterIsInstance<String>() ?: emptyList()
+                                val peerUid = memberUids.firstOrNull { it != currentUid } ?: return@mapNotNull null
+                                if (peerUid !in lockedContactUids || doc.getBoolean("isGroup") == true) return@mapNotNull null
+                                val names = doc.get("memberNames") as? Map<*, *>
+                                val peerName = names?.get(peerUid) as? String ?: "Khahish User"
+                                Chat(
+                                    id = doc.id,
+                                    peerUid = peerUid,
+                                    name = peerName,
+                                    message = doc.getString("lastMessage") ?: "",
+                                    time = "",
+                                    initials = peerName.firstOrNull()?.uppercase() ?: "K",
+                                    memberUids = memberUids
+                                )
+                            }.sortedByDescending { chat ->
+                                documents.firstOrNull { it.id == chat.id }?.getLong("lastMessageAt") ?: 0L
+                            }
+                            loading = false
+                        }
                     }
-
-                    loading = false
-                }
+                    .addOnFailureListener { error ->
+                        if (active) {
+                            chatListError = error.message ?: "Could not load locked chats."
+                            loading = false
+                        }
+                    }
             }
+        } else {
+            registration = db.collection("chats")
+                .whereArrayContains("members", currentUid)
+                .addSnapshotListener { snapshot, error ->
+                    if (!active) return@addSnapshotListener
+                    if (error != null) {
+                        chatListError = error.message ?: "Could not load conversations."
+                        loading = false
+                        return@addSnapshotListener
+                    }
+                    if (snapshot != null) {
+                        chatListError = ""
+                        val docs = snapshot.documents
+                        chats = docs.mapNotNull { doc ->
+                            val members = doc.get("members") as? List<*>
+                            val memberUids = members?.filterIsInstance<String>() ?: emptyList()
+                            val peerUid = memberUids.firstOrNull { it != currentUid } ?: return@mapNotNull null
+                            val names = doc.get("memberNames") as? Map<*, *>
+                            val isGroup = doc.getBoolean("isGroup") == true
+                            val peerName = names?.get(peerUid) as? String ?: "Khahish User"
+                            val displayName = if (isGroup) doc.getString("groupName") ?: "Group chat" else peerName
+                            Chat(
+                                id = doc.id,
+                                peerUid = peerUid,
+                                name = displayName,
+                                message = doc.getString("lastMessage") ?: "",
+                                time = "",
+                                initials = displayName.firstOrNull()?.uppercase() ?: "K",
+                                isGroup = isGroup,
+                                memberUids = memberUids
+                            )
+                        }.filter { chat ->
+                            if (chat.isGroup) true else chat.peerUid !in lockedContactUids
+                        }.sortedByDescending { chat ->
+                            docs.firstOrNull { it.id == chat.id }?.getLong("lastMessageAt") ?: 0L
+                        }
+                        loading = false
+                    }
+                }
+        }
 
-        onDispose { registration.remove() }
+        onDispose {
+            active = false
+            registration?.remove()
+        }
     }
 
     DisposableEffect(currentUid) {
