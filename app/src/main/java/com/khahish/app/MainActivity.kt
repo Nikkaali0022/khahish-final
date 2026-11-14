@@ -198,6 +198,20 @@ data class MessageItem(
 private fun privateChatId(uid1: String, uid2: String): String =
     listOf(uid1, uid2).sorted().joinToString("_")
 
+private fun formatChatListTimestamp(timestamp: Long): String {
+    if (timestamp <= 0L) return ""
+    val now = java.util.Calendar.getInstance()
+    val messageDate = java.util.Calendar.getInstance().apply { timeInMillis = timestamp }
+    val pattern = when {
+        now.get(java.util.Calendar.YEAR) == messageDate.get(java.util.Calendar.YEAR) &&
+            now.get(java.util.Calendar.DAY_OF_YEAR) == messageDate.get(java.util.Calendar.DAY_OF_YEAR) -> "h:mm a"
+        now.get(java.util.Calendar.YEAR) == messageDate.get(java.util.Calendar.YEAR) &&
+            now.get(java.util.Calendar.WEEK_OF_YEAR) == messageDate.get(java.util.Calendar.WEEK_OF_YEAR) -> "EEE"
+        else -> "dd/MM/yy"
+    }
+    return java.text.SimpleDateFormat(pattern, Locale.getDefault()).format(java.util.Date(timestamp))
+}
+
 private fun showToast(context: Context, message: String) {
     Toast.makeText(context, message, Toast.LENGTH_LONG).show()
 }
@@ -1731,7 +1745,8 @@ fun ChatList(
                             ?.takeIf { it.isNotBlank() } ?: "Group chat" else peerName
                         Chat(
                             id = doc.id, peerUid = peerUid, name = displayName,
-                            message = doc.getString("lastMessage") ?: "", time = "",
+                            message = doc.getString("lastMessage") ?: "",
+                            time = formatChatListTimestamp(doc.getLong("lastMessageAt") ?: 0L),
                             initials = displayName.firstOrNull()?.uppercase() ?: "K",
                             isGroup = isGroup, memberUids = memberUids
                         )
@@ -2130,21 +2145,34 @@ fun ChatList(
                         }
 
                         val unreadCount = unreadCounts[chat.id] ?: 0
-                        if (unreadCount > 0) {
-                            Box(
-                                modifier = Modifier
-                                    .padding(end = 8.dp)
-                                    .defaultMinSize(minWidth = 25.dp, minHeight = 25.dp)
-                                    .background(Color(0xFF16A66A), CircleShape)
-                                    .padding(horizontal = 7.dp, vertical = 4.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
+                        Column(
+                            modifier = Modifier.padding(end = 8.dp),
+                            horizontalAlignment = Alignment.End,
+                            verticalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            if (chat.time.isNotBlank()) {
                                 Text(
-                                    text = if (unreadCount > 99) "99+" else unreadCount.toString(),
-                                    color = Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
+                                    chat.time,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 10.sp,
+                                    maxLines = 1
                                 )
+                            }
+                            if (unreadCount > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .defaultMinSize(minWidth = 25.dp, minHeight = 25.dp)
+                                        .background(Color(0xFF16A66A), CircleShape)
+                                        .padding(horizontal = 7.dp, vertical = 4.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = if (unreadCount > 99) "99+" else unreadCount.toString(),
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
 
