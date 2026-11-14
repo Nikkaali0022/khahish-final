@@ -1,6 +1,11 @@
 package com.khahish.app
 
 import android.Manifest
+import android.content.Context
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
+import android.os.Build
+import android.os.PowerManager
 import android.content.pm.PackageManager
 import android.view.SurfaceView
 import androidx.activity.compose.BackHandler
@@ -17,6 +22,8 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Cached
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Videocam
@@ -65,7 +72,9 @@ fun KhahishCallScreen(
     var isJoined by remember(call.id) { mutableStateOf(false) }
     var isMuted by remember(call.id) { mutableStateOf(false) }
     var cameraEnabled by remember(call.id) { mutableStateOf(true) }
-    var speakerEnabled by remember(call.id) { mutableStateOf(true) }
+    var speakerEnabled by remember(call.id) { mutableStateOf(call.isVideo) }
+    var selectedAudioRoute by remember(call.id) { mutableStateOf(if (call.isVideo) "speaker" else "earpiece") }
+    var audioRouteMenuExpanded by remember(call.id) { mutableStateOf(false) }
     var credentials by remember(call.id) { mutableStateOf<AgoraRtcCredentials?>(null) }
     var session by remember(call.id) { mutableStateOf<KhahishAgoraSession?>(null) }
     var connectionStarted by remember(call.id) { mutableStateOf(false) }
@@ -83,6 +92,11 @@ fun KhahishCallScreen(
 
     LaunchedEffect(session, selectedBeautyFilter) {
         session?.setBeautyFilter(selectedBeautyFilter)
+    }
+
+    LaunchedEffect(session, selectedAudioRoute) {
+        session?.setAudioRoute(selectedAudioRoute)
+        speakerEnabled = selectedAudioRoute == "speaker"
     }
 
     val peerUid = if (isIncoming) currentCall.callerUid else currentCall.calleeUid
@@ -122,6 +136,7 @@ fun KhahishCallScreen(
                     }
                 )
                 session = rtc
+                rtc.setAudioRoute(selectedAudioRoute)
                 rtc.join()
             },
             onError = {
@@ -142,6 +157,17 @@ fun KhahishCallScreen(
             } else {
                 "Microphone permission is required."
             }
+        }
+    }
+
+    val bluetoothPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            selectedAudioRoute = "bluetooth"
+            session?.setAudioRoute("bluetooth")
+        } else {
+            errorText = "Bluetooth permission is needed to use a Bluetooth headset."
         }
     }
 
@@ -195,6 +221,26 @@ fun KhahishCallScreen(
 
     BackHandler(enabled = !isMinimized) {
         onMinimize()
+    }
+
+    DisposableEffect(call.id, selectedAudioRoute, isJoined, call.isVideo) {
+        var proximityLock: PowerManager.WakeLock? = null
+        if (!call.isVideo && isJoined && selectedAudioRoute == "earpiece") {
+            try {
+                val power = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+                if (power.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)) {
+                    proximityLock = power.newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, "Khahish:CallProximity").apply {
+                        setReferenceCounted(false)
+                        acquire()
+                    }
+                }
+            } catch (_: Exception) {
+                proximityLock = null
+            }
+        }
+        onDispose {
+            try { if (proximityLock?.isHeld == true) proximityLock?.release() } catch (_: Exception) { }
+        }
     }
 
     LaunchedEffect(call.id, isIncoming, currentCall.status) {
@@ -492,15 +538,58 @@ fun KhahishCallScreen(
                         }
                     )
                 }
-                CallControlButton(
-                    icon = if (speakerEnabled) Icons.Default.VolumeUp else Icons.Default.VolumeOff,
-                    label = "Speaker",
-                    background = colors.surfaceVariant,
-                    onClick = {
-                        speakerEnabled = !speakerEnabled
-                        session?.setSpeakerEnabled(speakerEnabled)
+                Box {
+                    CallControlButton(
+                        icon = when (selectedAudioRoute) {
+                            "speaker" -> Icons.Default.VolumeUp
+                            "bluetooth" -> Icons.Default.Bluetooth
+                            else -> Icons.Default.PhoneAndroid
+                        },
+                        label = "Audio",
+                        background = colors.surfaceVariant,
+                        onClick = { audioRouteMenuExpanded = true }
+                    )
+                    DropdownMenu(expanded = audioRouteMenuExpanded, onDismissRequest = { audioRouteMenuExpanded = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Earpiece") },
+                            leadingIcon = { Icon(Icons.Default.PhoneAndroid, null) },
+                            trailingIcon = { if (selectedAudioRoute == "earpiece") Icon(Icons.Default.Check, null, tint = colors.primary) },
+                            onClick = {
+                                selectedAudioRoute = "earpiece"
+                                session?.setAudioRoute("earpiece")
+                                audioRouteMenuExpanded = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Phone Speaker") },
+                            leadingIcon = { Icon(Icons.Default.VolumeUp, null) },
+                            trailingIcon = { if (selectedAudioRoute == "speaker") Icon(Icons.Default.Check, null, tint = colors.primary) },
+                            onClick = {
+                                selectedAudioRoute = "speaker"
+                                session?.setAudioRoute("speaker")
+                                audioRouteMenuExpanded = false
+                            }
+                        )
+                        if (hasKhahishBluetoothAudio(context)) {
+                            DropdownMenuItem(
+                                text = { Text("Bluetooth") },
+                                leadingIcon = { Icon(Icons.Default.Bluetooth, null) },
+                                trailingIcon = { if (selectedAudioRoute == "bluetooth") Icon(Icons.Default.Check, null, tint = colors.primary) },
+                                onClick = {
+                                    audioRouteMenuExpanded = false
+                                    if (Build.VERSION.SDK_INT >= 31 &&
+                                        ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
+                                    ) {
+                                        bluetoothPermissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT)
+                                    } else {
+                                        selectedAudioRoute = "bluetooth"
+                                        session?.setAudioRoute("bluetooth")
+                                    }
+                                }
+                            )
+                        }
                     }
-                )
+                }
                 CallControlButton(
                     icon = Icons.Default.CallEnd,
                     label = "End",
@@ -553,6 +642,16 @@ private fun CallControlButton(
         Spacer(Modifier.height(8.dp))
         Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
     }
+}
+
+private fun hasKhahishBluetoothAudio(context: Context): Boolean = try {
+    val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { device ->
+        device.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+            (Build.VERSION.SDK_INT >= 31 && device.type == AudioDeviceInfo.TYPE_BLE_HEADSET)
+    }
+} catch (_: Exception) {
+    false
 }
 
 private fun formatKhahishCallDuration(totalSeconds: Int): String {

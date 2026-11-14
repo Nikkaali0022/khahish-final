@@ -1,6 +1,9 @@
 package com.khahish.app
 
 import android.content.Context
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
+import android.os.Build
 import io.agora.rtc2.ChannelMediaOptions
 import io.agora.rtc2.Constants
 import io.agora.rtc2.IRtcEngineEventHandler
@@ -24,6 +27,7 @@ class KhahishAgoraSession(
     private val onFailure: (String) -> Unit
 ) {
     private val appContext = context.applicationContext
+    private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     @Volatile private var released = false
     private var engine: RtcEngine? = null
 
@@ -152,6 +156,50 @@ class KhahishAgoraSession(
         }
     }
 
+    fun setAudioRoute(route: String) {
+        if (released) return
+        try {
+            audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+            when (route) {
+                "speaker" -> {
+                    engine?.setEnableSpeakerphone(true)
+                    if (Build.VERSION.SDK_INT >= 31) {
+                        val speaker = audioManager.availableCommunicationDevices.firstOrNull {
+                            it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+                        }
+                        if (speaker != null) audioManager.setCommunicationDevice(speaker)
+                    }
+                }
+                "bluetooth" -> {
+                    engine?.setEnableSpeakerphone(false)
+                    if (Build.VERSION.SDK_INT >= 31) {
+                        val bluetooth = audioManager.availableCommunicationDevices.firstOrNull {
+                            it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                                it.type == AudioDeviceInfo.TYPE_BLE_HEADSET
+                        }
+                        if (bluetooth != null && audioManager.setCommunicationDevice(bluetooth)) return
+                    }
+                    @Suppress("DEPRECATION")
+                    audioManager.startBluetoothSco()
+                    @Suppress("DEPRECATION")
+                    run { audioManager.isBluetoothScoOn = true }
+                }
+                else -> {
+                    @Suppress("DEPRECATION")
+                    run { audioManager.isBluetoothScoOn = false }
+                    @Suppress("DEPRECATION")
+                    audioManager.stopBluetoothSco()
+                    if (Build.VERSION.SDK_INT >= 31) audioManager.clearCommunicationDevice()
+                    engine?.setEnableSpeakerphone(false)
+                }
+            }
+        } catch (_: SecurityException) {
+            engine?.setEnableSpeakerphone(route == "speaker")
+        } catch (_: Exception) {
+            engine?.setEnableSpeakerphone(route == "speaker")
+        }
+    }
+
     fun setSpeakerEnabled(enabled: Boolean) {
         engine?.setEnableSpeakerphone(enabled)
     }
@@ -159,6 +207,14 @@ class KhahishAgoraSession(
     fun leave() {
         if (released) return
         released = true
+        try {
+            @Suppress("DEPRECATION")
+            run { audioManager.isBluetoothScoOn = false }
+            @Suppress("DEPRECATION")
+            audioManager.stopBluetoothSco()
+            if (Build.VERSION.SDK_INT >= 31) audioManager.clearCommunicationDevice()
+            audioManager.mode = AudioManager.MODE_NORMAL
+        } catch (_: Exception) { }
         try {
             engine?.leaveChannel()
         } catch (_: Exception) {

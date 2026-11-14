@@ -109,6 +109,25 @@ service cloud.firestore {
         allow create, update, delete: if isOwner(uid);
       }
 
+      // Owner-managed audience lists used by Stories privacy settings.
+      match /closeFriends/{friendUid} {
+        allow get, list: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && friendUid != uid
+          && request.resource.data.uid == friendUid
+          && request.resource.data.keys().hasOnly(['uid', 'name', 'username', 'addedAt']);
+        allow delete: if isOwner(uid);
+      }
+
+      match /friends/{friendUid} {
+        allow get, list: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && friendUid != uid
+          && request.resource.data.uid == friendUid
+          && request.resource.data.keys().hasOnly(['uid', 'name', 'username', 'addedAt']);
+        allow delete: if isOwner(uid);
+      }
+
       match /trustedDevices/{deviceId} {
         allow read, create, update, delete: if isOwner(uid);
       }
@@ -233,26 +252,39 @@ service cloud.firestore {
         && !isBlocked(request.resource.data.senderUid, request.resource.data.receiverUid);
 
       allow update: if signedIn()
-        && resource.data.receiverUid == request.auth.uid
-        && resource.data.status == 'pending'
-        && request.resource.data.senderUid == resource.data.senderUid
-        && request.resource.data.receiverUid == resource.data.receiverUid
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'status', 'acceptedBy', 'handledBy', 'acceptedAt', 'rejectedAt'
-        ])
-        && request.resource.data.status in ['accepted', 'rejected']
-        && request.resource.data.handledBy == request.auth.uid
         && (
-          request.resource.data.status != 'rejected'
-          || request.resource.data.rejectedAt is int
-        )
-        && (
-          request.resource.data.status == 'rejected'
+          (
+            request.auth.uid == resource.data.receiverUid
+            && resource.data.status == 'pending'
+            && request.resource.data.senderUid == resource.data.senderUid
+            && request.resource.data.receiverUid == resource.data.receiverUid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'status', 'acceptedBy', 'handledBy', 'acceptedAt', 'rejectedAt'
+            ])
+            && request.resource.data.status in ['accepted', 'rejected']
+            && request.resource.data.handledBy == request.auth.uid
+            && (
+              request.resource.data.status != 'rejected'
+              || request.resource.data.rejectedAt is int
+            )
+            && (
+              request.resource.data.status == 'rejected'
+              || (
+                request.resource.data.acceptedBy == request.auth.uid
+                && request.resource.data.acceptedAt is int
+                && !isBlocked(resource.data.receiverUid, resource.data.senderUid)
+                && !isBlocked(resource.data.senderUid, resource.data.receiverUid)
+              )
+            )
+          )
           || (
-            request.resource.data.acceptedBy == request.auth.uid
-            && request.resource.data.acceptedAt is int
-            && !isBlocked(resource.data.receiverUid, resource.data.senderUid)
-            && !isBlocked(resource.data.senderUid, resource.data.receiverUid)
+            request.auth.uid == resource.data.senderUid
+            && resource.data.status == 'pending'
+            && request.resource.data.senderUid == resource.data.senderUid
+            && request.resource.data.receiverUid == resource.data.receiverUid
+            && request.resource.data.status == 'cancelled'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'cancelledAt'])
+            && request.resource.data.cancelledAt is int
           )
         );
 
@@ -702,7 +734,15 @@ service cloud.firestore {
         && request.resource.data.createdAt is int
         && request.resource.data.expiresAt is int
         && request.resource.data.expiresAt > request.resource.data.createdAt
-        && request.resource.data.audience in ['everyone', 'only_me'];
+        && request.resource.data.audience in ['everyone', 'close_friends', 'my_contacts', 'my_friends']
+        && request.resource.data.get('allowedUids', []) is list
+        && request.resource.data.get('allowedUids', []).size() <= 500
+        && (
+          (request.resource.data.audience == 'everyone'
+            && request.resource.data.get('allowedUids', []).size() == 0)
+          || (request.resource.data.audience != 'everyone'
+            && request.resource.data.get('allowedUids', []).size() > 0)
+        );
 
       allow update: if false;
       allow delete: if signedIn()

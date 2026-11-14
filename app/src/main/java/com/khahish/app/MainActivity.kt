@@ -137,7 +137,7 @@ data class LiveLocationPoint(
     val expiresAt: Long
 )
 
-data class MessageRequestItem(val id: String, val senderUid: String, val senderName: String, val senderUsername: String, val createdAt: Long)
+data class MessageRequestItem(val id: String, val senderUid: String, val senderName: String, val senderUsername: String, val createdAt: Long, val status: String = "pending")
 
 internal fun normalizeKhahishUsername(value: String): String = value.trim().removePrefix("@").lowercase(Locale.ROOT)
 internal fun isValidKhahishUsername(value: String): Boolean = Regex("^[a-z0-9_]{3,20}$").matches(normalizeKhahishUsername(value))
@@ -357,6 +357,43 @@ fun KhahishApp() {
     val tabOrder = listOf("Chats", "Contacts", "Updates", "Calls", "Settings")
     var selectedChat by remember { mutableStateOf<Chat?>(null) }
     var profileTargetUid by remember { mutableStateOf("") }
+    var lockedContactUids by remember(currentUser?.uid) {
+        mutableStateOf(KhahishSecretChatLock.lockedUids(appContext, currentUser?.uid.orEmpty()))
+    }
+    var secretPasswordHasPassword by remember { mutableStateOf(false) }
+    var secretUnlockExpiresAtMs by remember { mutableStateOf(0L) }
+    var showLockedChats by remember { mutableStateOf(false) }
+    var showSecretPasswordDialog by remember { mutableStateOf(false) }
+    var secretPasswordCreateMode by remember { mutableStateOf(false) }
+    var pendingLockedChat by remember { mutableStateOf<Chat?>(null) }
+    var openedChatFromLockedChats by remember { mutableStateOf(false) }
+    var showLockPasswordSettings by remember { mutableStateOf(false) }
+    var brandTapCount by remember { mutableStateOf(0) }
+    var lastBrandTapAt by remember { mutableStateOf(0L) }
+
+    fun openChatWithLockCheck(chat: Chat) {
+        if (!chat.isGroup && chat.peerUid in lockedContactUids) {
+            pendingLockedChat = chat
+            secretPasswordCreateMode = false
+            showSecretPasswordDialog = true
+        } else {
+            openedChatFromLockedChats = false
+            selectedChat = chat
+        }
+    }
+
+    fun handleKhahishBrandTap() {
+        val now = System.currentTimeMillis()
+        if (now - lastBrandTapAt > 2200L) brandTapCount = 0
+        lastBrandTapAt = now
+        brandTapCount += 1
+        if (brandTapCount >= 4) {
+            brandTapCount = 0
+            secretPasswordCreateMode = !secretPasswordHasPassword
+            pendingLockedChat = null
+            showSecretPasswordDialog = true
+        }
+    }
     var showNewChat by remember { mutableStateOf(false) }
     var showNewGroup by remember { mutableStateOf(false) }
     var activeCall by remember { mutableStateOf<KhahishCall?>(null) }
@@ -374,6 +411,42 @@ fun KhahishApp() {
         }
         auth.addAuthStateListener(listener)
         onDispose { auth.removeAuthStateListener(listener) }
+    }
+
+    LaunchedEffect(currentUser?.uid) {
+        val uid = currentUser?.uid
+        if (uid.isNullOrBlank()) {
+            lockedContactUids = emptySet()
+            secretPasswordHasPassword = false
+            secretUnlockExpiresAtMs = 0L
+        } else {
+            KhahishSecretChatApi.loadConfig(
+                onSuccess = { config ->
+                    lockedContactUids = config.lockedContactUids
+                    secretPasswordHasPassword = config.hasPassword
+                    KhahishSecretChatLock.saveLockedUids(appContext, uid, config.lockedContactUids)
+                },
+                onError = { message ->
+                    Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
+                }
+            )
+        }
+    }
+
+    LaunchedEffect(secretUnlockExpiresAtMs) {
+        val expiry = secretUnlockExpiresAtMs
+        if (expiry > 0L) {
+            val waitMs = (expiry - System.currentTimeMillis()).coerceAtLeast(0L)
+            delay(waitMs)
+            if (secretUnlockExpiresAtMs == expiry) {
+                if (selectedChat?.peerUid in lockedContactUids) selectedChat = null
+                showLockedChats = false
+                openedChatFromLockedChats = false
+                secretUnlockExpiresAtMs = 0L
+                KhahishSecretChatApi.lock()
+                Toast.makeText(appContext, "Locked Chats were secured again.", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     val hostActivity = appContext as? MainActivity
@@ -552,12 +625,27 @@ fun KhahishApp() {
 
     BackHandler(
         enabled = currentUser != null &&
-            (selectedChat != null || showNewChat || showNewGroup || profileTargetUid.isNotBlank() || tab != "Chats" || (activeCall != null && isCallMinimized))
+            (selectedChat != null || showNewChat || showNewGroup || showLockedChats || profileTargetUid.isNotBlank() || tab != "Chats" || (activeCall != null && isCallMinimized))
     ) {
         when {
             activeCall != null && isCallMinimized -> isCallMinimized = false
             profileTargetUid.isNotBlank() -> profileTargetUid = ""
-            selectedChat != null -> selectedChat = null
+            selectedChat != null -> {
+                val wasLockedChat = selectedChat?.peerUid in lockedContactUids
+                selectedChat = null
+                if (openedChatFromLockedChats) {
+                    showLockedChats = true
+                } else if (wasLockedChat) {
+                    secretUnlockExpiresAtMs = 0L
+                    KhahishSecretChatApi.lock()
+                }
+                openedChatFromLockedChats = false
+            }
+            showLockedChats -> {
+                showLockedChats = false
+                secretUnlockExpiresAtMs = 0L
+                KhahishSecretChatApi.lock()
+            }
             showNewGroup -> showNewGroup = false
             showNewChat -> showNewChat = false
             tab != "Chats" -> tab = "Chats"
@@ -652,7 +740,17 @@ fun KhahishApp() {
                 } else if (selectedChat != null) {
                     ConversationScreen(
                         chat = selectedChat!!,
-                        onBack = { selectedChat = null },
+                        onBack = {
+                            val wasLockedChat = selectedChat?.peerUid in lockedContactUids
+                            selectedChat = null
+                            if (openedChatFromLockedChats) {
+                                showLockedChats = true
+                            } else if (wasLockedChat) {
+                                secretUnlockExpiresAtMs = 0L
+                                KhahishSecretChatApi.lock()
+                            }
+                            openedChatFromLockedChats = false
+                        },
                         onViewProfile = { profileTargetUid = it },
                         onStartCall = { isVideo ->
                             KhahishCallRepository().createOutgoingCall(
@@ -676,7 +774,7 @@ fun KhahishApp() {
                         currentUid = user.uid,
                         onBack = { showNewGroup = false },
                         onCreated = {
-                            selectedChat = it
+                            openChatWithLockCheck(it)
                             showNewGroup = false
                         }
                     )
@@ -686,10 +784,42 @@ fun KhahishApp() {
                         onBack = { showNewChat = false },
                         onCreateGroup = { showNewChat = false; showNewGroup = true },
                         onChatCreated = {
-                            selectedChat = it
+                            openChatWithLockCheck(it)
                             showNewChat = false
                         }
                     )
+                } else if (showLockedChats) {
+                    LockedChatsHub(
+                        currentUid = user.uid,
+                        lockedContactUids = lockedContactUids,
+                        onBack = {
+                            showLockedChats = false
+                            tab = "Chats"
+                            secretUnlockExpiresAtMs = 0L
+                            KhahishSecretChatApi.lock()
+                        },
+                        onAddContact = { contactUid, onResult ->
+                            KhahishSecretChatApi.updateContact(
+                                action = "add",
+                                contactUid = contactUid,
+                                onSuccess = { updated ->
+                                    lockedContactUids = updated
+                                    KhahishSecretChatLock.saveLockedUids(appContext, user.uid, updated)
+                                    onResult(updated, null)
+                                },
+                                onError = { message -> onResult(null, message) }
+                            )
+                        },
+                        onOpenChat = {
+                            openedChatFromLockedChats = true
+                            selectedChat = it
+                            showLockedChats = false
+                        },
+                        onChangePassword = { showLockPasswordSettings = true }
+                    )
+                    if (showLockPasswordSettings) {
+                        LockChatPasswordSettingsDialog(user.uid) { showLockPasswordSettings = false }
+                    }
                 } else {
                     Scaffold(
                         containerColor = MaterialTheme.colorScheme.background,
@@ -716,7 +846,7 @@ fun KhahishApp() {
                                     Image(
                                         painter = painterResource(R.drawable.khahish_logo),
                                         contentDescription = "Khahish logo",
-                                        modifier = Modifier.size(38.dp),
+                                        modifier = Modifier.size(38.dp).clickable { handleKhahishBrandTap() },
                                         contentScale = ContentScale.Fit
                                     )
 
@@ -737,6 +867,15 @@ fun KhahishApp() {
                                         Text("🦎", fontSize = 23.sp)
                                     }
 
+                                    if (tab == "Chats") {
+                                        IconButton(onClick = {
+                                            secretPasswordCreateMode = !secretPasswordHasPassword
+                                            pendingLockedChat = null
+                                            showSecretPasswordDialog = true
+                                        }) {
+                                            Icon(Icons.Default.Lock, "Locked Chats", tint = Color.White)
+                                        }
+                                    }
                                     IconButton(onClick = { tab = "Settings" }) {
                                         Icon(
                                             Icons.Default.Settings,
@@ -820,14 +959,15 @@ fun KhahishApp() {
                                 "Chats" -> ChatList(
                                     modifier = Modifier.padding(padding),
                                     currentUid = user.uid,
-                                    onOpen = { selectedChat = it },
-                                    onViewProfile = { profileTargetUid = it }
+                                    onOpen = { openChatWithLockCheck(it) },
+                                    onViewProfile = { profileTargetUid = it },
+                                    lockedContactUids = lockedContactUids
                                 )
 
                                 "Contacts" -> KhahishContactsScreen(
                                     currentUid = user.uid,
                                     modifier = Modifier.padding(padding),
-                                    onOpenChat = { selectedChat = it },
+                                    onOpenChat = { openChatWithLockCheck(it) },
                                     onViewProfile = { profileTargetUid = it }
                                 )
 
@@ -883,6 +1023,30 @@ fun KhahishApp() {
                     }
                 }
             }
+        }
+        if (currentUser != null && showSecretPasswordDialog) {
+            SecretChatPasswordDialog(
+                uid = currentUser!!.uid,
+                createMode = secretPasswordCreateMode,
+                onDismiss = {
+                    showSecretPasswordDialog = false
+                    pendingLockedChat = null
+                },
+                onUnlocked = { expiresAt ->
+                    showSecretPasswordDialog = false
+                    secretPasswordHasPassword = true
+                    secretUnlockExpiresAtMs = expiresAt
+                    val requestedChat = pendingLockedChat
+                    pendingLockedChat = null
+                    if (requestedChat != null) {
+                        selectedChat = requestedChat
+                        openedChatFromLockedChats = false
+                        showLockedChats = false
+                    } else {
+                        showLockedChats = true
+                    }
+                }
+            )
         }
         if (currentUser != null && activeCall != null) {
             KhahishCallScreen(
@@ -1409,7 +1573,9 @@ fun ChatList(
     modifier: Modifier = Modifier,
     currentUid: String,
     onOpen: (Chat) -> Unit,
-    onViewProfile: (String) -> Unit
+    onViewProfile: (String) -> Unit,
+    lockedContactUids: Set<String> = emptySet(),
+    showOnlyLockedChats: Boolean = false
 ) {
     val db = remember { FirebaseFirestore.getInstance() }
     val context = LocalContext.current
@@ -1418,6 +1584,10 @@ fun ChatList(
     var chatListError by remember { mutableStateOf("") }
     var chatListRetry by remember { mutableIntStateOf(0) }
     var incomingRequests by remember { mutableStateOf(listOf<MessageRequestItem>()) }
+    var outgoingRequests by remember { mutableStateOf(listOf<MessageRequestItem>()) }
+    var showRequestsScreen by remember { mutableStateOf(false) }
+    var showPeopleSearchDialog by remember { mutableStateOf(false) }
+    var requestsTab by remember { mutableStateOf("Received") }
     var unreadCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     var loading by remember { mutableStateOf(true) }
     var search by remember { mutableStateOf("") }
@@ -1430,50 +1600,99 @@ fun ChatList(
     var hasMoreMessageSearchPages by remember { mutableStateOf(false) }
     var isLoadingMoreMessageSearch by remember { mutableStateOf(false) }
 
-    DisposableEffect(currentUid, chatListRetry) {
-        val registration = db.collection("chats")
-            .whereArrayContains("members", currentUid)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    chatListError = error.message ?: "Could not load conversations."
-                    loading = false
-                    return@addSnapshotListener
+    DisposableEffect(currentUid, chatListRetry, lockedContactUids.joinToString("|"), showOnlyLockedChats) {
+        var active = true
+        var registration: com.google.firebase.firestore.ListenerRegistration? = null
+        loading = true
+        chatListError = ""
+
+        if (showOnlyLockedChats) {
+            if (lockedContactUids.isEmpty()) {
+                chats = emptyList()
+                loading = false
+            } else {
+                val tasks = lockedContactUids.map { peerUid ->
+                    db.collection("chats").document(privateChatId(currentUid, peerUid)).get()
                 }
-
-                if (snapshot != null) {
-                    chatListError = ""
-                    val docs = snapshot.documents
-
-                    chats = docs.mapNotNull { doc ->
-                        val members = doc.get("members") as? List<*>
-                        val memberUids = members?.filterIsInstance<String>() ?: emptyList()
-                        val peerUid = memberUids.firstOrNull { it != currentUid }
-                            ?: return@mapNotNull null
-                        val names = doc.get("memberNames") as? Map<*, *>
-                        val isGroup = doc.getBoolean("isGroup") == true
-                        val peerName = names?.get(peerUid) as? String ?: "Khahish User"
-                        val displayName = if (isGroup) doc.getString("groupName") ?: "Group chat" else peerName
-
-                        Chat(
-                            id = doc.id,
-                            peerUid = peerUid,
-                            name = displayName,
-                            message = doc.getString("lastMessage") ?: "",
-                            time = "",
-                            initials = displayName.firstOrNull()?.uppercase() ?: "K",
-                            isGroup = isGroup,
-                            memberUids = memberUids
-                        )
-                    }.sortedByDescending { chat ->
-                        docs.firstOrNull { it.id == chat.id }
-                            ?.getLong("lastMessageAt") ?: 0L
+                com.google.android.gms.tasks.Tasks
+                    .whenAllSuccess<com.google.firebase.firestore.DocumentSnapshot>(tasks)
+                    .addOnSuccessListener { documents ->
+                        if (active) {
+                            chats = documents.mapNotNull { doc ->
+                                if (!doc.exists()) return@mapNotNull null
+                                val members = doc.get("members") as? List<*>
+                                val memberUids = members?.filterIsInstance<String>() ?: emptyList()
+                                val peerUid = memberUids.firstOrNull { it != currentUid } ?: return@mapNotNull null
+                                if (peerUid !in lockedContactUids || doc.getBoolean("isGroup") == true) return@mapNotNull null
+                                val names = doc.get("memberNames") as? Map<*, *>
+                                val peerName = names?.get(peerUid) as? String ?: "Khahish User"
+                                Chat(
+                                    id = doc.id,
+                                    peerUid = peerUid,
+                                    name = peerName,
+                                    message = doc.getString("lastMessage") ?: "",
+                                    time = "",
+                                    initials = peerName.firstOrNull()?.uppercase() ?: "K",
+                                    memberUids = memberUids
+                                )
+                            }.sortedByDescending { chat ->
+                                documents.firstOrNull { it.id == chat.id }?.getLong("lastMessageAt") ?: 0L
+                            }
+                            loading = false
+                        }
                     }
-
-                    loading = false
-                }
+                    .addOnFailureListener { error ->
+                        if (active) {
+                            chatListError = error.message ?: "Could not load locked chats."
+                            loading = false
+                        }
+                    }
             }
+        } else {
+            registration = db.collection("chats")
+                .whereArrayContains("members", currentUid)
+                .addSnapshotListener { snapshot, error ->
+                    if (!active) return@addSnapshotListener
+                    if (error != null) {
+                        chatListError = error.message ?: "Could not load conversations."
+                        loading = false
+                        return@addSnapshotListener
+                    }
+                    if (snapshot != null) {
+                        chatListError = ""
+                        val docs = snapshot.documents
+                        chats = docs.mapNotNull { doc ->
+                            val members = doc.get("members") as? List<*>
+                            val memberUids = members?.filterIsInstance<String>() ?: emptyList()
+                            val peerUid = memberUids.firstOrNull { it != currentUid } ?: return@mapNotNull null
+                            val names = doc.get("memberNames") as? Map<*, *>
+                            val isGroup = doc.getBoolean("isGroup") == true
+                            val peerName = names?.get(peerUid) as? String ?: "Khahish User"
+                            val displayName = if (isGroup) doc.getString("groupName") ?: "Group chat" else peerName
+                            Chat(
+                                id = doc.id,
+                                peerUid = peerUid,
+                                name = displayName,
+                                message = doc.getString("lastMessage") ?: "",
+                                time = "",
+                                initials = displayName.firstOrNull()?.uppercase() ?: "K",
+                                isGroup = isGroup,
+                                memberUids = memberUids
+                            )
+                        }.filter { chat ->
+                            if (chat.isGroup) true else chat.peerUid !in lockedContactUids
+                        }.sortedByDescending { chat ->
+                            docs.firstOrNull { it.id == chat.id }?.getLong("lastMessageAt") ?: 0L
+                        }
+                        loading = false
+                    }
+                }
+        }
 
-        onDispose { registration.remove() }
+        onDispose {
+            active = false
+            registration?.remove()
+        }
     }
 
     DisposableEffect(currentUid) {
@@ -1482,6 +1701,23 @@ fun ChatList(
                 if (error != null || snapshot == null) return@addSnapshotListener
                 incomingRequests = snapshot.documents.map { doc ->
                     MessageRequestItem(doc.id, doc.getString("senderUid").orEmpty(), doc.getString("senderName").orEmpty().ifBlank { "Khahish User" }, doc.getString("senderUsername").orEmpty(), doc.getLong("createdAt") ?: 0L)
+                }.sortedByDescending { it.createdAt }
+            }
+        onDispose { registration.remove() }
+    }
+    DisposableEffect(currentUid) {
+        val registration = db.collection("messageRequests").whereEqualTo("senderUid", currentUid)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null || snapshot == null) return@addSnapshotListener
+                outgoingRequests = snapshot.documents.map { doc ->
+                    MessageRequestItem(
+                        doc.id,
+                        doc.getString("receiverUid").orEmpty(),
+                        doc.getString("receiverName").orEmpty().ifBlank { "Khahish User" },
+                        doc.getString("receiverUsername").orEmpty(),
+                        doc.getLong("createdAt") ?: 0L,
+                        doc.getString("status").orEmpty().ifBlank { "pending" }
+                    )
                 }.sortedByDescending { it.createdAt }
             }
         onDispose { registration.remove() }
@@ -1646,7 +1882,403 @@ fun ChatList(
             IconButton(onClick = { selectedPictureUrl = "" }, modifier = Modifier.align(Alignment.TopEnd)) { Icon(Icons.Default.Close, "Close", tint = Color.White) }
         }
     }
+    if (showRequestsScreen) {
+        Dialog(onDismissRequest = { showRequestsScreen = false }) {
+            Card(Modifier.fillMaxWidth(0.94f).heightIn(max = 620.dp), shape = RoundedCornerShape(24.dp)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Message Requests", Modifier.weight(1f), fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        IconButton(onClick = { showRequestsScreen = false }) { Icon(Icons.Default.Close, "Close") }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("Received", "Sent").forEach { label ->
+                            FilterChip(selected = requestsTab == label, onClick = { requestsTab = label }, label = { Text(label) })
+                        }
+                    }
+                    if (requestsTab == "Received") {
+                        if (incomingRequests.isEmpty()) Text("No received requests.", Modifier.padding(24.dp))
+                        else LazyColumn(Modifier.heightIn(max = 450.dp)) {
+                            items(incomingRequests, key = { "received-" + it.id }) { request ->
+                                Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                                    Text(request.senderName, fontWeight = FontWeight.SemiBold)
+                                    Text("Request is also available in your Chats list to accept or reject.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                HorizontalDivider()
+                            }
+                        }
+                    } else {
+                        if (outgoingRequests.isEmpty()) Text("No sent requests.", Modifier.padding(24.dp))
+                        else LazyColumn(Modifier.heightIn(max = 450.dp)) {
+                            items(outgoingRequests, key = { "sent-" + it.id }) { request ->
+                                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(request.senderName, fontWeight = FontWeight.SemiBold)
+                                        Text("Status: " + request.status.replaceFirstChar { it.uppercase() }, fontSize = 12.sp)
+                                    }
+                                    if (request.status == "pending") TextButton(onClick = {
+                                        db.collection("messageRequests").document(request.id).update(mapOf("status" to "cancelled", "cancelledAt" to System.currentTimeMillis()))
+                                            .addOnSuccessListener { showToast(context, "Request cancelled.") }
+                                            .addOnFailureListener { showToast(context, "Could not cancel request: " + it.message) }
+                                    }) { Text("Cancel", color = MaterialTheme.colorScheme.error) }
+                                }
+                                HorizontalDivider()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (showPeopleSearchDialog) {
+        PeopleSearchDialog(currentUid = currentUid, existingContacts = chats.filter { !it.isGroup }, onDismiss = { showPeopleSearchDialog = false }, onOpenChat = {
+            showPeopleSearchDialog = false
+            onOpen(it)
+        })
+    }
+private fun PeopleSearchDialog(
+    currentUid: String,
+    existingContacts: List<Chat>,
+    onDismiss: () -> Unit,
+    onOpenChat: (Chat) -> Unit
+) {
+    val db = remember { FirebaseFirestore.getInstance() }
+    val context = LocalContext.current
+    var selectedTab by remember { mutableStateOf("Username") }
+    var username by remember { mutableStateOf("") }
+    var contactQuery by remember { mutableStateOf("") }
+    var result by remember { mutableStateOf<AppUser?>(null) }
+    var searching by remember { mutableStateOf(false) }
+    var searchMessage by remember { mutableStateOf("Search by an exact username to find someone on Khahish.") }
+    val searchPrefs = remember { context.getSharedPreferences("khahish_people_search", Context.MODE_PRIVATE) }
+    var recentSearches by remember { mutableStateOf(searchPrefs.getStringSet("recent_usernames", emptySet())?.toList().orEmpty()) }
+
+    val filteredContacts = remember(existingContacts, contactQuery) {
+        existingContacts.filter {
+            it.name.contains(contactQuery.trim(), ignoreCase = true)
+        }
+    }
+
+    fun searchUsername(value: String = username) {
+        val term = normalizeKhahishUsername(value)
+        if (!isValidKhahishUsername(term)) {
+            searchMessage = "Username must be 3–20 characters: letters, numbers or _."
+            result = null
+            return
+        }
+        searching = true
+        result = null
+        searchMessage = "Searching…"
+        db.collection("usernames").document(term).get()
+            .addOnSuccessListener { claim ->
+                val targetUid = claim.getString("uid").orEmpty()
+                if (targetUid.isBlank() || targetUid == currentUid) {
+                    searching = false
+                    searchMessage = if (targetUid == currentUid) "This is your own username." else "No account found with @$term."
+                } else {
+                    db.collection("publicProfiles").document(targetUid).get()
+                        .addOnSuccessListener { profile ->
+                            searching = false
+                            val found = profile.toObject(AppUser::class.java)
+                            if (profile.exists() && found != null && found.uid == targetUid) {
+                                result = found
+                                searchMessage = ""
+                                val updatedRecent = (listOf(term) + recentSearches.filterNot { it == term }).take(6)
+                                recentSearches = updatedRecent
+                                searchPrefs.edit().putStringSet("recent_usernames", updatedRecent.toSet()).apply()
+                            } else {
+                                searchMessage = "This profile is not available."
+                            }
+                        }
+                        .addOnFailureListener {
+                            searching = false
+                            searchMessage = "Profile lookup failed: ${it.message ?: "Please try again."}"
+                        }
+                }
+            }
+            .addOnFailureListener {
+                searching = false
+                searchMessage = "Username search failed: ${it.message ?: "Please try again."}"
+            }
+    }
+
+    fun openOrRequestChat(user: AppUser) {
+        val chatId = privateChatId(currentUid, user.uid)
+        val chatRef = db.collection("chats").document(chatId)
+        chatRef.get()
+            .addOnSuccessListener { existing ->
+                val members = (existing.get("members") as? List<*>)?.filterIsInstance<String>().orEmpty()
+                if (existing.exists() && currentUid in members && user.uid in members) {
+                    onOpenChat(
+                        Chat(
+                            id = chatId,
+                            peerUid = user.uid,
+                            name = user.name.ifBlank { "Khahish User" },
+                            message = existing.getString("lastMessage").orEmpty(),
+                            time = "",
+                            initials = user.name.firstOrNull()?.uppercase() ?: "K"
+                        )
+                    )
+                    return@addOnSuccessListener
+                }
+
+                val requestRef = db.collection("messageRequests").document(chatId)
+                requestRef.get()
+                    .addOnSuccessListener { request ->
+                        val status = request.getString("status").orEmpty()
+                        when {
+                            !request.exists() || status == "cancelled" -> {
+                                val now = System.currentTimeMillis()
+                                val senderName = FirebaseAuth.getInstance().currentUser?.displayName
+                                    ?.takeIf { it.isNotBlank() } ?: "Khahish User"
+                                requestRef.set(
+                                    mapOf(
+                                        "senderUid" to currentUid,
+                                        "receiverUid" to user.uid,
+                                        "senderName" to senderName,
+                                        "senderUsername" to "",
+                                        "receiverName" to user.name,
+                                        "status" to "pending",
+                                        "createdAt" to now
+                                    )
+                                ).addOnSuccessListener {
+                                    showToast(context, "Message request sent. Chat opens after acceptance.")
+                                    onDismiss()
+                                }.addOnFailureListener {
+                                    showToast(context, "Request failed: ${it.message}")
+                                }
+                            }
+                            status == "pending" && request.getString("senderUid") == currentUid ->
+                                showToast(context, "Your message request is already pending.")
+                            status == "pending" ->
+                                showToast(context, "This person has already requested to chat. Accept it from Chats.")
+                            status == "rejected" ->
+                                showToast(context, "This person rejected the request. Chat cannot start.")
+                            status == "accepted" ->
+                                showToast(context, "This request was accepted. Open your Chats list to continue.")
+                            else -> showToast(context, "A chat request already exists.")
+                        }
+                    }
+                    .addOnFailureListener {
+                        showToast(context, "Request lookup failed: ${it.message}")
+                    }
+            }
+            .addOnFailureListener {
+                showToast(context, "Chat lookup failed: ${it.message}")
+            }
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.94f)
+                .heightIn(max = 700.dp),
+            shape = RoundedCornerShape(28.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 16.dp)
+        ) {
+            Column(Modifier.fillMaxWidth()) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(
+                            Brush.linearGradient(
+                                listOf(Color(0xFF063D35), Color(0xFF087C65), Color(0xFF18A889))
+                            )
+                        )
+                        .padding(start = 20.dp, end = 12.dp, top = 18.dp, bottom = 20.dp)
+                ) {
+                    Column(Modifier.align(Alignment.CenterStart)) {
+                        Text("Find People", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(4.dp))
+                        Text("Connect with people on Khahish", color = Color.White.copy(alpha = 0.86f), fontSize = 12.sp)
+                    }
+                    IconButton(onClick = onDismiss, modifier = Modifier.align(Alignment.TopEnd)) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                    }
+                }
+
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp))
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    listOf("Username", "New Contact").forEach { tab ->
+                        val selected = selectedTab == tab
+                        Box(
+                            Modifier.weight(1f)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (selected) Green else Color.Transparent)
+                                .clickable { selectedTab = tab }
+                                .padding(vertical = 11.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                tab,
+                                color = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+                }
+
+                if (selectedTab == "Username") {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp)) {
+                        OutlinedTextField(
+                            value = username,
+                            onValueChange = {
+                                username = it.lowercase(Locale.ROOT)
+                                    .filter { ch -> ch in 'a'..'z' || ch in '0'..'9' || ch == '_' }
+                                    .take(20)
+                                result = null
+                                searchMessage = "Tap Search to find this username."
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            placeholder = { Text("Enter username") },
+                            leadingIcon = { Text("@", color = Green, fontWeight = FontWeight.Bold) },
+                            shape = RoundedCornerShape(18.dp)
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Button(
+                            onClick = { searchUsername() },
+                            enabled = !searching,
+                            modifier = Modifier.fillMaxWidth().height(50.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Green)
+                        ) {
+                            if (searching) {
+                                CircularProgressIndicator(Modifier.size(19.dp), color = Color.White, strokeWidth = 2.dp)
+                                Spacer(Modifier.width(9.dp))
+                            }
+                            Text(if (searching) "Searching…" else "Search", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        if (result != null) {
+                            val found = result!!
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .clickable { openOrRequestChat(found) }
+                                    .padding(13.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (found.photoUrl.isNotBlank()) {
+                                        AsyncImage(found.photoUrl, contentDescription = "Profile photo", modifier = Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop)
+                                    } else {
+                                        Text(found.name.firstOrNull()?.uppercase() ?: "K", color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(found.name.ifBlank { "Khahish User" }, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                                    Text("@${found.username.ifBlank { normalizeKhahishUsername(username) }}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                                }
+                                Icon(Icons.Default.Chat, contentDescription = "Open or request chat", tint = Green)
+                            }
+                        } else if (searchMessage.isNotBlank()) {
+                            Text(
+                                searchMessage,
+                                Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 12.sp,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                        if (recentSearches.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            Text("Recent Searches", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                            recentSearches.forEach { recent ->
+                                Row(
+                                    Modifier.fillMaxWidth().clickable {
+                                        username = recent
+                                        searchUsername(recent)
+                                    }.padding(vertical = 9.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.History, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Spacer(Modifier.width(10.dp))
+                                    Text("@$recent", Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
+                                    Icon(Icons.Default.NorthWest, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(17.dp))
+                                }
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                            }
+                        }
+                    }
+                } else {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp)) {
+                        OutlinedTextField(
+                            value = contactQuery,
+                            onValueChange = { contactQuery = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            placeholder = { Text("Search your contacts") },
+                            leadingIcon = { Icon(Icons.Default.Search, null) },
+                            shape = RoundedCornerShape(18.dp)
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        if (filteredContacts.isEmpty()) {
+                            Text(
+                                "Your existing private-chat contacts will appear here.",
+                                Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                                fontSize = 12.sp
+                            )
+                        } else {
+                            LazyColumn(Modifier.heightIn(max = 330.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                items(filteredContacts, key = { it.peerUid }) { contact ->
+                                    Row(
+                                        Modifier.fillMaxWidth().clip(RoundedCornerShape(15.dp))
+                                            .clickable { onOpenChat(contact) }
+                                            .padding(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Box(
+                                            Modifier.size(42.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(contact.initials, color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold)
+                                        }
+                                        Spacer(Modifier.width(11.dp))
+                                        Column(Modifier.weight(1f)) {
+                                            Text(contact.name, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                                            Text("Open conversation", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                                        }
+                                        Icon(Icons.Default.ChevronRight, null, tint = Green)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+        }
+    }
+}
+
     Column(modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 8.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Chats", Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            if (incomingRequests.isNotEmpty() || outgoingRequests.isNotEmpty()) {
+                TextButton(onClick = { requestsTab = "Received"; showRequestsScreen = true }) {
+                    Text("Requests " + (incomingRequests.size + outgoingRequests.count { it.status == "pending" }), color = Green)
+                }
+            }
+            IconButton(onClick = { showPeopleSearchDialog = true }) {
+                Icon(Icons.Default.PersonSearch, contentDescription = "Find people", tint = Green)
+            }
+        }
         OutlinedTextField(
             value = search,
             onValueChange = { search = it },
@@ -1880,6 +2512,7 @@ fun ChatList(
         }
     }
 }
+
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun ConversationScreen(
