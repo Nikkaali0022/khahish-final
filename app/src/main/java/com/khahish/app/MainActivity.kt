@@ -357,6 +357,43 @@ fun KhahishApp() {
     val tabOrder = listOf("Chats", "Contacts", "Updates", "Calls", "Settings")
     var selectedChat by remember { mutableStateOf<Chat?>(null) }
     var profileTargetUid by remember { mutableStateOf("") }
+    var lockedContactUids by remember(currentUser?.uid) {
+        mutableStateOf(KhahishSecretChatLock.lockedUids(appContext, currentUser?.uid.orEmpty()))
+    }
+    var secretPasswordHasPassword by remember { mutableStateOf(false) }
+    var secretUnlockExpiresAtMs by remember { mutableStateOf(0L) }
+    var showLockedChats by remember { mutableStateOf(false) }
+    var showSecretPasswordDialog by remember { mutableStateOf(false) }
+    var secretPasswordCreateMode by remember { mutableStateOf(false) }
+    var pendingLockedChat by remember { mutableStateOf<Chat?>(null) }
+    var openedChatFromLockedChats by remember { mutableStateOf(false) }
+    var showLockPasswordSettings by remember { mutableStateOf(false) }
+    var brandTapCount by remember { mutableStateOf(0) }
+    var lastBrandTapAt by remember { mutableStateOf(0L) }
+
+    fun openChatWithLockCheck(chat: Chat) {
+        if (!chat.isGroup && chat.peerUid in lockedContactUids) {
+            pendingLockedChat = chat
+            secretPasswordCreateMode = false
+            showSecretPasswordDialog = true
+        } else {
+            openedChatFromLockedChats = false
+            selectedChat = chat
+        }
+    }
+
+    fun handleKhahishBrandTap() {
+        val now = System.currentTimeMillis()
+        if (now - lastBrandTapAt > 2200L) brandTapCount = 0
+        lastBrandTapAt = now
+        brandTapCount += 1
+        if (brandTapCount >= 4) {
+            brandTapCount = 0
+            secretPasswordCreateMode = !secretPasswordHasPassword
+            pendingLockedChat = null
+            showSecretPasswordDialog = true
+        }
+    }
     var showNewChat by remember { mutableStateOf(false) }
     var showNewGroup by remember { mutableStateOf(false) }
     var activeCall by remember { mutableStateOf<KhahishCall?>(null) }
@@ -374,6 +411,42 @@ fun KhahishApp() {
         }
         auth.addAuthStateListener(listener)
         onDispose { auth.removeAuthStateListener(listener) }
+    }
+
+    LaunchedEffect(currentUser?.uid) {
+        val uid = currentUser?.uid
+        if (uid.isNullOrBlank()) {
+            lockedContactUids = emptySet()
+            secretPasswordHasPassword = false
+            secretUnlockExpiresAtMs = 0L
+        } else {
+            KhahishSecretChatApi.loadConfig(
+                onSuccess = { config ->
+                    lockedContactUids = config.lockedContactUids
+                    secretPasswordHasPassword = config.hasPassword
+                    KhahishSecretChatLock.saveLockedUids(appContext, uid, config.lockedContactUids)
+                },
+                onError = { message ->
+                    Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
+                }
+            )
+        }
+    }
+
+    LaunchedEffect(secretUnlockExpiresAtMs) {
+        val expiry = secretUnlockExpiresAtMs
+        if (expiry > 0L) {
+            val waitMs = (expiry - System.currentTimeMillis()).coerceAtLeast(0L)
+            delay(waitMs)
+            if (secretUnlockExpiresAtMs == expiry) {
+                if (selectedChat?.peerUid in lockedContactUids) selectedChat = null
+                showLockedChats = false
+                openedChatFromLockedChats = false
+                secretUnlockExpiresAtMs = 0L
+                KhahishSecretChatApi.lock()
+                Toast.makeText(appContext, "Locked Chats were secured again.", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     val hostActivity = appContext as? MainActivity
@@ -552,12 +625,27 @@ fun KhahishApp() {
 
     BackHandler(
         enabled = currentUser != null &&
-            (selectedChat != null || showNewChat || showNewGroup || profileTargetUid.isNotBlank() || tab != "Chats" || (activeCall != null && isCallMinimized))
+            (selectedChat != null || showNewChat || showNewGroup || showLockedChats || profileTargetUid.isNotBlank() || tab != "Chats" || (activeCall != null && isCallMinimized))
     ) {
         when {
             activeCall != null && isCallMinimized -> isCallMinimized = false
             profileTargetUid.isNotBlank() -> profileTargetUid = ""
-            selectedChat != null -> selectedChat = null
+            selectedChat != null -> {
+                val wasLockedChat = selectedChat?.peerUid in lockedContactUids
+                selectedChat = null
+                if (openedChatFromLockedChats) {
+                    showLockedChats = true
+                } else if (wasLockedChat) {
+                    secretUnlockExpiresAtMs = 0L
+                    KhahishSecretChatApi.lock()
+                }
+                openedChatFromLockedChats = false
+            }
+            showLockedChats -> {
+                showLockedChats = false
+                secretUnlockExpiresAtMs = 0L
+                KhahishSecretChatApi.lock()
+            }
             showNewGroup -> showNewGroup = false
             showNewChat -> showNewChat = false
             tab != "Chats" -> tab = "Chats"
