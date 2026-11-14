@@ -73,7 +73,7 @@ private data class KhahishStory(
     val mediaType: String,
     val createdAt: Long,
     val expiresAt: Long,
-    val audience: String = "everyone",
+    val audience: String = "my_friends",
     val linkUrl: String = ""
 )
 
@@ -452,7 +452,7 @@ fun KhahishUpdatesScreen(
                     val expires = doc.getLong("expiresAt") ?: 0L
                     if (expires <= now) return@mapNotNull null
                     val ownerUid = doc.getString("ownerUid").orEmpty()
-                    val audience = doc.getString("audience") ?: "everyone"
+                    val audience = doc.getString("audience") ?: "my_friends"
                     KhahishStory(
                         id = doc.id,
                         ownerUid = ownerUid,
@@ -560,7 +560,7 @@ fun KhahishUpdatesScreen(
                 Text("Change", color = Green)
             }
             DropdownMenu(expanded = audienceMenu, onDismissRequest = { audienceMenu = false }) {
-                listOf("close_friends" to "Close Friends", "my_contacts" to "My Contacts", "my_friends" to "My Friends", "everyone" to "Everyone").forEach { (value, label) ->
+                listOf("close_friends" to "Close Friends", "my_contacts" to "My Contacts", "my_friends" to "My Friends", "only_share_with" to "Only share with").forEach { (value, label) ->
                     DropdownMenuItem(text = { Text(label) }, onClick = { storyAudience = value; audienceMenu = false; if (value == "only_share_with") openOnlyShareWith() })
                 }
             }
@@ -1013,13 +1013,14 @@ fun KhahishUpdatesScreen(
                                     "close_friends" -> "Close Friends"
                                     "my_contacts" -> "My Contacts"
                                     "my_friends" -> "My Friends"
-                                    else -> "Everyone"
+                                    "only_share_with" -> "Only share with"
+                                    else -> "My Friends"
                                 },
                                 color = Color(0xFF70D7B8)
                             )
                         }
                         DropdownMenu(expanded = editorAudienceMenu, onDismissRequest = { editorAudienceMenu = false }) {
-                            listOf("close_friends" to "Close Friends", "my_contacts" to "My Contacts", "my_friends" to "My Friends", "everyone" to "Everyone").forEach { (value, label) ->
+                            listOf("close_friends" to "Close Friends", "my_contacts" to "My Contacts", "my_friends" to "My Friends", "only_share_with" to "Only share with").forEach { (value, label) ->
                                 DropdownMenuItem(text = { Text(label) }, onClick = { storyAudience = value; editorAudienceMenu = false; if (value == "only_share_with") openOnlyShareWith() })
                             }
                         }
@@ -1133,7 +1134,8 @@ fun KhahishUpdatesScreen(
                                         "close_friends" -> "Close Friends"
                                         "my_contacts" -> "My Contacts"
                                         "my_friends" -> "My Friends"
-                                        else -> "Everyone"
+                                        "only_share_with" -> "Only share with"
+                                    else -> "My Friends"
                                     },
                                     color = Green
                                 )
@@ -1146,7 +1148,7 @@ fun KhahishUpdatesScreen(
                                     "close_friends" to "Close Friends",
                                     "my_contacts" to "My Contacts",
                                     "my_friends" to "My Friends",
-                                    "everyone" to "Everyone"
+                                    "only_share_with" to "Only share with"
                                 ).forEach { (value, label) ->
                                     DropdownMenuItem(
                                         text = { Text(label) },
