@@ -1026,7 +1026,9 @@ fun KhahishUpdatesScreen(
                                 Text("${storyViewers.size} views", color = Color.White, fontSize = 12.sp)
                             }
                         } else {
-                            IconButton(onClick = {
+                            IconButton(
+                                modifier = Modifier.size(36.dp),
+                                onClick = {
                                 val likeRef = db.collection("stories").document(story.id).collection("likes").document(currentUid)
                                 if (story.id in likedStoryIds) {
                                     likeRef.delete().addOnSuccessListener { likedStoryIds = likedStoryIds - story.id }
@@ -1039,7 +1041,7 @@ fun KhahishUpdatesScreen(
                                         .addOnFailureListener { Toast.makeText(context, "Could not like story: ${it.message}", Toast.LENGTH_LONG).show() }
                                 }
                             }) {
-                                Icon(Icons.Default.Favorite, "Like story", tint = if (story.id in likedStoryIds) Color(0xFFFF5A75) else Color.White)
+                                Icon(Icons.Default.Favorite, "Like story", tint = if (story.id in likedStoryIds) Color(0xFFFF5A75) else Color.White, modifier = Modifier.size(19.dp))
                             }
                         }
                     }
