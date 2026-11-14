@@ -3890,6 +3890,7 @@ fun ConversationScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 10.dp, vertical = 8.dp)
                 .padding(bottom = 6.dp)
+                .imePadding()
                 .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(30.dp))
                 .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(30.dp))
                 .padding(horizontal = 5.dp, vertical = 4.dp),
@@ -5991,7 +5992,8 @@ private fun KhahishUserProfileScreen(
                     }
                 }
                 Spacer(Modifier.height(16.dp))
-                Text(name, color = MaterialTheme.colorScheme.onBackground, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                Text(nickname.ifBlank { name }, color = MaterialTheme.colorScheme.onBackground, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                if (nickname.isNotBlank()) Text(name, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 if (username.isNotBlank()) Text("@$username", color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)
                 Text(if (online) "Online" else "Khahish member", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 if (bio.isNotBlank()) {
@@ -6031,7 +6033,7 @@ private fun KhahishUserProfileScreen(
                 Spacer(Modifier.height(22.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Button(
-                        onClick = { onStartCall(uid, name, false) },
+                        onClick = { onStartCall(uid, nickname.ifBlank { name }, false) },
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(containerColor = Green)
                     ) {
@@ -6040,7 +6042,7 @@ private fun KhahishUserProfileScreen(
                         Text("Voice")
                     }
                     OutlinedButton(
-                        onClick = { onStartCall(uid, name, true) },
+                        onClick = { onStartCall(uid, nickname.ifBlank { name }, true) },
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(Icons.Default.Videocam, null)
