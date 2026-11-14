@@ -12,6 +12,7 @@ on:
       - "firestore.indexes.json"
       - "firebase.json"
       - "tests/**"
+      - "functions/**"
       - "package.json"
       - ".github/workflows/firestore-rules.yml"
   push:
