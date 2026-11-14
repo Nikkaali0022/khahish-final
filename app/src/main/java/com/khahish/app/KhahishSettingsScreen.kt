@@ -76,6 +76,10 @@ fun KhahishSettingsScreen(
     var showAppearance by remember { mutableStateOf(false) }
     var showStorage by remember { mutableStateOf(false) }
     var showSupport by remember { mutableStateOf(false) }
+    var adminTapCount by remember { mutableStateOf(0) }
+    var lastAdminTapAt by remember { mutableStateOf(0L) }
+    var showAdminPassword by remember { mutableStateOf(false) }
+    var showAdminPanel by remember { mutableStateOf(false) }
     var supportSubject by remember { mutableStateOf("") }
     var supportMessage by remember { mutableStateOf("") }
     var submittingSupport by remember { mutableStateOf(false) }
@@ -132,6 +136,11 @@ fun KhahishSettingsScreen(
                     Toast.makeText(context, "Unable to load blocked accounts: ${it.message}", Toast.LENGTH_LONG).show()
                 }
         }
+    }
+
+    if (showAdminPanel) {
+        KhahishAdminPanelScreen(onBack = { showAdminPanel = false })
+        return
     }
 
     if (showAdvanced) {
@@ -479,9 +488,20 @@ fun KhahishSettingsScreen(
                     ),
                     shape = RoundedCornerShape(28.dp)
                 )
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .clickable {
+                    val now = System.currentTimeMillis()
+                    if (now - lastAdminTapAt > 3000L) adminTapCount = 0
+                    lastAdminTapAt = now
+                    adminTapCount += 1
+                    if (adminTapCount >= 10) {
+                        adminTapCount = 0
+                        showAdminPassword = true
+                    }
+                },
             contentAlignment = Alignment.Center
         ) {
+            // Ten quick taps on this developer credit open the owner-only access check.
             // Soft emerald wave accents along the lower edge.
             Box(
                 Modifier
@@ -539,6 +559,16 @@ fun KhahishSettingsScreen(
         }
         Spacer(Modifier.height(28.dp))
         }
+    }
+
+    if (showAdminPassword) {
+        KhahishAdminPasswordDialog(
+            onDismiss = { showAdminPassword = false },
+            onUnlocked = {
+                showAdminPassword = false
+                showAdminPanel = true
+            }
+        )
     }
 
     if (showLockChatPasswordDialog) {
