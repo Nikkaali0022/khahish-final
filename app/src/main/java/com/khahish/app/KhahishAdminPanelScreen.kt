@@ -376,7 +376,7 @@ fun KhahishAdminPanelScreen(onBack: () -> Unit) {
             )
         ).addOnSuccessListener {
             audit("maintenance_mode_changed", "", enabled.toString())
-            notice = "Global setting saved. App-side maintenance enforcement is a separate client update."
+            notice = "Global setting saved. Maintenance mode applies to non-owner signed-in users immediately."
         }.addOnFailureListener { error = it.localizedMessage ?: "Could not save setting." }
     }
 
@@ -622,7 +622,7 @@ fun KhahishAdminPanelScreen(onBack: () -> Unit) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("Maintenance mode", fontWeight = FontWeight.SemiBold)
-                            Text("Saves the global maintenance flag in Firestore.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                            Text("Immediately blocks non-owner app access while maintenance is enabled.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
                         }
                         Switch(checked = maintenanceMode, onCheckedChange = { saveMaintenanceSettings(it) })
                     }
@@ -636,7 +636,7 @@ fun KhahishAdminPanelScreen(onBack: () -> Unit) {
                     Button(onClick = { saveMaintenanceSettings(maintenanceMode) }, modifier = Modifier.fillMaxWidth()) {
                         Text("Save app settings")
                     }
-                    Text("Note: the flag is stored securely. The normal app screens still need to read this config before maintenance mode can block app access.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                    Text("The Owner account keeps access to the app and Admin Panel while maintenance mode is enabled.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
                 }
             }
 
