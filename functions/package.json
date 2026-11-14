@@ -1,0 +1,16 @@
+{
+  "name": "khahish-admin-functions",
+  "private": true,
+  "description": "Trusted Firebase backend for Khahish owner administration",
+  "engines": {
+    "node": "20"
+  },
+  "main": "index.js",
+  "scripts": {
+    "lint": "node --check index.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.0.2",
+    "firebase-functions": "^6.3.2"
+  }
+}
