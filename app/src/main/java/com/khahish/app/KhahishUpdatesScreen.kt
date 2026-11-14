@@ -73,7 +73,7 @@ private data class KhahishStory(
     val mediaType: String,
     val createdAt: Long,
     val expiresAt: Long,
-    val audience: String = "everyone",
+    val audience: String = "my_friends",
     val linkUrl: String = ""
 )
 
@@ -109,7 +109,10 @@ fun KhahishUpdatesScreen(
     var voiceStoryPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
     var voiceStoryPlaying by remember { mutableStateOf(false) }
     var videoPlayerUrl by remember { mutableStateOf("") }
-    var storyAudience by remember { mutableStateOf("everyone") }
+    var storyAudience by remember { mutableStateOf("my_friends") }
+    var acceptedFriends by remember { mutableStateOf(emptyList<Pair<String, String>>()) }
+    var onlyShareSelected by remember { mutableStateOf(setOf<String>()) }
+    var showOnlyShareDialog by remember { mutableStateOf(false) }
     var audienceMenu by remember { mutableStateOf(false) }
     var showAudienceListDialog by remember { mutableStateOf(false) }
     var audienceListType by remember { mutableStateOf("closeFriends") }
@@ -126,6 +129,55 @@ fun KhahishUpdatesScreen(
     var viewedStoryIds by remember { mutableStateOf(setOf<String>()) }
     var currentPhotoUrl by remember(currentUid) { mutableStateOf("") }
     var ownerPhotos by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+
+    fun loadAcceptedFriends(onDone: (() -> Unit)? = null) {
+        val acceptedByMe = db.collection("messageRequests")
+            .whereEqualTo("senderUid", currentUid)
+            .whereEqualTo("status", "accepted")
+        val acceptedByOthers = db.collection("messageRequests")
+            .whereEqualTo("receiverUid", currentUid)
+            .whereEqualTo("status", "accepted")
+
+        com.google.android.gms.tasks.Tasks.whenAllSuccess<com.google.firebase.firestore.QuerySnapshot>(
+            acceptedByMe.get(),
+            acceptedByOthers.get()
+        ).addOnSuccessListener { results ->
+            val friends = linkedMapOf<String, String>()
+            results.filterIsInstance<com.google.firebase.firestore.QuerySnapshot>().forEach { snapshot ->
+                snapshot.documents.forEach { request ->
+                    val senderUid = request.getString("senderUid").orEmpty()
+                    val receiverUid = request.getString("receiverUid").orEmpty()
+                    val peerUid = when (currentUid) {
+                        senderUid -> receiverUid
+                        receiverUid -> senderUid
+                        else -> ""
+                    }
+                    if (peerUid.isNotBlank() && peerUid != currentUid) {
+                        val peerName = if (currentUid == senderUid) {
+                            request.getString("receiverName")
+                        } else {
+                            request.getString("senderName")
+                        }
+                        friends[peerUid] = peerName?.takeIf { it.isNotBlank() } ?: "Khahish User"
+                    }
+                }
+            }
+            acceptedFriends = friends.entries
+                .map { it.key to it.value }
+                .sortedBy { it.second.lowercase(Locale.ROOT) }
+            onDone?.invoke()
+        }.addOnFailureListener {
+            Toast.makeText(context, "Could not load accepted friends: ${it.message}", Toast.LENGTH_LONG).show()
+            onDone?.invoke()
+        }
+    }
+
+    fun openOnlyShareWith() {
+        loadAcceptedFriends {
+            onlyShareSelected = onlyShareSelected.intersect(acceptedFriends.map { it.first }.toSet())
+            showOnlyShareDialog = true
+        }
+    }
 
     fun loadAudienceList() {
         audienceListLoading = true
@@ -196,24 +248,46 @@ fun KhahishUpdatesScreen(
 
         fun saveForAudience(uids: List<String>) {
             val allowed = uids.filter { it.isNotBlank() && it != currentUid }.distinct().take(500)
-            if (storyAudience != "everyone" && allowed.isEmpty()) {
+            if (allowed.isEmpty()) {
                 Toast.makeText(context, "No people are in this audience list yet. Add people first.", Toast.LENGTH_LONG).show()
                 return
             }
             data["allowedUids"] = allowed
             db.collection("stories").add(data)
-                .addOnSuccessListener { Toast.makeText(context, "Story shared for 24 hours", Toast.LENGTH_SHORT).show() }
+                .addOnSuccessListener { storyRef ->
+                    val feedBatch = db.batch()
+                    allowed.forEach { viewerUid ->
+                        val feedRef = db.collection("users").document(viewerUid)
+                            .collection("storyFeed").document(currentUid)
+                            .collection("stories").document(storyRef.id)
+                        feedBatch.set(feedRef, mapOf(
+                            "ownerUid" to currentUid,
+                            "viewerUid" to viewerUid,
+                            "storyId" to storyRef.id,
+                            "createdAt" to now,
+                            "expiresAt" to (now + 24L * 60L * 60L * 1000L)
+                        ))
+                    }
+                    feedBatch.commit()
+                        .addOnSuccessListener {
+                            Toast.makeText(context, "Story shared for 24 hours", Toast.LENGTH_SHORT).show()
+                        }
+                        .addOnFailureListener {
+                            Toast.makeText(context, "Story saved, but friend feed update failed: ${it.message}", Toast.LENGTH_LONG).show()
+                        }
+                }
                 .addOnFailureListener { Toast.makeText(context, "Story failed: ${it.message}", Toast.LENGTH_LONG).show() }
         }
 
+        loadAcceptedFriends {
+        val acceptedUids = acceptedFriends.map { it.first }.toSet()
         when (storyAudience) {
-            "everyone" -> saveForAudience(emptyList())
-            "close_friends", "my_friends" -> {
-                val listName = if (storyAudience == "close_friends") "closeFriends" else "friends"
-                db.collection("users").document(currentUid).collection(listName).get()
-                    .addOnSuccessListener { snapshot -> saveForAudience(snapshot.documents.map { it.id }) }
+            "close_friends" -> {
+                db.collection("users").document(currentUid).collection("closeFriends").get()
+                    .addOnSuccessListener { snapshot -> saveForAudience(snapshot.documents.map { it.id }.filter { it in acceptedUids }) }
                     .addOnFailureListener { Toast.makeText(context, "Could not load audience: ${it.message}", Toast.LENGTH_LONG).show() }
             }
+            "my_friends" -> saveForAudience(acceptedUids.toList())
             "my_contacts" -> {
                 db.collection("chats").whereArrayContains("visibleToUids", currentUid).get()
                     .addOnSuccessListener { snapshot ->
@@ -223,10 +297,13 @@ fun KhahishUpdatesScreen(
                                 members.filterIsInstance<String>().filter { it != currentUid }
                             } else emptyList()
                         }
-                        saveForAudience(recipients)
+                        saveForAudience(recipients.filter { it in acceptedUids })
                     }
                     .addOnFailureListener { Toast.makeText(context, "Could not load contacts: ${it.message}", Toast.LENGTH_LONG).show() }
             }
+            "only_share_with" -> saveForAudience(onlyShareSelected.filter { it in acceptedUids })
+            else -> saveForAudience(acceptedUids.toList())
+        }
         }
     }
 
@@ -410,18 +487,72 @@ fun KhahishUpdatesScreen(
     }
 
     DisposableEffect(currentUid) {
-        val publicDocs = mutableMapOf<String, com.google.firebase.firestore.DocumentSnapshot>()
+        val sentRequests = mutableMapOf<String, com.google.firebase.firestore.DocumentSnapshot>()
+        val receivedRequests = mutableMapOf<String, com.google.firebase.firestore.DocumentSnapshot>()
+
+        fun refreshAcceptedFriends() {
+            val friends = linkedMapOf<String, String>()
+            (sentRequests.values + receivedRequests.values).forEach { request ->
+                if (request.getString("status") != "accepted") return@forEach
+                val senderUid = request.getString("senderUid").orEmpty()
+                val receiverUid = request.getString("receiverUid").orEmpty()
+                val peerUid = when (currentUid) {
+                    senderUid -> receiverUid
+                    receiverUid -> senderUid
+                    else -> ""
+                }
+                if (peerUid.isNotBlank() && peerUid != currentUid) {
+                    val peerName = if (currentUid == senderUid) {
+                        request.getString("receiverName")
+                    } else {
+                        request.getString("senderName")
+                    }
+                    friends[peerUid] = peerName?.takeIf { it.isNotBlank() } ?: "Khahish User"
+                }
+            }
+            acceptedFriends = friends.entries
+                .map { it.key to it.value }
+                .sortedBy { it.second.lowercase(Locale.ROOT) }
+        }
+
+        val sentListener = db.collection("messageRequests")
+            .whereEqualTo("senderUid", currentUid)
+            .whereEqualTo("status", "accepted")
+            .addSnapshotListener { snapshot, error ->
+                if (error == null) {
+                    sentRequests.clear()
+                    snapshot?.documents?.forEach { sentRequests[it.id] = it }
+                    refreshAcceptedFriends()
+                }
+            }
+        val receivedListener = db.collection("messageRequests")
+            .whereEqualTo("receiverUid", currentUid)
+            .whereEqualTo("status", "accepted")
+            .addSnapshotListener { snapshot, error ->
+                if (error == null) {
+                    receivedRequests.clear()
+                    snapshot?.documents?.forEach { receivedRequests[it.id] = it }
+                    refreshAcceptedFriends()
+                }
+            }
+        onDispose {
+            sentListener.remove()
+            receivedListener.remove()
+        }
+    }
+
+    DisposableEffect(currentUid, acceptedFriends) {
         val ownerDocs = mutableMapOf<String, com.google.firebase.firestore.DocumentSnapshot>()
-        val allowedDocs = mutableMapOf<String, com.google.firebase.firestore.DocumentSnapshot>()
+        val friendDocs = mutableMapOf<String, com.google.firebase.firestore.DocumentSnapshot>()
         fun refreshStories() {
             val now = System.currentTimeMillis()
-            stories = (publicDocs.values + ownerDocs.values + allowedDocs.values)
+            stories = (ownerDocs.values + friendDocs.values)
                 .distinctBy { it.id }
                 .mapNotNull { doc ->
                     val expires = doc.getLong("expiresAt") ?: 0L
                     if (expires <= now) return@mapNotNull null
                     val ownerUid = doc.getString("ownerUid").orEmpty()
-                    val audience = doc.getString("audience") ?: "everyone"
+                    val audience = doc.getString("audience") ?: "my_friends"
                     KhahishStory(
                         id = doc.id,
                         ownerUid = ownerUid,
@@ -437,37 +568,48 @@ fun KhahishUpdatesScreen(
                 }.sortedByDescending { it.createdAt }
             loading = false
         }
-        val publicListener = db.collection("stories").whereEqualTo("audience", "everyone")
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    loading = false
-                    Toast.makeText(context, "Unable to load public updates: ${error.message}", Toast.LENGTH_LONG).show()
-                } else {
-                    publicDocs.clear()
-                    snapshot?.documents?.forEach { publicDocs[it.id] = it }
-                    refreshStories()
-                }
-            }
         val ownerListener = db.collection("stories").whereEqualTo("ownerUid", currentUid)
             .addSnapshotListener { snapshot, error ->
                 if (error == null) {
                     ownerDocs.clear()
                     snapshot?.documents?.forEach { ownerDocs[it.id] = it }
                     refreshStories()
+                } else {
+                    loading = false
+                    Toast.makeText(context, "Unable to load your stories: ${error.message}", Toast.LENGTH_LONG).show()
                 }
             }
-        val allowedListener = db.collection("stories").whereArrayContains("allowedUids", currentUid)
-            .addSnapshotListener { snapshot, error ->
-                if (error == null) {
-                    allowedDocs.clear()
-                    snapshot?.documents?.forEach { allowedDocs[it.id] = it }
-                    refreshStories()
+        val friendListeners = acceptedFriends.map { (friendUid, _) ->
+            db.collection("users").document(currentUid)
+                .collection("storyFeed").document(friendUid)
+                .collection("stories")
+                .addSnapshotListener { snapshot, error ->
+                    if (error == null) {
+                        val feedStoryIds = snapshot?.documents.orEmpty().map { it.id }.toSet()
+                        friendDocs.entries.removeAll {
+                            it.value.getString("ownerUid") == friendUid && it.key !in feedStoryIds
+                        }
+                        snapshot?.documents?.forEach { feedEntry ->
+                            db.collection("stories").document(feedEntry.id).get()
+                                .addOnSuccessListener { storyDoc ->
+                                    if (storyDoc.exists()) {
+                                        friendDocs[storyDoc.id] = storyDoc
+                                    } else {
+                                        friendDocs.remove(feedEntry.id)
+                                    }
+                                    refreshStories()
+                                }
+                        }
+                        refreshStories()
+                    } else {
+                        loading = false
+                        Toast.makeText(context, "Unable to load a friend's status: ${error.message}", Toast.LENGTH_LONG).show()
+                    }
                 }
-            }
+        }
         onDispose {
-            publicListener.remove()
             ownerListener.remove()
-            allowedListener.remove()
+            friendListeners.forEach { it.remove() }
         }
     }
 
@@ -487,11 +629,11 @@ fun KhahishUpdatesScreen(
                     Icon(Icons.Default.MoreVert, "Update options", tint = MaterialTheme.colorScheme.onSurface)
                 }
                 DropdownMenu(expanded = updatesMenu, onDismissRequest = { updatesMenu = false }) {
-                    listOf("close_friends" to "Close Friends", "my_contacts" to "My Contacts", "my_friends" to "My Friends", "everyone" to "Everyone").forEach { (value, label) ->
+                    listOf("close_friends" to "Close Friends", "my_contacts" to "My Contacts", "my_friends" to "My Friends", "only_share_with" to "Only share with").forEach { (value, label) ->
                         DropdownMenuItem(
                             text = { Text(if (storyAudience == value) "✓ $label" else label) },
                             leadingIcon = { Icon(Icons.Default.Lock, null) },
-                            onClick = { storyAudience = value; updatesMenu = false }
+                            onClick = { storyAudience = value; updatesMenu = false; if (value == "only_share_with") openOnlyShareWith() }
                         )
                     }
                     DropdownMenuItem(
@@ -503,11 +645,6 @@ fun KhahishUpdatesScreen(
                         text = { Text("Manage Close Friends") },
                         leadingIcon = { Icon(Icons.Default.People, null) },
                         onClick = { updatesMenu = false; openAudienceList("closeFriends") }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Manage My Friends") },
-                        leadingIcon = { Icon(Icons.Default.Person, null) },
-                        onClick = { updatesMenu = false; openAudienceList("friends") }
                     )
                 }
             }
@@ -529,7 +666,8 @@ fun KhahishUpdatesScreen(
                     "close_friends" -> "Close Friends"
                     "my_contacts" -> "My Contacts"
                     "my_friends" -> "My Friends"
-                    else -> "Everyone"
+                    "only_share_with" -> "Only share with"
+                    else -> "My Friends"
                 },
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
@@ -540,8 +678,8 @@ fun KhahishUpdatesScreen(
                 Text("Change", color = Green)
             }
             DropdownMenu(expanded = audienceMenu, onDismissRequest = { audienceMenu = false }) {
-                listOf("close_friends" to "Close Friends", "my_contacts" to "My Contacts", "my_friends" to "My Friends", "everyone" to "Everyone").forEach { (value, label) ->
-                    DropdownMenuItem(text = { Text(label) }, onClick = { storyAudience = value; audienceMenu = false })
+                listOf("close_friends" to "Close Friends", "my_contacts" to "My Contacts", "my_friends" to "My Friends", "only_share_with" to "Only share with").forEach { (value, label) ->
+                    DropdownMenuItem(text = { Text(label) }, onClick = { storyAudience = value; audienceMenu = false; if (value == "only_share_with") openOnlyShareWith() })
                 }
             }
         }
@@ -842,6 +980,44 @@ fun KhahishUpdatesScreen(
         }
     }
 
+    if (showOnlyShareDialog) {
+        AlertDialog(
+            onDismissRequest = { showOnlyShareDialog = false },
+            title = { Text("Only share with") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Select accepted friends who can view this status. Nobody else will see it.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                    if (acceptedFriends.isEmpty()) {
+                        Text("No accepted friends yet. Accept a friend request first.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        Column(Modifier.heightIn(max = 300.dp).verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+                            acceptedFriends.forEach { (friendUid, friendName) ->
+                                Row(
+                                    Modifier.fillMaxWidth().clickable {
+                                        onlyShareSelected = if (friendUid in onlyShareSelected) onlyShareSelected - friendUid else onlyShareSelected + friendUid
+                                    }.padding(vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Checkbox(
+                                        checked = friendUid in onlyShareSelected,
+                                        onCheckedChange = { checked ->
+                                            onlyShareSelected = if (checked) onlyShareSelected + friendUid else onlyShareSelected - friendUid
+                                        }
+                                    )
+                                    Text(friendName, color = MaterialTheme.colorScheme.onSurface)
+                                }
+                            }
+                        }
+                    }
+                    Text("${onlyShareSelected.size} selected", color = Green, fontSize = 12.sp)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showOnlyShareDialog = false }) { Text("Done") }
+            }
+        )
+    }
+
     if (showAudienceListDialog) {
         AlertDialog(
             onDismissRequest = { showAudienceListDialog = false },
@@ -955,14 +1131,15 @@ fun KhahishUpdatesScreen(
                                     "close_friends" -> "Close Friends"
                                     "my_contacts" -> "My Contacts"
                                     "my_friends" -> "My Friends"
-                                    else -> "Everyone"
+                                    "only_share_with" -> "Only share with"
+                                    else -> "My Friends"
                                 },
                                 color = Color(0xFF70D7B8)
                             )
                         }
                         DropdownMenu(expanded = editorAudienceMenu, onDismissRequest = { editorAudienceMenu = false }) {
-                            listOf("close_friends" to "Close Friends", "my_contacts" to "My Contacts", "my_friends" to "My Friends", "everyone" to "Everyone").forEach { (value, label) ->
-                                DropdownMenuItem(text = { Text(label) }, onClick = { storyAudience = value; editorAudienceMenu = false })
+                            listOf("close_friends" to "Close Friends", "my_contacts" to "My Contacts", "my_friends" to "My Friends", "only_share_with" to "Only share with").forEach { (value, label) ->
+                                DropdownMenuItem(text = { Text(label) }, onClick = { storyAudience = value; editorAudienceMenu = false; if (value == "only_share_with") openOnlyShareWith() })
                             }
                         }
                     }
@@ -1075,7 +1252,8 @@ fun KhahishUpdatesScreen(
                                         "close_friends" -> "Close Friends"
                                         "my_contacts" -> "My Contacts"
                                         "my_friends" -> "My Friends"
-                                        else -> "Everyone"
+                                        "only_share_with" -> "Only share with"
+                                    else -> "My Friends"
                                     },
                                     color = Green
                                 )
@@ -1088,11 +1266,11 @@ fun KhahishUpdatesScreen(
                                     "close_friends" to "Close Friends",
                                     "my_contacts" to "My Contacts",
                                     "my_friends" to "My Friends",
-                                    "everyone" to "Everyone"
+                                    "only_share_with" to "Only share with"
                                 ).forEach { (value, label) ->
                                     DropdownMenuItem(
                                         text = { Text(label) },
-                                        onClick = { storyAudience = value; voiceAudienceMenuExpanded = false }
+                                        onClick = { storyAudience = value; voiceAudienceMenuExpanded = false; if (value == "only_share_with") openOnlyShareWith() }
                                     )
                                 }
                             }

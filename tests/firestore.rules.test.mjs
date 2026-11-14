@@ -31,7 +31,8 @@ const activeStory = {
   mediaType: "text",
   createdAt: Date.now(),
   expiresAt: Date.now() + 60 * 60 * 1000,
-  audience: "everyone"
+  audience: "my_friends",
+  allowedUids: ["bob"]
 };
 
 before(async () => {
@@ -328,22 +329,70 @@ test("messages cannot be created while impersonating another chat member", async
   }));
 });
 
-test("story audience and expiry are enforced", async () => {
-  await seed("stories/active-public", activeStory);
-  await seed("stories/expired-public", {
+test("story audience requires an accepted friend and expiry is enforced", async () => {
+  await seed("messageRequests/alice_bob", {
+    senderUid: "alice",
+    receiverUid: "bob",
+    status: "accepted"
+  });
+  await seed("stories/active-friends", activeStory);
+  // A malicious owner may forge a recipient UID in allowedUids, but that
+  // recipient must still fail both direct reads and scoped list queries.
+  await seed("stories/forged-recipient", {
+    ...activeStory,
+    allowedUids: ["charlie"]
+  });
+  await seed("stories/expired-friends", {
     ...activeStory,
     expiresAt: Date.now() - 60_000
   });
   await seed("stories/private", {
     ...activeStory,
-    audience: "only_me"
+    audience: "only_me",
+    allowedUids: []
   });
 
-  await assertSucceeds(getDoc(doc(db("bob"), "stories/active-public")));
-  await assertFails(getDoc(doc(db("bob"), "stories/expired-public")));
+  await assertSucceeds(getDoc(doc(db("bob"), "stories/active-friends")));
+  await assertFails(getDoc(doc(db("charlie"), "stories/active-friends")));
+  await assertFails(getDoc(doc(db("charlie"), "stories/forged-recipient")));
+  await assertFails(getDoc(doc(db("bob"), "stories/expired-friends")));
   await assertFails(getDoc(doc(db("bob"), "stories/private")));
   await assertSucceeds(getDoc(doc(db("alice"), "stories/private")));
-  await assertSucceeds(getDocs(query(
+
+  const feedEntry = {
+    ownerUid: "alice",
+    viewerUid: "bob",
+    storyId: "active-friends",
+    createdAt: Date.now(),
+    expiresAt: Date.now() + 60 * 60 * 1000
+  };
+  await assertSucceeds(setDoc(
+    doc(db("alice"), "users/bob/storyFeed/alice/stories/active-friends"),
+    feedEntry
+  ));
+  await assertFails(setDoc(
+    doc(db("alice"), "users/charlie/storyFeed/alice/stories/forged-recipient"),
+    {
+      ...feedEntry,
+      viewerUid: "charlie",
+      storyId: "forged-recipient"
+    }
+  ));
+  await assertSucceeds(getDocs(collection(
+    db("bob"),
+    "users/bob/storyFeed/alice/stories"
+  )));
+  await assertFails(getDocs(collection(
+    db("charlie"),
+    "users/charlie/storyFeed/alice/stories"
+  )));
+  await assertFails(getDocs(query(
+    collection(db("bob"), "stories"),
+    where("ownerUid", "==", "alice"),
+    where("allowedUids", "array-contains", "bob"),
+    where("expiresAt", ">", Date.now())
+  )));
+  await assertFails(getDocs(query(
     collection(db("bob"), "stories"),
     where("audience", "==", "everyone"),
     where("expiresAt", ">", Date.now())
