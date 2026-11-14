@@ -114,14 +114,31 @@ service cloud.firestore {
         ).data.senderUid in members;
     }
 
+    function isAcceptedStoryFriend(ownerUid, viewerUid) {
+      return signedIn()
+        && ownerUid is string
+        && viewerUid is string
+        && ownerUid != viewerUid
+        && (
+          (
+            exists(/databases/$(database)/documents/messageRequests/$(ownerUid + '_' + viewerUid))
+            && get(/databases/$(database)/documents/messageRequests/$(ownerUid + '_' + viewerUid)).data.status == 'accepted'
+          )
+          || (
+            exists(/databases/$(database)/documents/messageRequests/$(viewerUid + '_' + ownerUid))
+            && get(/databases/$(database)/documents/messageRequests/$(viewerUid + '_' + ownerUid)).data.status == 'accepted'
+          )
+        );
+    }
+
     function canReadStory(storyData) {
       return signedIn()
         && (
           storyData.ownerUid == request.auth.uid
-          || storyData.get('audience', 'everyone') == 'everyone'
           || (
             storyData.get('allowedUids', []) is list
             && request.auth.uid in storyData.get('allowedUids', [])
+            && isAcceptedStoryFriend(storyData.ownerUid, request.auth.uid)
           )
         );
     }
@@ -803,10 +820,10 @@ service cloud.firestore {
       allow list: if signedIn()
         && (
           resource.data.ownerUid == request.auth.uid
-          || resource.data.get('audience', 'everyone') == 'everyone'
           || (
             resource.data.get('allowedUids', []) is list
             && request.auth.uid in resource.data.get('allowedUids', [])
+            && isAcceptedStoryFriend(resource.data.ownerUid, request.auth.uid)
           )
         );
 
@@ -819,15 +836,11 @@ service cloud.firestore {
         && request.resource.data.createdAt is int
         && request.resource.data.expiresAt is int
         && request.resource.data.expiresAt > request.resource.data.createdAt
-        && request.resource.data.audience in ['everyone', 'close_friends', 'my_contacts', 'my_friends']
+        && request.resource.data.audience in ['close_friends', 'my_contacts', 'my_friends', 'only_share_with']
         && request.resource.data.get('allowedUids', []) is list
+        && request.resource.data.get('allowedUids', []).size() > 0
         && request.resource.data.get('allowedUids', []).size() <= 500
-        && (
-          (request.resource.data.audience == 'everyone'
-            && request.resource.data.get('allowedUids', []).size() == 0)
-          || (request.resource.data.audience != 'everyone'
-            && request.resource.data.get('allowedUids', []).size() > 0)
-        );
+        && !(request.auth.uid in request.resource.data.allowedUids);
 
       allow update: if false;
       allow delete: if signedIn()
