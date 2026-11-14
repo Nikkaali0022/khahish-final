@@ -197,6 +197,33 @@ service cloud.firestore {
         allow update, delete: if false;
       }
 
+      // A story owner's feed entry is stored under the viewer's own user path.
+      // The owner can create it only for an accepted, unblocked friend, and
+      // the path binds both UIDs so list authorization does not depend on
+      // filtering arbitrary story documents.
+      match /storyFeed/{ownerUid}/stories/{storyId} {
+        allow get, list: if isOwner(uid)
+          && isAcceptedStoryFriend(ownerUid, uid);
+
+        allow create: if signedIn()
+          && request.auth.uid == ownerUid
+          && isAcceptedStoryFriend(ownerUid, uid)
+          && request.resource.data.keys().hasOnly([
+            'ownerUid', 'viewerUid', 'storyId', 'createdAt', 'expiresAt'
+          ])
+          && request.resource.data.ownerUid == ownerUid
+          && request.resource.data.viewerUid == uid
+          && request.resource.data.storyId == storyId
+          && request.resource.data.createdAt is int
+          && request.resource.data.expiresAt is int
+          && exists(/databases/$(database)/documents/stories/$(storyId))
+          && get(/databases/$(database)/documents/stories/$(storyId)).data.ownerUid == ownerUid
+          && get(/databases/$(database)/documents/stories/$(storyId)).data.get('allowedUids', []) is list
+          && uid in get(/databases/$(database)/documents/stories/$(storyId)).data.allowedUids;
+
+        allow update, delete: if false;
+      }
+
       match /privacySettings/{settingId} {
         allow read, create, update, delete: if isOwner(uid);
       }
@@ -816,10 +843,9 @@ service cloud.firestore {
         && resource.data.get('expiresAt', 0) is int
         && resource.data.expiresAt > request.time.toMillis();
 
-      // Apply the same accepted-friend and block checks to list queries as
-      // direct reads. The app scopes each friend's query by ownerUid and
-      // allowedUids, so Firestore can prove this rule for every returned row.
-      allow list: if canReadStory(resource.data);
+      // Other users read stories through their path-scoped storyFeed entries.
+      // Only the owner may list the top-level stories collection.
+      allow list: if signedIn() && resource.data.ownerUid == request.auth.uid;
 
       allow create: if signedIn()
         && request.resource.data.ownerUid == request.auth.uid
