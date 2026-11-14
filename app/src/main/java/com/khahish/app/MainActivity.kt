@@ -4463,6 +4463,20 @@ fun ConversationScreen(
                             onDismissRequest = { reactionMenuExpanded = false }
                         ) {
                             DropdownMenuItem(
+                                text = { Text("Edit") },
+                                leadingIcon = { Icon(Icons.Default.Edit, null) },
+                                enabled = target.senderId == currentUserId &&
+                                    target.mediaType == "text" &&
+                                    target.text.isNotBlank() &&
+                                    System.currentTimeMillis() - target.timestamp <= 15 * 60 * 1000L,
+                                onClick = {
+                                    editTarget = target
+                                    editText = target.text
+                                    reactionTarget = null
+                                    reactionMenuExpanded = false
+                                }
+                            )
+                            DropdownMenuItem(
                                 text = { Text("Forward") },
                                 leadingIcon = { Icon(Icons.Default.Forward, null) },
                                 onClick = {
