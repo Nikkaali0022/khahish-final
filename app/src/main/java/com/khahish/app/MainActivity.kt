@@ -393,7 +393,6 @@ fun KhahishApp() {
     val tabOrder = listOf("Chats", "Contacts", "Updates", "Calls", "Settings")
     var selectedChat by remember { mutableStateOf<Chat?>(null) }
     var profileTargetUid by remember { mutableStateOf("") }
-    var lockedContactUids by remember(currentUser?.uid) { mutableStateOf(emptySet<String>()) }
     fun openChatWithLockCheck(chat: Chat) { selectedChat = chat }
     var showNewChat by remember { mutableStateOf(false) }
     var showNewGroup by remember { mutableStateOf(false) }
@@ -956,7 +955,7 @@ fun KhahishApp() {
                                     currentUid = user.uid,
                                     onOpen = { openChatWithLockCheck(it) },
                                     onViewProfile = { profileTargetUid = it },
-                                    lockedContactUids = lockedContactUids
+
                                 )
 
                                 "Contacts" -> KhahishContactsScreen(
