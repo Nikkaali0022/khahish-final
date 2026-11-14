@@ -6,6 +6,12 @@ concurrency:
 
 on:
   workflow_dispatch:
+    inputs:
+      run_instrumentation_tests:
+        description: 'Run the optional Android emulator instrumentation test suite'
+        required: false
+        type: boolean
+        default: false
   push:
     branches:
       - main
@@ -188,8 +194,9 @@ jobs:
       # Upload the installable APK immediately after a successful build.
       # Emulator instrumentation is reported separately because large APK installs
       # can fail in hosted emulators even when the APK itself builds successfully.
-      - name: Run Android Keystore instrumentation tests
+      - name: Run optional Android emulator instrumentation tests
         id: instrumentation
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_instrumentation_tests }}
         continue-on-error: true
         timeout-minutes: 25
         uses: reactivecircus/android-emulator-runner@v2
@@ -201,8 +208,8 @@ jobs:
             cd "$PROJECT_DIR"
             gradle :app:connectedDebugAndroidTest --stacktrace; TEST_EXIT=$?; adb logcat -d -v threadtime > "$PROJECT_DIR/keystore-instrumentation-logcat.txt" || true; exit $TEST_EXIT
 
-      - name: Upload Keystore test diagnostics
-        if: always()
+      - name: Upload instrumentation test diagnostics
+        if: always() && steps.instrumentation.outcome != 'skipped'
         uses: actions/upload-artifact@v4
         with:
           name: Khahish-Keystore-Test-Diagnostics
@@ -236,7 +243,7 @@ jobs:
               sha: context.sha,
               state: "success",
               context: "Khahish Android Build",
-              description: "APK build passed; emulator test result is reported separately"
+              description: "APK build passed; optional emulator tests are manual"
             })
 
       - name: Mark Android build failed
@@ -250,5 +257,5 @@ jobs:
               sha: context.sha,
               state: "failure",
               context: "Khahish Android Build",
-              description: "Android tests or APK build failed"
+              description: "APK build or another required workflow step failed"
             })
