@@ -352,17 +352,20 @@ test("story audience requires an accepted friend and expiry is enforced", async 
   await assertFails(getDoc(doc(db("bob"), "stories/private")));
   await assertSucceeds(getDoc(doc(db("alice"), "stories/private")));
 
+  console.log("STORY TEST: before Bob friend list query");
   await assertSucceeds(getDocs(query(
     collection(db("bob"), "stories"),
     where("ownerUid", "==", "alice"),
     where("allowedUids", "array-contains", "bob"),
     where("expiresAt", ">", Date.now())
   )));
+  console.log("STORY TEST: before Bob public query");
   await assertFails(getDocs(query(
     collection(db("bob"), "stories"),
     where("audience", "==", "everyone"),
     where("expiresAt", ">", Date.now())
   )));
+  console.log("STORY TEST: before Alice owner list query");
   await assertSucceeds(getDocs(query(
     collection(db("alice"), "stories"),
     where("ownerUid", "==", "alice"),
