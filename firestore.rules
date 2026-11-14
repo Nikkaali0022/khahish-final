@@ -1057,7 +1057,10 @@ service cloud.firestore {
     }
 
     match /appConfig/{configId} {
-      allow get, list, create, update, delete: if isAdmin();
+      // The single global document contains only public maintenance messaging.
+      allow get: if isAdmin() || (signedIn() && configId == 'global');
+      allow list: if isAdmin();
+      allow create, update, delete: if isAdmin();
     }
 
     // -----------------------------------------------------
