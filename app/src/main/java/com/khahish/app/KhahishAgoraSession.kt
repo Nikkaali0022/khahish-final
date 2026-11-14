@@ -11,6 +11,7 @@ import io.agora.rtc2.RtcEngine
 import io.agora.rtc2.RtcEngineConfig
 import android.view.SurfaceView
 import io.agora.rtc2.video.VideoCanvas
+import io.agora.rtc2.video.BeautyOptions
 
 /**
  * Owns a single Agora RTC engine instance for an active Khahish call.
@@ -154,6 +155,22 @@ class KhahishAgoraSession(
                 engine?.enableLocalVideo(false)
                 engine?.stopPreview()
             }
+        }
+    }
+
+    fun switchCamera() {
+        if (isVideoCall && !released) engine?.switchCamera()
+    }
+
+    fun setBeautyFilter(filter: String) {
+        if (!isVideoCall || released) return
+        val rtc = engine ?: return
+        when (filter) {
+            "Natural" -> rtc.setBeautyEffectOptions(false, BeautyOptions(BeautyOptions.LIGHTENING_CONTRAST_NORMAL, 0.0f, 0.0f, 0.0f, 0.0f))
+            "Soft Skin" -> rtc.setBeautyEffectOptions(true, BeautyOptions(BeautyOptions.LIGHTENING_CONTRAST_NORMAL, 0.45f, 0.68f, 0.12f, 0.35f))
+            "Glow" -> rtc.setBeautyEffectOptions(true, BeautyOptions(BeautyOptions.LIGHTENING_CONTRAST_HIGH, 0.82f, 0.52f, 0.18f, 0.42f))
+            "Rosy" -> rtc.setBeautyEffectOptions(true, BeautyOptions(BeautyOptions.LIGHTENING_CONTRAST_NORMAL, 0.52f, 0.48f, 0.38f, 0.34f))
+            "Smooth Plus" -> rtc.setBeautyEffectOptions(true, BeautyOptions(BeautyOptions.LIGHTENING_CONTRAST_NORMAL, 0.58f, 0.90f, 0.16f, 0.30f))
         }
     }
 
