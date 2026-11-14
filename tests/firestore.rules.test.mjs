@@ -354,6 +354,7 @@ test("story audience requires an accepted friend and expiry is enforced", async 
 
   await assertSucceeds(getDocs(query(
     collection(db("bob"), "stories"),
+    where("ownerUid", "==", "alice"),
     where("allowedUids", "array-contains", "bob"),
     where("expiresAt", ">", Date.now())
   )));
