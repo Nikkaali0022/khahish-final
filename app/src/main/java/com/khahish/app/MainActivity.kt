@@ -41,6 +41,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.ui.input.pointer.pointerInput
@@ -69,6 +70,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.res.painterResource
@@ -93,6 +96,10 @@ import com.google.firebase.firestore.SetOptions
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
+import okio.BufferedSink
+import okio.ForwardingSink
+import okio.buffer
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
@@ -100,6 +107,7 @@ import java.io.File
 import java.util.Locale
 import kotlin.math.abs
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import java.util.concurrent.TimeUnit
 
 private const val CLOUDINARY_CLOUD_NAME = "koctiaes"
@@ -172,7 +180,12 @@ data class MessageItem(
     val editedAt: Long = 0L,
     val starredBy: List<String> = emptyList(),
     val restoredFromBackup: Boolean = false,
-    val isPending: Boolean = false
+    val isPending: Boolean = false,
+    val uploadProgress: Int = -1,
+    val localPreviewUri: String = "",
+    val uploadUri: String = "",
+    val uploadFailed: Boolean = false,
+    val deleteLocalFileAfterUpload: Boolean = false
 )
 
 private fun privateChatId(uid1: String, uid2: String): String =
@@ -2575,10 +2588,17 @@ fun ConversationScreen(
     }
     var attachmentMenu by remember { mutableStateOf(false) }
     var isRecordingVoice by remember { mutableStateOf(false) }
-    var voiceDragOffset by remember { mutableFloatStateOf(0f) }
-    var voiceCancelGesture by remember { mutableStateOf(false) }
+    var voiceLocked by remember { mutableStateOf(false) }
+    var voiceElapsedSeconds by remember { mutableLongStateOf(0L) }
     var voiceRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
     var voiceRecordingFile by remember { mutableStateOf<File?>(null) }
+    val voiceHaptic = LocalHapticFeedback.current
+    LaunchedEffect(isRecordingVoice) {
+        while (isRecordingVoice) {
+            delay(1000L)
+            voiceElapsedSeconds += 1L
+        }
+    }
     var selectedMessageIds by remember { mutableStateOf(setOf<String>()) }
     var editTarget by remember { mutableStateOf<MessageItem?>(null) }
     var editText by remember { mutableStateOf("") }
@@ -2618,12 +2638,59 @@ fun ConversationScreen(
     var chatSearchVisible by remember(chat.id) { mutableStateOf(false) }
     var chatSearchQuery by remember(chat.id) { mutableStateOf("") }
 
-    val displayedMessages = remember(messages, chatSearchQuery) {
+    var pendingMediaMessages by remember(chat.id) { mutableStateOf(emptyList<MessageItem>()) }
+    val displayedMessages = remember(messages, pendingMediaMessages, chatSearchQuery) {
+        val allMessages = (messages + pendingMediaMessages).sortedBy { it.timestamp }
         val query = chatSearchQuery.trim()
-        if (query.isBlank()) messages else messages.filter { message ->
+        if (query.isBlank()) allMessages else allMessages.filter { message ->
             message.text.contains(query, ignoreCase = true) ||
                 message.replyToText.contains(query, ignoreCase = true)
         }
+    }
+
+    fun performChatMediaUpload(pendingMessage: MessageItem) {
+        pendingMediaMessages = pendingMediaMessages.map { item ->
+            if (item.id == pendingMessage.id) item.copy(uploadProgress = 0, uploadFailed = false) else item
+        }
+        uploadToCloudinary(
+            context, Uri.parse(pendingMessage.uploadUri),
+            when (pendingMessage.mediaType) { "image" -> "image"; "document" -> "raw"; else -> "video" },
+            onSuccess = { url ->
+                sendChatMessage(chatRef, currentUserId, pendingMessage.text, url, pendingMessage.mediaType, context) {
+                    if (pendingMessage.deleteLocalFileAfterUpload) runCatching {
+                        File(Uri.parse(pendingMessage.uploadUri).path.orEmpty()).delete()
+                    }
+                    pendingMediaMessages = pendingMediaMessages.filterNot { it.id == pendingMessage.id }
+                }
+            },
+            onError = {
+                pendingMediaMessages = pendingMediaMessages.map { item ->
+                    if (item.id == pendingMessage.id) item.copy(uploadFailed = true) else item
+                }
+                showToast(context, it)
+            },
+            onProgress = { percent ->
+                pendingMediaMessages = pendingMediaMessages.map { item ->
+                    if (item.id == pendingMessage.id) item.copy(uploadProgress = percent) else item
+                }
+            }
+        )
+    }
+
+    fun queueChatMedia(uri: Uri, mediaType: String, caption: String = "") {
+        val pending = MessageItem(
+            id = "local_upload_" + java.util.UUID.randomUUID(),
+            senderId = currentUserId, text = caption, mediaType = mediaType,
+            timestamp = System.currentTimeMillis(), uploadProgress = 0,
+            localPreviewUri = uri.toString(), uploadUri = uri.toString()
+        )
+        pendingMediaMessages = pendingMediaMessages + pending
+        messageScrollScope.launch {
+            delay(120L)
+            val lastIndex = displayedMessages.lastIndex
+            if (lastIndex >= 0) messageListState.animateScrollToItem(lastIndex)
+        }
+        performChatMediaUpload(pending)
     }
 
 
@@ -2671,25 +2738,7 @@ fun ConversationScreen(
 
     val audioPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
-    ) { uri ->
-        if (uri != null) {
-            isUploading = true
-            uploadToCloudinary(
-                context, uri, "video",
-                onSuccess = { url ->
-                    isUploading = false
-                    isSending = true
-                    sendChatMessage(
-                        chatRef, currentUserId, "", url, "audio", context
-                    ) { isSending = false }
-                },
-                onError = {
-                    isUploading = false
-                    showToast(context, it)
-                }
-            )
-        }
-    }
+    ) { uri -> if (uri != null) queueChatMedia(uri, "audio") }
 
     val contactPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -2776,25 +2825,7 @@ fun ConversationScreen(
 
     val documentPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
-    ) { uri ->
-        if (uri != null) {
-            isUploading = true
-            uploadToCloudinary(
-                context, uri, "raw",
-                onSuccess = { url ->
-                    isUploading = false
-                    isSending = true
-                    sendChatMessage(
-                        chatRef, currentUserId, "", url, "document", context
-                    ) { isSending = false }
-                },
-                onError = {
-                    isUploading = false
-                    showToast(context, it)
-                }
-            )
-        }
-    }
+    ) { uri -> if (uri != null) queueChatMedia(uri, "document") }
 
 
     fun startVoiceRecording() {
@@ -2816,6 +2847,8 @@ fun ConversationScreen(
             recorder.start()
             voiceRecorder = recorder
             voiceRecordingFile = output
+            voiceElapsedSeconds = 0L
+            voiceLocked = false
             isRecordingVoice = true
             showToast(context, "Recording… slide left to cancel, release to send")
         } catch (error: Exception) {
@@ -2841,47 +2874,43 @@ fun ConversationScreen(
         }
     }
 
-    fun stopVoiceRecordingAndSend() {
+    fun finishVoiceRecording(send: Boolean) {
         val recorder = voiceRecorder
         val file = voiceRecordingFile
-        try {
-            recorder?.stop()
-        } catch (_: Exception) {
-            file?.delete()
-            showToast(context, "Voice recording was too short. Please try again.")
-        } finally {
+        var stoppedSuccessfully = false
+        try { recorder?.stop(); stoppedSuccessfully = recorder != null }
+        catch (_: Exception) { if (send) showToast(context, "Voice recording was too short. Please try again.") }
+        finally {
             recorder?.release()
             voiceRecorder = null
-            isRecordingVoice = false
             voiceRecordingFile = null
+            isRecordingVoice = false
+            voiceLocked = false
+            voiceElapsedSeconds = 0L
         }
-        if (file == null || !file.exists() || file.length() < 1000L) {
-            file?.delete()
-            return
+        if (!send || !stoppedSuccessfully || file == null || !file.exists() || file.length() < 1000L) {
+            file?.delete(); return
         }
-        isUploading = true
-        uploadToCloudinary(
-            context, Uri.fromFile(file), "video",
-            onSuccess = { url ->
-                isUploading = false
-                isSending = true
-                sendChatMessage(chatRef, currentUserId, "", url, "audio", context) {
-                    isSending = false
-                    file.delete()
-                }
-            },
-            onError = {
-                isUploading = false
-                file.delete()
-                showToast(context, it)
-            }
+        val voiceUri = Uri.fromFile(file)
+        val pendingVoice = MessageItem(
+            id = "local_upload_" + java.util.UUID.randomUUID(),
+            senderId = currentUserId, mediaType = "audio",
+            timestamp = System.currentTimeMillis(), uploadProgress = 0,
+            uploadUri = voiceUri.toString(), deleteLocalFileAfterUpload = true
         )
+        pendingMediaMessages = pendingMediaMessages + pendingVoice
+        messageScrollScope.launch {
+            delay(120L)
+            val lastIndex = displayedMessages.lastIndex
+            if (lastIndex >= 0) messageListState.animateScrollToItem(lastIndex)
+        }
+        performChatMediaUpload(pendingVoice)
     }
 
     val voicePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) startVoiceRecording()
+        if (granted) { startVoiceRecording(); voiceLocked = true }
         else showToast(context, "Microphone permission is required for voice messages.")
     }
 
@@ -3485,7 +3514,7 @@ fun ConversationScreen(
                             "image" -> {
                                 if (showMediaPreviews) {
                                     AsyncImage(
-                                        model = msg.imageUrl,
+                                        model = msg.localPreviewUri.takeIf { msg.uploadProgress >= 0 } ?: msg.imageUrl,
                                         contentDescription = "Shared photo — tap to view full screen",
                                         modifier = Modifier
                                             .sizeIn(maxWidth = 250.dp, maxHeight = 250.dp)
@@ -3509,25 +3538,22 @@ fun ConversationScreen(
 
                             "video" -> Row(
                                 Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
-                                    .clickable { videoToPlay = msg.imageUrl }.padding(10.dp),
+                                    .clickable { if (msg.uploadProgress < 0) videoToPlay = msg.imageUrl }.padding(10.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(Icons.Default.PlayCircle, null, tint = Green, modifier = Modifier.size(30.dp))
                                 Spacer(Modifier.width(8.dp))
                                 Text(
-                                    if (showMediaPreviews) "Play video" else "Video preview hidden • tap to play",
+                                    if (msg.uploadProgress >= 0) "Uploading video…" else if (showMediaPreviews) "Play video" else "Video preview hidden • tap to play",
                                     color = MaterialTheme.colorScheme.onSurface,
                                     fontWeight = FontWeight.SemiBold
                                 )
                             }
 
-                            "audio" -> AudioMessagePlayer(msg.imageUrl)
+                            "audio" -> if (msg.uploadProgress >= 0) Text("Voice message uploading…", color = bubbleTextColor) else AudioMessagePlayer(msg.imageUrl)
 
-                            "document" -> MediaOpenRow(
-                                "Document — tap to open",
-                                Icons.Default.Description,
-                                msg.imageUrl,
-                                context
+                            "document" -> if (msg.uploadProgress >= 0) Text("Document uploading…", color = bubbleTextColor) else MediaOpenRow(
+                                "Document — tap to open", Icons.Default.Description, msg.imageUrl, context
                             )
 
                             "live_location" -> {
@@ -3581,6 +3607,13 @@ fun ConversationScreen(
                             }
                         }
 
+                        if (msg.uploadProgress >= 0) {
+                            UploadProgressBadge(
+                                progress = msg.uploadProgress, failed = msg.uploadFailed,
+                                onRetry = { performChatMediaUpload(msg) },
+                                modifier = Modifier.align(Alignment.End).padding(top = 5.dp)
+                            )
+                        }
                         if (msg.replyToMessageId.isNotBlank()) {
                             Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)).padding(7.dp)) {
                                 Text("Reply", color = Green, fontSize = 10.sp, fontWeight = FontWeight.Bold)
@@ -3808,79 +3841,61 @@ fun ConversationScreen(
                         if (voiceCancelGesture) MaterialTheme.colorScheme.error else Green,
                         CircleShape
                     )
-                    .pointerInput(isUploading, isSending, text) {
-                        if (!isUploading && !isSending && text.isBlank()) {
-                            awaitEachGesture {
-                                val firstEvent = awaitPointerEvent()
-                                val down = firstEvent.changes.firstOrNull { it.pressed } ?: return@awaitEachGesture
-                                if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                                    voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                    return@awaitEachGesture
-                                }
-
-                                voiceDragOffset = 0f
-                                voiceCancelGesture = false
-                                startVoiceRecording()
-                                var releasedNormally = false
-
-                                while (true) {
-                                    val event = awaitPointerEvent()
-                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                                    if (change.pressed) {
-                                        val horizontalDelta = change.position.x - change.previousPosition.x
-                                        if (isRecordingVoice) {
-                                            voiceDragOffset = (voiceDragOffset + horizontalDelta).coerceIn(-140f, 20f)
-                                            voiceCancelGesture = voiceDragOffset <= -85f
-                                        }
-                                        change.consume()
-                                    } else {
-                                        change.consume()
-                                        releasedNormally = true
-                                        if (isRecordingVoice) {
-                                            if (voiceCancelGesture) cancelVoiceRecording()
-                                            else stopVoiceRecordingAndSend()
-                                        }
-                                        break
-                                    }
-                                }
-
-                                if (!releasedNormally && isRecordingVoice) cancelVoiceRecording()
-                                voiceDragOffset = 0f
-                                voiceCancelGesture = false
-                            }
-                        }
-                    }
-                    .pointerInput(isUploading, isSending, text) {
-                        detectTapGestures {
-                            if (isUploading || isSending || text.isBlank()) return@detectTapGestures
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
                             val message = text.trim()
-                            text = ""
-                            updateTyping(false)
-                            isSending = true
-                            sendChatMessage(
-                                chatRef,
-                                currentUserId,
-                                message,
-                                "",
-                                "text",
-                                context,
-                                replyToMessageId = replyTarget?.id.orEmpty(),
-                                replyToText = replyTarget?.text?.ifBlank { replyTarget?.mediaType ?: "Media" }.orEmpty()
-                            ) {
-                                isSending = false
-                                replyTarget = null
+                            when {
+                                isUploading || isSending -> Unit
+                                isRecordingVoice -> { voiceHaptic.performHapticFeedback(HapticFeedbackType.LongPress); finishVoiceRecording(true) }
+                                message.isNotBlank() -> {
+                                    text = ""; updateTyping(false); isSending = true
+                                    sendChatMessage(chatRef, currentUserId, message, "", "text", context,
+                                        replyToMessageId = replyTarget?.id.orEmpty(),
+                                        replyToText = replyTarget?.text?.ifBlank { replyTarget?.mediaType ?: "Media" }.orEmpty()
+                                    ) { isSending = false; replyTarget = null }
+                                }
+                                ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED ->
+                                    voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                else -> {
+                                    voiceHaptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    startVoiceRecording()
+                                    var lockedByGesture = false
+                                    var cancelledByGesture = false
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        val change = event.changes.firstOrNull() ?: break
+                                        val verticalDrag = change.position.y - down.position.y
+                                        val horizontalDrag = change.position.x - down.position.x
+                                        if (!lockedByGesture && verticalDrag < -72f) {
+                                            lockedByGesture = true; voiceLocked = true
+                                            voiceHaptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        } else if (!lockedByGesture && (verticalDrag > 95f || abs(horizontalDrag) > 125f)) {
+                                            cancelledByGesture = true
+                                        }
+                                        if (!change.pressed) break
+                                    }
+                                    voiceHaptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    if (!lockedByGesture) finishVoiceRecording(!cancelledByGesture)
+                                }
                             }
                         }
                     },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    if (voiceCancelGesture) Icons.Default.Close
-                    else if (text.isNotBlank()) Icons.Default.Send
-                    else Icons.Default.Mic,
-                    if (voiceCancelGesture) "Release to cancel voice message"
-                    else if (text.isNotBlank()) "Send message"
-                    else "Hold to record, release to send",
+                    when {
+                        voiceLocked && isRecordingVoice -> Icons.Default.Lock
+                        isRecordingVoice -> Icons.Default.Mic
+                        text.isNotBlank() -> Icons.Default.Send
+                        else -> Icons.Default.Mic
+                    },
+                    when {
+                        voiceLocked && isRecordingVoice -> "Recording locked; tap to send"
+                        isRecordingVoice -> "Hold to record; swipe up to lock"
+                        text.isNotBlank() -> "Send message"
+                        else -> "Press and hold to record voice"
+                    },
                     tint = Color.White,
                     modifier = Modifier.size(23.dp)
                 )
@@ -4468,26 +4483,10 @@ fun ConversationScreen(
                             val uri = pendingChatMediaUri ?: return@Button
                             val type = pendingChatMediaType
                             val caption = pendingChatMediaCaption.trim()
-                            isUploading = true
-                            uploadToCloudinary(
-                                context,
-                                uri,
-                                if (type == "video") "video" else "image",
-                                onSuccess = { url ->
-                                    isUploading = false
-                                    isSending = true
-                                    pendingChatMediaUri = null
-                                    pendingChatMediaType = ""
-                                    pendingChatMediaCaption = ""
-                                    sendChatMessage(
-                                        chatRef, currentUserId, caption, url, type, context
-                                    ) { isSending = false }
-                                },
-                                onError = {
-                                    isUploading = false
-                                    showToast(context, it)
-                                }
-                            )
+                            queueChatMedia(uri, type, caption)
+                            pendingChatMediaUri = null
+                            pendingChatMediaType = ""
+                            pendingChatMediaCaption = ""
                         }
                     ) {
                         Icon(Icons.Default.Send, null)
@@ -5553,73 +5552,81 @@ private fun SettingsItem(
     }
 }
 
+private class ProgressRequestBody(
+    private val delegate: RequestBody,
+    private val onProgress: (Int) -> Unit
+) : RequestBody() {
+    override fun contentType() = delegate.contentType()
+    override fun contentLength(): Long = delegate.contentLength()
+    override fun writeTo(sink: BufferedSink) {
+        val totalBytes = contentLength()
+        var uploadedBytes = 0L
+        var lastReported = -1
+        val countingSink = object : ForwardingSink(sink) {
+            override fun write(source: okio.Buffer, byteCount: Long) {
+                super.write(source, byteCount); uploadedBytes += byteCount
+                if (totalBytes > 0L) {
+                    val percent = ((uploadedBytes * 100L) / totalBytes).toInt().coerceIn(0, 100)
+                    if (percent != lastReported) { lastReported = percent; onProgress(percent) }
+                }
+            }
+        }.buffer()
+        delegate.writeTo(countingSink); countingSink.flush()
+    }
+}
+
+@Composable
+private fun UploadProgressBadge(progress: Int, failed: Boolean, onRetry: () -> Unit, modifier: Modifier = Modifier) {
+    Box(modifier.background(Color.Black.copy(alpha = 0.78f), CircleShape).padding(6.dp), contentAlignment = Alignment.Center) {
+        if (failed) {
+            IconButton(onClick = onRetry, modifier = Modifier.size(34.dp)) {
+                Icon(Icons.Default.Refresh, contentDescription = "Retry upload", tint = Color.White)
+            }
+        } else {
+            Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(progress = progress.coerceIn(0, 100) / 100f,
+                    modifier = Modifier.fillMaxSize(), color = Color.White,
+                    trackColor = Color.White.copy(alpha = 0.28f), strokeWidth = 3.dp)
+                Text("$progress%", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
 internal fun uploadToCloudinary(
-    context: Context,
-    uri: Uri,
-    resourceType: String,
-    onSuccess: (String) -> Unit,
-    onError: (String) -> Unit
+    context: Context, uri: Uri, resourceType: String,
+    onSuccess: (String) -> Unit, onError: (String) -> Unit,
+    onProgress: (Int) -> Unit = {}
 ) {
     Thread {
         try {
-            val inputStream = context.contentResolver.openInputStream(uri)
-                ?: throw Exception("Cannot read selected file")
-
+            val inputStream = context.contentResolver.openInputStream(uri) ?: throw Exception("Cannot read selected file")
             val bytes = inputStream.use { it.readBytes() }
-
-            val mimeType = context.contentResolver.getType(uri)
-                ?: "application/octet-stream"
-
-            val fileName = "khahish_${System.currentTimeMillis()}"
-
-            val requestBody = MultipartBody.Builder()
-                .setType(MultipartBody.FORM)
-                .addFormDataPart(
-                    "file",
-                    fileName,
-                    bytes.toRequestBody(mimeType.toMediaType())
-                )
-                .addFormDataPart(
-                    "upload_preset",
-                    CLOUDINARY_UPLOAD_PRESET
-                )
-                .build()
-
+            val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
+            val requestBody = MultipartBody.Builder().setType(MultipartBody.FORM)
+                .addFormDataPart("file", "khahish_" + System.currentTimeMillis(), bytes.toRequestBody(mimeType.toMediaType()))
+                .addFormDataPart("upload_preset", CLOUDINARY_UPLOAD_PRESET).build()
+            val progressBody = ProgressRequestBody(requestBody) { percent ->
+                Handler(Looper.getMainLooper()).post { onProgress(percent) }
+            }
             val request = Request.Builder()
-                .url(
-                    "https://api.cloudinary.com/v1_1/" +
-                        CLOUDINARY_CLOUD_NAME +
-                        "/" + resourceType + "/upload"
-                )
-                .post(requestBody)
-                .build()
-
+                .url("https://api.cloudinary.com/v1_1/" + CLOUDINARY_CLOUD_NAME + "/" + resourceType + "/upload")
+                .post(progressBody).build()
             val client = OkHttpClient.Builder()
-                .callTimeout(120, TimeUnit.SECONDS)
-                .build()
-
+                .connectTimeout(45, TimeUnit.SECONDS).writeTimeout(8, TimeUnit.MINUTES)
+                .readTimeout(5, TimeUnit.MINUTES).callTimeout(10, TimeUnit.MINUTES)
+                .retryOnConnectionFailure(true).build()
             client.newCall(request).execute().use { response ->
                 val responseText = response.body?.string().orEmpty()
-
-                if (!response.isSuccessful) {
-                    throw Exception("Upload error: ${response.code} $responseText")
-                }
-
-                val json = JSONObject(responseText)
-                val secureUrl = json.optString("secure_url")
-
-                if (secureUrl.isBlank()) {
-                    throw Exception("Upload URL was not returned")
-                }
-
-                Handler(Looper.getMainLooper()).post {
-                    onSuccess(secureUrl)
-                }
+                if (!response.isSuccessful) throw Exception("Upload error: " + response.code + " " + responseText)
+                val secureUrl = JSONObject(responseText).optString("secure_url")
+                if (secureUrl.isBlank()) throw Exception("Upload URL was not returned")
+                Handler(Looper.getMainLooper()).post { onSuccess(secureUrl) }
             }
+        } catch (e: java.net.SocketTimeoutException) {
+            Handler(Looper.getMainLooper()).post { onError("Upload took too long because of the network. Please check your internet and try again.") }
         } catch (e: Exception) {
-            Handler(Looper.getMainLooper()).post {
-                onError(e.message ?: "Unknown upload error")
-            }
+            Handler(Looper.getMainLooper()).post { onError(e.message ?: "Media upload failed. Please try again.") }
         }
     }.start()
 }
