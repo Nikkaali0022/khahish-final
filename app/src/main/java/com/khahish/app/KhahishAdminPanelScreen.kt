@@ -154,7 +154,7 @@ fun KhahishAdminPanelScreen(onBack: () -> Unit) {
                         Text("KHAHISH ADMIN", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
                         Text("Owner Control Center", color = Color(0xFFD9FFF1), fontSize = 11.sp)
                     }
-                    Surface(color = Color(0x332FFFFFF), shape = RoundedCornerShape(50)) {
+                    Surface(color = Color(0x33FFFFFF), shape = RoundedCornerShape(50)) {
                         Row(Modifier.padding(horizontal = 11.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.VerifiedUser, null, tint = Color.White, modifier = Modifier.size(15.dp))
                             Spacer(Modifier.width(5.dp))
