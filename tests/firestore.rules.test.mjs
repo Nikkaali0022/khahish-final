@@ -359,16 +359,37 @@ test("story audience requires an accepted friend and expiry is enforced", async 
   await assertFails(getDoc(doc(db("bob"), "stories/private")));
   await assertSucceeds(getDoc(doc(db("alice"), "stories/private")));
 
-  await assertSucceeds(getDocs(query(
+  const feedEntry = {
+    ownerUid: "alice",
+    viewerUid: "bob",
+    storyId: "active-friends",
+    createdAt: Date.now(),
+    expiresAt: Date.now() + 60 * 60 * 1000
+  };
+  await assertSucceeds(setDoc(
+    doc(db("alice"), "users/bob/storyFeed/alice/stories/active-friends"),
+    feedEntry
+  ));
+  await assertFails(setDoc(
+    doc(db("alice"), "users/charlie/storyFeed/alice/stories/forged-recipient"),
+    {
+      ...feedEntry,
+      viewerUid: "charlie",
+      storyId: "forged-recipient"
+    }
+  ));
+  await assertSucceeds(getDocs(collection(
+    db("bob"),
+    "users/bob/storyFeed/alice/stories"
+  )));
+  await assertFails(getDocs(collection(
+    db("charlie"),
+    "users/charlie/storyFeed/alice/stories"
+  )));
+  await assertFails(getDocs(query(
     collection(db("bob"), "stories"),
     where("ownerUid", "==", "alice"),
     where("allowedUids", "array-contains", "bob"),
-    where("expiresAt", ">", Date.now())
-  )));
-  await assertFails(getDocs(query(
-    collection(db("charlie"), "stories"),
-    where("ownerUid", "==", "alice"),
-    where("allowedUids", "array-contains", "charlie"),
     where("expiresAt", ">", Date.now())
   )));
   await assertFails(getDocs(query(
