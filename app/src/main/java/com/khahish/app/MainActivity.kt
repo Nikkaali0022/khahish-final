@@ -3219,6 +3219,7 @@ fun ConversationScreen(
     Column(
         Modifier
             .fillMaxSize()
+            .imePadding()
             .background(MaterialTheme.colorScheme.background)
     ) {
         Row(
@@ -3905,7 +3906,6 @@ fun ConversationScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 10.dp, vertical = 8.dp)
                 .padding(bottom = 6.dp)
-                .imePadding()
                 .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(30.dp))
                 .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(30.dp))
                 .padding(horizontal = 5.dp, vertical = 4.dp),
