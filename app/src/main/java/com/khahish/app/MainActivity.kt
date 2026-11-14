@@ -4861,8 +4861,18 @@ fun ConversationScreen(
                     if (canDeleteForEveryone) {
                         TextButton(onClick = {
                             selectedMessageIds.toList().forEach { id ->
-                                chatRef.collection("messages").document(id).delete()
-                                    .addOnFailureListener { showToast(context, "Could not delete for everyone: ${it.message}") }
+                                val selected = selectedMessages.firstOrNull { it.id == id }
+                                val messageRef = chatRef.collection("messages").document(id)
+                                if (selected?.mediaType == "video") {
+                                    messageRef.update(mapOf(
+                                        "mediaType" to "text",
+                                        "text" to "This video was deleted for everyone",
+                                        "imageUrl" to "",
+                                        "deletedForEveryone" to true
+                                    )).addOnFailureListener { showToast(context, "Could not delete video for everyone: ${it.message}") }
+                                } else {
+                                    messageRef.delete().addOnFailureListener { showToast(context, "Could not delete for everyone: ${it.message}") }
+                                }
                             }
                             selectedMessageIds = emptySet()
                             showDeleteOptions = false
