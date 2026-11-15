@@ -90,6 +90,7 @@ import coil.compose.AsyncImage
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.auth.api.signin.GoogleSignInStatusCodes
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.FirebaseAuthInvalidCredentialsException
@@ -1106,6 +1107,11 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
     ) { result ->
         if (result.resultCode != Activity.RESULT_OK || result.data == null) {
             isLoading = false
+            if (result.resultCode == Activity.RESULT_CANCELED) {
+                showToast(context, "Google account selection was cancelled. Please choose an account to continue.")
+            } else {
+                showToast(context, "Google sign-in did not return an account. Please try again.")
+            }
         } else {
             try {
                 val account = GoogleSignIn.getSignedInAccountFromIntent(result.data)
@@ -1154,7 +1160,14 @@ fun AuthScreen(onLoginSuccess: () -> Unit) {
                 }
             } catch (error: ApiException) {
                 isLoading = false
-                showToast(context, "Google sign-in failed: ${error.statusCode}")
+                val statusMessage = GoogleSignInStatusCodes.getStatusCodeString(error.statusCode)
+                val detail = when (error.statusCode) {
+                    GoogleSignInStatusCodes.SIGN_IN_CANCELLED -> "Account selection was cancelled."
+                    GoogleSignInStatusCodes.NETWORK_ERROR -> "Network connection failed. Check your internet and try again."
+                    GoogleSignInStatusCodes.DEVELOPER_ERROR -> "Google OAuth setup error. The app SHA-1 and Web OAuth client must match Firebase."
+                    else -> "Google sign-in failed (" + error.statusCode + ": " + statusMessage + ")."
+                }
+                showToast(context, detail)
             } catch (error: Exception) {
                 isLoading = false
                 showToast(context, error.localizedMessage ?: "Google sign-in failed.")
