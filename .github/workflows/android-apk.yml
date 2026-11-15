@@ -177,6 +177,14 @@ jobs:
             echo "google-services.json already in project or missing"
           fi
 
+      - name: Restore stable Android debug signing key
+        run: |
+          test -s .github/khahish-debug.keystore.b64 || { echo "Stable debug keystore file is missing"; exit 1; }
+          mkdir -p "$HOME/.android"
+          base64 --decode .github/khahish-debug.keystore.b64 > "$HOME/.android/debug.keystore"
+          chmod 600 "$HOME/.android/debug.keystore"
+          keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | grep -E 'SHA1:|SHA256:'
+
       - name: Verify project build configuration
         run: |
           cd "$PROJECT_DIR"
