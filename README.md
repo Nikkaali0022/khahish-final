@@ -48,7 +48,7 @@ A connected Firebase management integration may simplify this step, but it is no
 
 ## Explicit product exclusions
 
-Communities, Two-Step Verification, account deletion, Guest Mode, multiple-account switching, automatic media saving to device storage and TalkBack/Screen Reader features are excluded by the current product decisions. Do not reintroduce them unless the product owner changes those decisions.
+Communities, Two-Step Verification, account deletion, Guest Mode, multiple-account switching and TalkBack/Screen Reader features remain excluded by the current product decisions. Automatic media saving is no longer excluded: the approved Offline-First and Save to Device scope is documented in `docs/offline-first-media-save.md`; implementation and verification are pending.
 
 ## Important data and security notes
 
