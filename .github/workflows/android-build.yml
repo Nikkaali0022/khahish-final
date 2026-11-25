@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - feature/agora-calling
+      - feature/offline-first-media-save
     paths:
       - '**.kt'
       - '**.kts'
