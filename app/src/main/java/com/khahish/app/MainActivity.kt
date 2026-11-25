@@ -3580,6 +3580,29 @@ fun ConversationScreen(
                             }
                         )
                         DropdownMenuItem(
+                            text = { Text("Save to Device") },
+                            leadingIcon = { Icon(Icons.Default.Download, null) },
+                            enabled = selectedMessageIds.size == 1 && selectedOne != null &&
+                                selectedOne.mediaType != "text" && selectedOne.mediaType != "location" &&
+                                selectedOne.mediaType != "contact" &&
+                                (selectedOne.imageUrl.isNotBlank() || selectedOne.localPreviewUri.isNotBlank()),
+                            onClick = {
+                                selectedMoreExpanded = false
+                                selectedOne?.let { item ->
+                                    val sourceValue = item.localPreviewUri.takeIf { it.isNotBlank() && item.uploadProgress >= 0 } ?: item.imageUrl
+                                    if (sourceValue.isBlank()) showToast(context, "This attachment is not available to save.")
+                                    else {
+                                        val ext = when (item.mediaType) { "image" -> "jpg"; "video" -> "mp4"; "audio" -> "m4a"; "document" -> "file"; else -> "bin" }
+                                        KhahishMediaSaver.save(context, Uri.parse(sourceValue), item.mediaType, "Khahish_" + item.id.takeLast(12) + "." + ext) { result ->
+                                            result.onSuccess { showToast(context, "Saved to device") }
+                                                .onFailure { showToast(context, "Could not save attachment: " + it.message) }
+                                        }
+                                    }
+                                    selectedMessageIds = emptySet()
+                                }
+                            }
+                        )
+                        DropdownMenuItem(
                             text = { Text("Verify security code") },
                             leadingIcon = { Icon(Icons.Default.VerifiedUser, null) },
                             onClick = { selectedMoreExpanded = false; showSecurityCodeInfo = true }
